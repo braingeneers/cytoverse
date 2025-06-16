@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+*.whl
+
+# uv-specific
+.uv_cache/
+.uv_work/
+
+# OS and environment
+.DS_Store
+*.env
+.env
+*.local
+
+# Testing and coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
