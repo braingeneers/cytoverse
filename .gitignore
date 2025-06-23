@@ -1,3 +1,6 @@
+data/
+lamin/
+
 # Python
 __pycache__/
 *.py[cod]
