@@ -1,7 +1,5 @@
-import scimilarity
 import click
 from pathlib import Path
-import gzip
 import numpy as np
 
 import torch
@@ -20,7 +18,7 @@ from scimilarity import CellEmbedding
 @click.option(
     "--output_path",
     type=click.Path(exists=False, file_okay=True, path_type=Path),
-    default="public/models/scimilarity.onnx",
+    default="web/public/models/scimilarity.onnx",
     help="Path to save the ONNX model",
 )
 def main(model_path: Path, output_path: Path) -> None:
@@ -52,43 +50,52 @@ def main(model_path: Path, output_path: Path) -> None:
     print("  ✓ ONNX model validation passed")
 
     print("Checking concordance with scimilarity model...")
-    
+
     # Create ONNX runtime session
     ort_session = ort.InferenceSession(str(output_path))
-    
+
     # Generate random test data (batch of 5 samples)
     batch_size = 5
     np.random.seed(42)  # For reproducible results
-    test_input = np.random.lognormal(mean=0, sigma=1, size=(batch_size, ce.n_genes)).astype(np.float32)
-    
+    test_input = np.random.lognormal(
+        mean=0, sigma=1, size=(batch_size, ce.n_genes)
+    ).astype(np.float32)
+
     # Run through original PyTorch model
     ce.model.eval()
     with torch.no_grad():
         torch_input = torch.from_numpy(test_input)
         torch_output = ce.model(torch_input).numpy()
-    
+
     # Run through ONNX model
     onnx_output = ort_session.run(None, {"input": test_input})[0]
-    
+
     # Compare outputs
     max_diff = np.max(np.abs(torch_output - onnx_output))
     mean_diff = np.mean(np.abs(torch_output - onnx_output))
-    
+
     print(f"  Max absolute difference: {max_diff:.2e}")
     print(f"  Mean absolute difference: {mean_diff:.2e}")
-    
-    if max_diff < 1e-5:
-        print("  ✓ Models are concordant (differences < 1e-5)")
-    elif max_diff < 1e-3:
-        print("  ⚠ Models have small differences (< 1e-3)")
-    else:
-        print(f"  ✗ Models have significant differences (max diff: {max_diff:.2e})")
 
+    if max_diff < 1e-5:
+        print("  ✅ ✓ Models are concordant (differences < 1e-5)")
+    elif max_diff < 1e-3:
+        print("  ⚠️ Models have small differences (< 1e-3)")
+    else:
+        print(f"  ❌ Models have significant differences (max diff: {max_diff:.2e})")
 
     print("Exporting genes...")
-    genes_path = (output_path.parent / output_path.stem).with_suffix(".genes.gz")
-    with gzip.open(genes_path, "wt", encoding="utf-8") as f:
+
+    # REMIND: Switch to saving as .gz and sort out issues with vite server mime...
+    # genes_path = (output_path.parent / output_path.stem).with_suffix(".genes.gz")
+    # with gzip.open(genes_path, "wb") as f:
+    #     f.write("\n".join(map(str, ce.gene_order)).encode('utf-8'))
+
+    genes_path = (output_path.parent / output_path.stem).with_suffix(".genes")
+    with open(genes_path, "w") as f:
         f.write("\n".join(map(str, ce.gene_order)))
+
+    print("🎉 Export complete!")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,6 @@
 data/
 lamin/
 
-# Note eventually should push to git but not for now as large
-public/models
-
 # Python
 __pycache__/
 *.py[cod]

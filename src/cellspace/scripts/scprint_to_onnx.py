@@ -244,13 +244,13 @@ def main():
         default=None,
         help="Output ONNX filename (default: scprint_<model_size>.onnx)"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Set default output name if not provided
     if args.output_name is None:
         args.output_name = f"scprint_{args.model_size}.onnx"
-    
+
     print("scPRINT to ONNX Converter")
     print("=" * 40)
     print(f"Model size: {args.model_size}")
@@ -271,9 +271,9 @@ def main():
         matched_count = load_compatible_state_dict(checkpoint, model)
 
         if matched_count > 0:
-            print(f"✓ Loaded {matched_count} parameters from checkpoint!")
+            print(f"✅ Loaded {matched_count} parameters from checkpoint!")
         else:
-            print("⚠ No parameters were loaded - using random initialization")
+            print("❌ No parameters were loaded - using random initialization")
 
         # Set model to evaluation mode
         model.eval()
@@ -315,7 +315,7 @@ def main():
             verbose=False,  # Reduce verbosity
         )
 
-        print("✓ ONNX export completed!")
+        print("✅ ONNX export completed!")
 
         # Check file size
         if onnx_path.exists():
@@ -324,11 +324,11 @@ def main():
 
             # A proper scPRINT model should be reasonably sized
             if file_size_mb > 5:
-                print("  ✓ File size looks reasonable for a transformer model")
+                print("  ✅ File size looks reasonable for a transformer model")
             elif file_size_mb > 1:
-                print("  ⚠ File size is smaller than expected but may be correct")
+                print("  ⚠️ File size is smaller than expected but may be correct")
             else:
-                print("  ✗ File size is very small - export may be incomplete")
+                print("  ❌ File size is very small - export may be incomplete")
 
         # Optional: Verify ONNX model
         try:
@@ -336,11 +336,13 @@ def main():
 
             onnx_model = onnx.load(str(onnx_path))
             onnx.checker.check_model(onnx_model)
-            print("  ✓ ONNX model validation passed")
+            print("  ✅ ONNX model validation passed")
         except ImportError:
             print("  (Install onnx package to verify the exported model)")
         except Exception as e:
-            print(f"  ⚠ ONNX validation warning: {e}")
+            print(f"  ⚠️ ONNX validation warning: {e}")
+
+        print("🎉 scPRINT to ONNX conversion completed successfully!")
 
     except Exception as e:
         print(f"Error: {e}")

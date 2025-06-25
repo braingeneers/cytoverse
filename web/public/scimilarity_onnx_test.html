@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONNX Model Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.min.js"></script>
+</head>
+
+<body>
+    <h1>ONNX Model Test</h1>
+    <p>Check the console for results.</p>
+    <div id="status">Initializing...</div>
+
+    <script>
+        async function checkWebGPUSupport() {
+            if ('gpu' in navigator) {
+                try {
+                    const adapter = await navigator.gpu.requestAdapter();
+                    if (adapter) {
+                        console.log('✓ WebGPU is supported and available');
+                        document.getElementById('status').innerHTML += '<br>✓ WebGPU supported';
+                        return true;
+                    }
+                } catch (error) {
+                    console.log('⚠ WebGPU adapter request failed:', error);
+                }
+            }
+            console.log('✗ WebGPU is not available');
+            document.getElementById('status').innerHTML += '<br>✗ WebGPU not available, using CPU';
+            return false;
+        }
+
+        async function runModel() {
+            try {
+                console.log('Loading ONNX model...');
+                document.getElementById('status').innerHTML = 'Loading ONNX model...';
+
+                // Check WebGPU support
+                const webGPUSupported = await checkWebGPUSupport();
+
+                // Configure execution providers based on WebGPU availability
+                let sessionOptions = {};
+                if (webGPUSupported) {
+                    console.log('Configuring ONNX Runtime to use WebGPU...');
+                    sessionOptions = {
+                        executionProviders: ['webgpu'],
+                        graphOptimizationLevel: 'all'
+                    };
+                } else {
+                    console.log('Configuring ONNX Runtime to use WebAssembly...');
+                    sessionOptions = {
+                        executionProviders: ['wasm'],
+                        graphOptimizationLevel: 'all'
+                    };
+                }
+
+                // Load the model
+                const session = await ort.InferenceSession.create('./models/scimilarity.onnx', sessionOptions);
+                console.log('Model loaded successfully!');
+
+                // Log which execution provider is actually being used
+                console.log('Session created with options:', sessionOptions);
+                document.getElementById('status').innerHTML += `<br>Model loaded successfully`;
+
+                // Get model input information
+                const inputNames = session.inputNames;
+                const outputNames = session.outputNames;
+                console.log('Input names:', inputNames);
+                console.log('Output names:', outputNames);
+
+                // Generate random input data
+                // Assuming the model expects a 2D tensor - adjust dimensions as needed
+                const inputShape = [1, 19264]; // Common shape for single-cell models
+                const inputData = new Float32Array(inputShape[0] * inputShape[1]);
+
+                // Fill with random values
+                for (let i = 0; i < inputData.length; i++) {
+                    inputData[i] = Math.random();
+                }
+
+                console.log('Generated random input with shape:', inputShape);
+
+                // Create input tensor
+                const inputTensor = new ort.Tensor('float32', inputData, inputShape);
+                const feeds = {};
+                feeds[inputNames[0]] = inputTensor;
+
+                console.log('Running model inference...');
+                document.getElementById('status').innerHTML += '<br>Running inference...';
+
+                // Time the inference
+                const startTime = performance.now();
+
+                // Run inference
+                const results = await session.run(feeds);
+
+                const endTime = performance.now();
+                const inferenceTime = endTime - startTime;
+
+                console.log('Model run successfully!');
+                console.log(`Inference time: ${inferenceTime.toFixed(2)}ms`);
+                console.log('Results:', results);
+
+                const executionProvider = webGPUSupported ? 'WebGPU' : 'WebAssembly';
+                document.getElementById('status').innerHTML += `<br>✓ Inference completed using ${executionProvider} in ${inferenceTime.toFixed(2)}ms`;
+
+                // Log output details
+                for (const outputName of outputNames) {
+                    const output = results[outputName];
+                    console.log(`Output "${outputName}":`, {
+                        shape: output.dims,
+                        type: output.type,
+                        data: output.data.slice(0, 10) // Show first 10 values
+                    });
+                }
+
+                document.getElementById('status').innerHTML += '<br>✓ All tests completed successfully';
+
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('status').innerHTML += `<br>✗ Error: ${error.message}`;
+
+                // If WebGPU fails, try fallback to WebAssembly
+                if (error.message.includes('webgpu') || error.message.includes('WebGPU')) {
+                    console.log('WebGPU failed, trying WebAssembly fallback...');
+                    document.getElementById('status').innerHTML += '<br>Trying WebAssembly fallback...';
+                    await runModelWithWasm();
+                }
+            }
+        }
+
+        async function runModelWithWasm() {
+            try {
+                const sessionOptions = {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all'
+                };
+
+                const session = await ort.InferenceSession.create('./models/scimilarity.onnx', sessionOptions);
+                console.log('Model loaded with WebAssembly');
+
+                const inputNames = session.inputNames;
+                const inputShape = [1, 19264];
+                const inputData = new Float32Array(inputShape[0] * inputShape[1]);
+
+                for (let i = 0; i < inputData.length; i++) {
+                    inputData[i] = Math.random();
+                }
+
+                const inputTensor = new ort.Tensor('float32', inputData, inputShape);
+                const feeds = {};
+                feeds[inputNames[0]] = inputTensor;
+
+                const startTime = performance.now();
+                const results = await session.run(feeds);
+                const endTime = performance.now();
+                const inferenceTime = endTime - startTime;
+
+                console.log('WebAssembly fallback successful!');
+                document.getElementById('status').innerHTML += `<br>✓ WebAssembly fallback completed in ${inferenceTime.toFixed(2)}ms`;
+
+            } catch (fallbackError) {
+                console.error('WebAssembly fallback also failed:', fallbackError);
+                document.getElementById('status').innerHTML += `<br>✗ WebAssembly fallback failed: ${fallbackError.message}`;
+            }
+        }
+
+        // Run the model when page loads
+        window.addEventListener('load', runModel);
+    </script>
+</body>
+
+</html>

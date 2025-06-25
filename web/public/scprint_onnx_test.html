@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ONNX Model Test</title>
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.webgpu.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.min.js"></script>
 </head>
 
 <body>
@@ -45,14 +45,7 @@
                 if (webGPUSupported) {
                     console.log('Configuring ONNX Runtime to use WebGPU...');
                     sessionOptions = {
-                        executionProviders: [
-                            {
-                                name: 'webgpu',
-                                deviceType: 'gpu',
-                                powerPreference: 'high-performance'
-                            },
-                            'wasm'
-                        ],
+                        executionProviders: ['webgpu'],
                         graphOptimizationLevel: 'all'
                     };
                 } else {
@@ -64,9 +57,9 @@
                 }
 
                 // Load the model
-                const session = await ort.InferenceSession.create('./models/scprint_large.onnx', sessionOptions);
+                const session = await ort.InferenceSession.create('./models/scprint_small.onnx', sessionOptions);
                 console.log('Model loaded successfully!');
-                
+
                 // Log which execution provider is actually being used
                 console.log('Session created with options:', sessionOptions);
                 document.getElementById('status').innerHTML += `<br>Model loaded successfully`;
@@ -99,13 +92,13 @@
 
                 // Time the inference
                 const startTime = performance.now();
-                
+
                 // Run inference
                 const results = await session.run(feeds);
-                
+
                 const endTime = performance.now();
                 const inferenceTime = endTime - startTime;
-                
+
                 console.log('Model run successfully!');
                 console.log(`Inference time: ${inferenceTime.toFixed(2)}ms`);
                 console.log('Results:', results);
@@ -128,7 +121,7 @@
             } catch (error) {
                 console.error('Error:', error);
                 document.getElementById('status').innerHTML += `<br>✗ Error: ${error.message}`;
-                
+
                 // If WebGPU fails, try fallback to WebAssembly
                 if (error.message.includes('webgpu') || error.message.includes('WebGPU')) {
                     console.log('WebGPU failed, trying WebAssembly fallback...');
@@ -151,7 +144,7 @@
                 const inputNames = session.inputNames;
                 const inputShape = [1, 19264];
                 const inputData = new Float32Array(inputShape[0] * inputShape[1]);
-                
+
                 for (let i = 0; i < inputData.length; i++) {
                     inputData[i] = Math.random();
                 }

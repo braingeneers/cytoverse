@@ -10,6 +10,15 @@
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal"
+    },
+    {
+      "type": "chrome",
+      "request": "attach",
+      "name": "Attach to Playwright Chrome",
+      "port": 9222,
+      "url": "http://localhost:5173/*",
+      "webRoot": "${workspaceFolder}/web",
+      "timeout": 30000
     }
   ]
 }
