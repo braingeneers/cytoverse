@@ -1,5 +1,6 @@
 # Relatively large so don't push during development
 public/models
+public/sample.h5ad
 
 # Logs
 logs

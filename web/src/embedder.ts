@@ -57,7 +57,7 @@ interface H5File {
 }
 
 interface EmbeddingOutput {
-  embedding: Tensor
+  output: Tensor
 }
 
 // interface MappingOutput {
@@ -305,6 +305,7 @@ async function start(
   cellRangePercent: number,
   useWebGPU: boolean
 ): Promise<void> {
+  console.log(`Starting embedding for model ${modelID} with file ${h5File.name}`)
   self.postMessage({ type: 'status', message: 'Loading libraries...' })
   const Module = await h5wasm.ready
   const { FS } = Module
@@ -459,8 +460,12 @@ async function start(
       }
 
       // Wait for inference to complete on the current buffer
-      const output = await inferencePromise
-      console.log('output', output)
+      const results = await inferencePromise
+      self.postMessage({
+        type: 'embeddings',
+        embeddings: results.output.data,
+      })
+
 
       // // While we're unpacking the inference kick off 2d mapping in the background
       // const mappingPromise = model.mappingSession.run({

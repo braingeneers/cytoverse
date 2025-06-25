@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { createTheme } from '@mui/material/styles'
@@ -12,7 +12,11 @@ import {
   LinearProgress,
   useMediaQuery,
   Button,
-  Chip,
+  FormControl,
+  FormLabel,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
@@ -46,24 +50,52 @@ function App() {
 
   const [embedderWorker, setEmbedderWorker] = useState<Worker | null>(null)
   const [isRunning, setIsRunning] = useState(false)
-  const [hasWebGPU, setHasWebGPU] = useState<boolean | null>(null)
+  const [hasWebGPU, setHasWebGPU] = useState(false)
+  const [useWebGPU, setUseWebGPU] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+
+  const detectWebGPU = useCallback(async () => {
+    try {
+      const webGPUSupported = await isWebGPUSupported()
+      setHasWebGPU(webGPUSupported)
+      // Default to GPU if available, otherwise CPU
+      setUseWebGPU(webGPUSupported)
+    } catch (error) {
+      console.error('WebGPU detection failed:', error)
+      setHasWebGPU(false)
+      setUseWebGPU(false)
+    }
+  }, [])
+
+  // Function to check WebGPU support
+  async function isWebGPUSupported(): Promise<boolean> {
+    try {
+      // Check if WebGPU is available in the browser
+      if (!navigator.gpu) {
+        console.log('WebGPU is not supported in this browser.')
+        return false
+      }
+
+      // Check if a WebGPU adapter is available
+      const adapter: GPUAdapter | null = await navigator.gpu.requestAdapter()
+      if (!adapter) {
+        console.log('No WebGPU adapter available.')
+        return false
+      }
+
+      console.log('WebGPU is supported and ready for ONNX Runtime.')
+      return true
+    } catch (error) {
+      console.error('Error checking WebGPU support:', error)
+      return false
+    }
+  }
 
   useEffect(() => {
     console.log('App mounted')
     fetchSampleFile()
     detectWebGPU()
-
-    // Cleanup: Terminate the worker when the component unmounts
-    return () => {
-      if (embedderWorker) {
-        console.log('Terminating worker...')
-        embedderWorker.terminate()
-        setEmbedderWorker(null)
-        console.log('Worker terminated')
-      }
-    }
-  }, [])
+  }, [detectWebGPU])
 
   async function fetchSampleFile() {
     try {
@@ -78,26 +110,6 @@ function App() {
     }
   }
 
-  async function detectWebGPU() {
-    try {
-      // Check for WebWebGPU support (more future-proof)
-      if ('gpu' in navigator) {
-        try {
-          // @ts-expect-error - WebWebGPU is experimental
-          const adapter = await navigator.gpu.requestAdapter()
-          setHasWebGPU(!!adapter)
-          // setHasWebGPU(false)
-          return
-        } catch (error) {
-          console.log('WebWebGPU not available:', error)
-        }
-      }
-    } catch (error) {
-      console.error('WebGPU detection failed:', error)
-      setHasWebGPU(false)
-    }
-  }
-
   function createWorkers() {
     const embedder = new EmbeddingWorker()
 
@@ -109,6 +121,9 @@ function App() {
         case 'progress':
           setStatusMessage(evt.data.message)
           setProgress(Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
+          break
+        case 'embeddings':
+          console.log('Received embedding data:', evt.data.embeddings.slice(0, 4), '...')
           break
         case 'finished':
           setStatusMessage(
@@ -145,7 +160,7 @@ function App() {
       modelID: 'scimilarity',
       h5File: selectedFile,
       cellRangePercent: 100,
-      useWebGPU: hasWebGPU ?? false,
+      useWebGPU: useWebGPU,
     })
   }
 
@@ -172,6 +187,17 @@ function App() {
       start()
     }
   }
+
+  useEffect(() => {
+    return () => {
+      if (embedderWorker) {
+        console.log('Terminating worker...')
+        embedderWorker.terminate()
+        setEmbedderWorker(null)
+        console.log('Worker terminated')
+      }
+    }
+  }, [embedderWorker])
 
   return (
     <ThemeProvider theme={theme}>
@@ -278,14 +304,6 @@ function App() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               CellSpace
             </Typography>
-            {hasWebGPU !== null && (
-              <Chip
-                label={hasWebGPU ? 'GPU' : 'CPU'}
-                color={hasWebGPU ? 'success' : 'default'}
-                size="small"
-                sx={{ mr: 1 }}
-              />
-            )}
             <IconButton onClick={handleDrawerToggle}>
               <ChevronLeftIcon />
             </IconButton>
@@ -299,6 +317,31 @@ function App() {
               inputProps={{ accept: '.h5ad' }}
               sx={{ mb: 2 }}
             />
+
+            {/* Execution Provider Selection */}
+            <FormControl component="fieldset" sx={{ mb: 2 }}>
+              <FormLabel component="legend">Execution Provider</FormLabel>
+              <RadioGroup
+                value={useWebGPU ? 'gpu' : 'cpu'}
+                onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}
+                row
+              >
+                <FormControlLabel
+                  data-testid="radio-cpu-option"
+                  value="cpu"
+                  control={<Radio />}
+                  label="CPU"
+                />
+                <FormControlLabel
+                  data-testid="radio-gpu-option"
+                  value="gpu"
+                  control={<Radio />}
+                  label="GPU"
+                  disabled={!hasWebGPU}
+                />
+              </RadioGroup>
+            </FormControl>
+
             <Button
               data-testid="run-stop-button"
               variant="contained"

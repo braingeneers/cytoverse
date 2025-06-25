@@ -19,6 +19,10 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
     },
   },
+  worker: {
+    format: 'es',
+    plugins: () => [react()],
+  },
   preview: {
     cors: true,
     headers: {
