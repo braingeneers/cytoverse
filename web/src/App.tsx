@@ -320,7 +320,6 @@ function App() {
 
             {/* Execution Provider Selection */}
             <FormControl component="fieldset" sx={{ mb: 2 }}>
-              <FormLabel component="legend">Execution Provider</FormLabel>
               <RadioGroup
                 value={useWebGPU ? 'gpu' : 'cpu'}
                 onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}

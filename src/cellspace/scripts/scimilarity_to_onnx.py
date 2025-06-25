@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import click
 from pathlib import Path
 import numpy as np
@@ -47,7 +49,7 @@ def main(model_path: Path, output_path: Path) -> None:
     print("Validating ONNX model...")
     onnx_model = onnx.load(str(output_path))
     onnx.checker.check_model(onnx_model)
-    print("  ✓ ONNX model validation passed")
+    print("  ✅ ONNX model validation passed")
 
     print("Checking concordance with scimilarity model...")
 
@@ -78,7 +80,7 @@ def main(model_path: Path, output_path: Path) -> None:
     print(f"  Mean absolute difference: {mean_diff:.2e}")
 
     if max_diff < 1e-5:
-        print("  ✅ ✓ Models are concordant (differences < 1e-5)")
+        print("  ✅ Models are concordant (differences < 1e-5)")
     elif max_diff < 1e-3:
         print("  ⚠️ Models have small differences (< 1e-3)")
     else:
