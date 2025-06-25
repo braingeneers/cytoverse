@@ -60,9 +60,9 @@ interface EmbeddingOutput {
   output: Tensor
 }
 
-// interface MappingOutput {
-//   mapping: Tensor
-// }
+interface MappingOutput {
+  output: Tensor
+}
 
 // Dictionary with various model information (id, genes, session)
 let model = null as ModelInfo | null
@@ -118,7 +118,7 @@ async function instantiateModel(
   console.log('Model Genes', genes.slice(0, 5))
 
   // Fetch the model ONNX file incrementally to show progress
-  response = await fetch(`${modelURL}/${modelID}.onnx`)
+  response = await fetch(`${modelURL}/${modelID}-embedder.onnx`)
   if (!response.ok) {
     throw new Error(`Error fetching onnx file: ${response.status}`)
   }
@@ -193,7 +193,7 @@ async function instantiateModel(
 
   // Create the MappingSession
   const mappingSession = await InferenceSession.create(
-    `${modelURL}/${modelID}-pumap.onnx`,
+    `${modelURL}/${modelID}-mapper.onnx`,
     sessionOptions
   )
   console.log('Mapper Output names', mappingSession.outputNames)
@@ -466,30 +466,28 @@ async function start(
         embeddings: results.output.data,
       })
 
+      // Map the embeddings to 2D coordinates
+      const mappingPromise = model.mappingSession.run({
+        input: results.output,
+      }) as unknown as Promise<MappingOutput>
 
-      // // While we're unpacking the inference kick off 2d mapping in the background
-      // const mappingPromise = model.mappingSession.run({
-      //   input: output.embedding,
-      // }) as unknown as Promise<MappingOutput>
-
-      // // REMIND
-      // // Could start PQ compressing while we're waiting here for the mapping...
-      // const mappings = await mappingPromise
+      const mappings = await mappingPromise
 
       // Reshape into an array of 2D for the plotting packages
-      // for (let i = 0; i < mappings.mapping.dims[0]; i++) {
-      //   const startIndex = i * 2 // Calculate startIndex for [x, y] pair
-      //   coordinates.push([mappings.mapping.data[startIndex], mappings.mapping.data[startIndex + 1]])
-      // }
+      const coordinates: number[][] = []
+      for (let i = 0; i < mappings.output.dims[0]; i++) {
+        const startIndex = i * 2 // Calculate startIndex for [x, y] pair
+        coordinates.push([Number(mappings.output.data[startIndex]), Number(mappings.output.data[startIndex + 1])])
+      }
 
-      // self.postMessage({
-      //   type: 'mappings',
-      //   coords: coordinates.slice(coordinates.length - mappings.mapping.dims[0]),
-      // })
+      self.postMessage({
+        type: 'mappings',
+        mappings: coordinates,
+      })
 
       self.postMessage({
         type: 'progress',
-        message: `Embedding ${cellNames.length} out of ${totalNumCells}...`,
+        message: `Embedded and mapped ${cellNames.length} out of ${totalNumCells}...`,
         countFinished: nextStart,
         totalToProcess: cellNames.length,
       })

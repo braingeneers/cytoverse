@@ -123,7 +123,10 @@ function App() {
           setProgress(Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
           break
         case 'embeddings':
-          console.log('Received embedding data:', evt.data.embeddings.slice(0, 4), '...')
+          console.log('Received embedding:', evt.data.embeddings.slice(0, 4), '...')
+          break
+        case 'mappings':
+          console.log('Received mappings:', evt.data.mappings.slice(0, 4), '...')
           break
         case 'finished':
           setStatusMessage(
