@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
+import os
 import typer
 from pathlib import Path
 import pandas as pd
+import pyarrow.feather as feather
 import numpy as np
 import tiledb
 import scimilarity
@@ -18,46 +20,59 @@ def main(
         help="Path to model directory",
     ),
     output_path: Path = typer.Option(
-        "data/scimilarity",
-        exists=True,
+        "web/public/models/scimilarity",
         file_okay=False,
         dir_okay=True,
         help="Output directory path",
     ),
-    field: str = typer.Option(
-        "prediction",
-        help="Field to use for stratification (e.g., 'tissue', 'study')",
+    labels: list[str] = typer.Option(
+        ["tissue"],
+        help="labels to use for stratification",
     ),
-    count: int = typer.Option(250, "-c", "--count", help="Number of cells to export"),
+    count: int = typer.Option(1000, "-c", "--count", help="Number of cells to export"),
     export_h5ad: bool = typer.Option(
         False, "--export_h5ad", help="Export an h5ad file"
     ),
 ) -> None:
 
+    np.random.seed(42)  # For reproducibility
+
     print("Opening metadata TileDB and stratified sampling cells...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
 
-        fields = [f.name for f in metadata_db.schema]
-        print("Meta data fieilds:", fields)
+        # Get all available schema fields for reference
+        schema_fields = [f.name for f in metadata_db.schema]
+        print("Available fields:", schema_fields)
 
-        # Read only required columns for stratification
-        df_strat: pd.DataFrame = metadata_db.query(attrs=[field]).df[:]
+        print("Reading metadata for stratification...")
 
-        # Create stratification labels by combining study and tissue
-        # strata_labels: pd.Series = df_strat["study"] + "_" + df_strat["tissue"]
-        strata_labels: pd.Series = df_strat[field]
+        # Read all rows for stratification
+        # df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[:]
+
+        # Read a subset of rows to then stratify from
+        df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[0:1000000]
+
+        # Create compound label for stratification
+        strata_labels: pd.Series = df_strat[labels].agg("|".join, axis=1)
 
         # Use stratified sampling
+        print("Stratifying on:", labels)
         sss = StratifiedShuffleSplit(n_splits=1, train_size=count, random_state=42)
         sampled_indices, _ = next(sss.split(df_strat.index, strata_labels))
 
-        # Create metadata DataFrame with sampled indices
-        metadata_df: pd.DataFrame = df_strat.loc[sampled_indices].copy()
-        # metadata_df["study"] = metadata_df["study"].astype("category")
-        metadata_df[field] = metadata_df[field].astype("category")
+    print(f"Outputing {count} cells to {output_path}...")
+    os.makedirs(output_path, exist_ok=True)
 
-        # Export metadata
-        metadata_df.to_parquet(output_path / "metadata.parquet")
+    print("Exporting metadata for sampled cells...")
+    metadata_df: pd.DataFrame = df_strat.loc[sampled_indices].copy()
+    metadata_df[labels] = metadata_df[labels].astype("category")
+    feather.write_feather(metadata_df, output_path / "labels.feather")
+
+    print("Exporting corresponding cell embeddings...")
+    embeddings = scimilarity.utils.embedding_from_tiledb(
+        sampled_indices, str(model_path / "cell_embedding")
+    )
+    np.save(output_path / "embeddings.npy", embeddings)
 
     if export_h5ad:
         print("Exporting h5ad with all of the cells expression...")
@@ -66,12 +81,6 @@ def main(
             str(model_path / "cell_expression"),
         )
         adata.write(output_path / "expression.h5ad")
-
-    print("Exporting corresponding cell embeddings...")
-    embeddings = scimilarity.utils.embedding_from_tiledb(
-        sampled_indices, str(model_path / "cell_embedding")
-    )
-    np.save(output_path / "embeddings.npy", embeddings)
 
     print(f"Exported {len(sampled_indices)} cells to {output_path}")
 

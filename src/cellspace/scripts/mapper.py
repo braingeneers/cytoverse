@@ -11,10 +11,11 @@ from umap_pytorch import PUMAP
 import anndata as ad
 import scanpy as sc
 from tqdm import tqdm
+import pandas as pd
 
 # Create Typer app
 app = typer.Typer(
-    help="Generate embeddings and train parametric UMAP models for single cell data using ONNX models.",
+    help="Export an ONNX parametric UMAP model from a sample embedding file and map embeddings to 2D coordinates.",
     add_completion=True,
 )
 
@@ -212,6 +213,9 @@ def train(
     sample_embeddings_path: Path = typer.Argument(
         ..., help="Path to embeddings.npy file"
     ),
+    output_path: Path = typer.Argument(
+        ..., help="Path to output directory for the trained model"
+    ),
     num_embeddings: Optional[int] = typer.Option(
         None,
         help="Limit the total number of embeddings used for training, use all if None",
@@ -261,13 +265,11 @@ def train(
     model.fit(torch.from_numpy(embeddings).to("mps"))
 
     # Export to ONNX
-    output_path = Path(sample_embeddings_path).with_name(
-        f"{Path(sample_embeddings_path).stem.replace('-embeddings', '')}-pumap.onnx"
-    )
+    model_output_path = output_path / "mapper.onnx"
     torch.onnx.export(
         model.model.encoder.encoder,
         torch.zeros(1, embeddings.shape[1]),
-        output_path,
+        model_output_path,
         training=torch.onnx.TrainingMode.EVAL,
         input_names=["input"],
         output_names=["output"],
@@ -275,17 +277,7 @@ def train(
         opset_version=12,
         dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
     )
-    typer.echo(f"Saved clustering model to {output_path}")
-
-    typer.echo(f"Computing mappings for {sample_embeddings_path}...")
-    mappings = model.transform(torch.from_numpy(embeddings))
-
-    # Save the mappings
-    output_path = Path(sample_embeddings_path).with_name(
-        f"{Path(sample_embeddings_path).stem.replace('-embeddings', '')}-mappings.npy"
-    )
-    np.save(output_path, mappings)
-    typer.echo(f"Saved mappings to {output_path}")
+    typer.echo(f"Saved clustering model to {model_output_path}")
 
 
 @app.command()
@@ -294,30 +286,18 @@ def map(
     sample_embeddings_path: Path = typer.Argument(
         ..., help="Path to sample-embeddings.npy file"
     ),
-    labels_path: Path = typer.Argument(
-        ..., help="Path to the labels.bin file (ground_truth, prediction pairs)"
+    output_path: Path = typer.Argument(
+        ..., help="Path to output directory for the mapped data"
     ),
     batch_size: int = typer.Option(
         32, help="Number of samples to process in each batch"
     ),
-    num_samples: Optional[int] = typer.Option(
+    num_embeddings: Optional[int] = typer.Option(
         None, help="Limit the total number of inputs processed, process all if None"
     ),
 ) -> None:
-    """
-    Map the embeddings to 2d coordinates using the mapper onnx model, combine with
-    predicted class labels, and save in an optimized Apache ECharts format:
-    Float32Array of [x1, y1, classIndex1, x2, y2, classIndex2, ...].
-
-    Args:
-        model_path: Path to pumap.onnx
-        sample_embeddings_path: Path to sample-embeddings.npy file
-        labels_path: Path to the labels.bin file containing (ground_truth, prediction) pairs.
-        batch_size: Number of samples to process at a time
-        num_samples: Limit the total number of inputs processed, process all if None
-    """
     typer.echo(
-        f"Mapping samples from {sample_embeddings_path} using model {model_path} and labels {labels_path}"
+        f"Mapping samples from {sample_embeddings_path} using model {model_path}"
     )
 
     # Load the cluster model
@@ -328,25 +308,10 @@ def map(
     # Load the embeddings
     embeddings = np.load(sample_embeddings_path)
 
-    # Load the labels (ground_truth, prediction pairs)
-    # The file contains flattened int32 pairs: [gt1, pred1, gt2, pred2, ...]
-    label_pairs = np.fromfile(labels_path, dtype=np.int32)
-    # Reshape to (n_samples, 2) and extract the predicted labels (second column)
-    predicted_labels = label_pairs.reshape(-1, 2)[:, 1]
-
-    # Determine number of samples to process
-    num_embeddings = num_samples if num_samples is not None else embeddings.shape[0]
-    if num_samples is not None:
-        num_embeddings = min(embeddings.shape[0], num_samples)
-
-    # Ensure the number of labels matches the number of embeddings to process
-    if predicted_labels.shape[0] < num_embeddings:
-        raise ValueError(
-            f"Number of labels ({predicted_labels.shape[0]}) is less than the number of embeddings to process ({num_embeddings})."
-        )
-    # Slice labels if needed
-    if predicted_labels.shape[0] > num_embeddings:
-        predicted_labels = predicted_labels[:num_embeddings]
+    # Determine number of embeddings to process
+    num_embeddings = num_embeddings if num_embeddings is not None else embeddings.shape[0]
+    if num_embeddings is not None:
+        num_embeddings = min(embeddings.shape[0], num_embeddings)
 
     typer.echo(f"Processing {num_embeddings} embeddings with batch size {batch_size}")
 
@@ -374,27 +339,12 @@ def map(
     # Combine all batches
     mappings = np.concatenate(all_mappings)  # Shape: (num_embeddings, 2)
 
-    # Combine mappings (x, y) with predicted labels
-    # Reshape labels to (num_embeddings, 1) and cast to float32
-    predicted_labels_float = predicted_labels.reshape(-1, 1).astype(np.float32)
-    # Concatenate along the second axis to get [x, y, classIndex]
-    combined_data = np.concatenate(
-        (mappings, predicted_labels_float), axis=1
-    )  # Shape: (num_embeddings, 3)
+    # Save mappings as feather file
+    mappings_df = pd.DataFrame(mappings, columns=['x', 'y'])
+    mappings_path = output_path / "mappings.feather"
+    mappings_df.to_feather(mappings_path)
 
-    # Flatten the array to [x1, y1, classIndex1, x2, y2, classIndex2, ...]
-    flat_combined_data = combined_data.flatten()
-
-    # Define the output path based on the embeddings file name
-    output_filename = (
-        f"{Path(sample_embeddings_path).stem.replace('-embeddings', '')}-mappings.bin"
-    )
-    output_path = Path(sample_embeddings_path).with_name(output_filename)
-
-    # Save the flattened data as a binary file
-    flat_combined_data.tofile(output_path)
-
-    typer.echo(f"Saved optimized ECharts data [x, y, classIndex] to {output_path}")
+    typer.echo(f"Saved mappings to {mappings_path}")
 
 
 if __name__ == "__main__":

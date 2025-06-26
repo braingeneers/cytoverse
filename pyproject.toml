@@ -17,6 +17,7 @@ dependencies = [
     "anndata>=0.11.4",
     "zarr<3.0",
     "pytorch-lightning>=2.5.2",
+    "pyarrow>=20.0.0",
 ]
 
 [dependency-groups]

@@ -11,6 +11,7 @@
  * the h5 file in a separate thread towards keeping all the threads busy.
  */
 import h5wasm from 'h5wasm'
+import { tableFromIPC } from 'apache-arrow'
 
 import { InferenceSession, Tensor, env } from 'onnxruntime-web'
 
@@ -30,7 +31,7 @@ interface Buffer {
 interface StartMessage {
   type: 'start'
   modelID: string
-  modelURL: string
+  modelsURL: string
   h5File: File
   cellRangePercent: number
   useWebGPU: boolean
@@ -86,7 +87,7 @@ self.addEventListener('message', async function (event: MessageEvent<StartMessag
   if (event.data.type === 'start') {
     start(
       event.data.modelID,
-      event.data.modelURL,
+      event.data.modelsURL,
       event.data.h5File,
       event.data.cellRangePercent,
       event.data.useWebGPU
@@ -96,21 +97,21 @@ self.addEventListener('message', async function (event: MessageEvent<StartMessag
 
 /**
  * Create an ONNX Runtime session for the selected model
- * @param {string} modelURL - The URL of the model
+ * @param {string} modelsURL - The URL of the model
  * @param {string} modelID - The id of the model to load
  * @returns {Promise<ModelInfo>} - A promise that resolves to a model session dictionary
  */
 async function instantiateModel(
-  modelURL: string,
+  modelsURL: string,
   modelID: string,
   useWebGPU: boolean
 ): Promise<ModelInfo> {
-  console.log(`Instantiating model ${modelID} from ${modelURL}`)
+  console.log(`Instantiating model ${modelID} from ${modelsURL}`)
   self.postMessage({ type: 'status', message: 'Downloading model...' })
 
   // Fetch the model gene list
   // REMIND: Switch to .gz and have browser de-compress
-  let response = await fetch(`${modelURL}/${modelID}.genes`)
+  let response = await fetch(`${modelsURL}/${modelID}/embedder.genes`)
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -118,7 +119,7 @@ async function instantiateModel(
   console.log('Model Genes', genes.slice(0, 5))
 
   // Fetch the model ONNX file incrementally to show progress
-  response = await fetch(`${modelURL}/${modelID}-embedder.onnx`)
+  response = await fetch(`${modelsURL}/${modelID}/embedder.onnx`)
   if (!response.ok) {
     throw new Error(`Error fetching onnx file: ${response.status}`)
   }
@@ -193,7 +194,7 @@ async function instantiateModel(
 
   // Create the MappingSession
   const mappingSession = await InferenceSession.create(
-    `${modelURL}/${modelID}-mapper.onnx`,
+    `${modelsURL}/${modelID}/mapper.onnx`,
     sessionOptions
   )
   console.log('Mapper Output names', mappingSession.outputNames)
@@ -293,14 +294,14 @@ function fillBatchData(
 /**
  * Run the prediction on the model and store the results in IndexedDB
  * @param {string} modelID - The id of the model
- * @param {string} modelURL - The URL of the model
+ * @param {string} modelsURL - The URL of the model
  * @param {File} h5File - The h5ad file
  * @param {number} cellRangePercent - The percentage of cells to process
  * When finished, it sends a "finishedPrediction" message to the main thread.
  */
 async function start(
   modelID: string,
-  modelURL: string,
+  modelsURL: string,
   h5File: File,
   cellRangePercent: number,
   useWebGPU: boolean
@@ -314,7 +315,7 @@ async function start(
   try {
     // Load the model if it's not already loaded
     if (!model || model.modelID !== modelID) {
-      model = await instantiateModel(modelURL, modelID, useWebGPU)
+      model = await instantiateModel(modelsURL, modelID, useWebGPU)
     }
 
     // Load the h5ad file mapping it to the /work directory so we can read
@@ -477,7 +478,10 @@ async function start(
       const coordinates: number[][] = []
       for (let i = 0; i < mappings.output.dims[0]; i++) {
         const startIndex = i * 2 // Calculate startIndex for [x, y] pair
-        coordinates.push([Number(mappings.output.data[startIndex]), Number(mappings.output.data[startIndex + 1])])
+        coordinates.push([
+          Number(mappings.output.data[startIndex]),
+          Number(mappings.output.data[startIndex + 1]),
+        ])
       }
 
       self.postMessage({

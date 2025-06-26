@@ -5,14 +5,30 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "pumap train",
+      "name": "mapper train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/pumap.py",
+      "program": "${workspaceFolder}/src/cellspace/scripts/mapper.py",
       "console": "integratedTerminal",
       "args": [
         "train",
-        "${workspaceFolder}/data/scimilarity/embeddings.npy",
+        "${workspaceFolder}/web/public/models/scimilarity/embeddings.npy",
+        "${workspaceFolder}/web/public/models/scimilarity/",
+        "--num-embeddings",
+        "100"
+      ]
+    },
+    {
+      "name": "mapper map",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cellspace/scripts/mapper.py",
+      "console": "integratedTerminal",
+      "args": [
+        "map",
+        "${workspaceFolder}/web/public/models/scimilarity/mapper.onnx",
+        "${workspaceFolder}/web/public/models/scimilarity/embeddings.npy",
+        "${workspaceFolder}/web/public/models/scimilarity/",
         "--num-embeddings",
         "100"
       ]

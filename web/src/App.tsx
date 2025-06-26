@@ -13,7 +13,6 @@ import {
   useMediaQuery,
   Button,
   FormControl,
-  FormLabel,
   RadioGroup,
   FormControlLabel,
   Radio,
@@ -159,7 +158,7 @@ function App() {
     setEmbedderWorker(embedder)
     embedder.postMessage({
       type: 'start',
-      modelURL: `${sitePath}/models`,
+      modelsURL: `${sitePath}/models`,
       modelID: 'scimilarity',
       h5File: selectedFile,
       cellRangePercent: 100,

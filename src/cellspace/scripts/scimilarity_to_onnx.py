@@ -20,7 +20,7 @@ from scimilarity import CellEmbedding
 @click.option(
     "--output_path",
     type=click.Path(exists=False, file_okay=True, path_type=Path),
-    default="web/public/models/scimilarity.onnx",
+    default="web/public/models/scimilarity/embedder.onnx",
     help="Path to save the ONNX model",
 )
 def main(model_path: Path, output_path: Path) -> None:
