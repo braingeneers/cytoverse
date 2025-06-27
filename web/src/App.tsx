@@ -22,8 +22,11 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import { MuiFileInput } from 'mui-file-input'
+import wasmInit, { readParquet } from 'parquet-wasm'
+import { tableFromIPC } from 'apache-arrow'
 
 import EmbeddingWorker from './embedder?worker'
+import ScatterPlotWebGL from './ScatterPlotWebGL'
 
 const drawerWidth = 320
 const miniDrawerWidth = 64
@@ -52,6 +55,11 @@ function App() {
   const [hasWebGPU, setHasWebGPU] = useState(false)
   const [useWebGPU, setUseWebGPU] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+
+  // Scatter plot data state
+  const [trainMappings, setTrainMappings] = useState<Float32Array | null>(null)
+  const [classNames, setClassNames] = useState<string[]>([])
+  const [isLoadingData, setIsLoadingData] = useState(false)
 
   const detectWebGPU = useCallback(async () => {
     try {
@@ -89,12 +97,6 @@ function App() {
       return false
     }
   }
-
-  useEffect(() => {
-    console.log('App mounted')
-    fetchSampleFile()
-    detectWebGPU()
-  }, [detectWebGPU])
 
   async function fetchSampleFile() {
     try {
@@ -149,6 +151,120 @@ function App() {
   const sitePath =
     window.location.origin +
     window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
+
+  const loadScatterPlotData = useCallback(async () => {
+    setIsLoadingData(true)
+    try {
+      // Initialize parquet-wasm
+      await wasmInit()
+
+      const modelID = 'scimilarity'
+      const mappingsUrl = `${sitePath}/models/${modelID}/mappings.parquet`
+      const categoriesUrl = `${sitePath}/models/${modelID}/categories.parquet`
+
+      // Load both files in parallel
+      const [mappingsResponse, categoriesResponse] = await Promise.all([
+        fetch(mappingsUrl),
+        fetch(categoriesUrl),
+      ])
+
+      const [mappingsBuffer, categoriesBuffer] = await Promise.all([
+        mappingsResponse.arrayBuffer(),
+        categoriesResponse.arrayBuffer(),
+      ])
+
+      // Process mappings
+      const mappingsTable = readParquet(new Uint8Array(mappingsBuffer))
+      const mappingsArrowTable = tableFromIPC(mappingsTable.intoIPCStream())
+
+      // Process categories
+      const categoriesTable = readParquet(new Uint8Array(categoriesBuffer))
+      const categoriesArrowTable = tableFromIPC(categoriesTable.intoIPCStream())
+
+      // Extract x, y, and first category index columns from mappings
+      const xColumn = mappingsArrowTable.getChild('x')
+      const yColumn = mappingsArrowTable.getChild('y')
+      if (!xColumn || !yColumn) {
+        throw new Error('Missing x or y columns in mappings.parquet')
+      }
+
+      // Find the first category index column (should end with '_idx')
+      let firstCategoryColumn = null
+      let firstCategoryName = null
+      for (let i = 0; i < mappingsArrowTable.schema.fields.length; i++) {
+        const fieldName = mappingsArrowTable.schema.fields[i].name
+        if (fieldName.endsWith('_idx')) {
+          firstCategoryColumn = mappingsArrowTable.getChildAt(i)
+          firstCategoryName = fieldName.slice(0, -4) // Remove '_idx' suffix
+          break
+        }
+      }
+
+      if (!firstCategoryColumn || !firstCategoryName) {
+        throw new Error('No category index column found in mappings.parquet')
+      }
+
+      // Extract category names for the first category from categories.parquet
+      const columnNameColumn = categoriesArrowTable.getChild('column_name')
+      if (!columnNameColumn) {
+        throw new Error('Missing column_name in categories.parquet')
+      }
+
+      // Find the row for our first category
+      let categoryRow = -1
+      for (let i = 0; i < categoriesArrowTable.numRows; i++) {
+        if (columnNameColumn.get(i) === firstCategoryName) {
+          categoryRow = i
+          break
+        }
+      }
+
+      if (categoryRow === -1) {
+        throw new Error(`Category '${firstCategoryName}' not found in categories.parquet`)
+      }
+
+      // Extract category names from the row (skip the column_name field)
+      const classNamesArray: string[] = []
+      for (let i = 1; i < categoriesArrowTable.schema.fields.length; i++) {
+        const categoryValue = categoriesArrowTable.getChildAt(i)?.get(categoryRow)
+        if (categoryValue !== null && categoryValue !== undefined) {
+          classNamesArray.push(categoryValue.toString())
+        }
+      }
+
+      const numPoints = mappingsArrowTable.numRows
+
+      // Create the final Float32Array with x, y, classIndex triplets
+      // Minimize copying by directly accessing Arrow data
+      const mappingsData = new Float32Array(numPoints * 3)
+      for (let i = 0; i < numPoints; i++) {
+        const idx = i * 3
+        mappingsData[idx] = xColumn.get(i) || 0 // x coordinate (int16 -> float32)
+        mappingsData[idx + 1] = yColumn.get(i) || 0 // y coordinate (int16 -> float32)
+        mappingsData[idx + 2] = firstCategoryColumn.get(i) || 0 // category index (int16 -> float32)
+      }
+
+      setTrainMappings(mappingsData)
+      setClassNames(classNamesArray)
+      console.log('Loaded scatter plot data:', {
+        numPoints,
+        numClasses: classNamesArray.length,
+        firstCategory: firstCategoryName,
+        classNames: classNamesArray.slice(0, 10), // Show first 10 for debugging
+      })
+    } catch (error) {
+      console.error('Error loading scatter plot data:', error)
+    } finally {
+      setIsLoadingData(false)
+    }
+  }, [sitePath])
+
+  useEffect(() => {
+    console.log('App mounted')
+    fetchSampleFile()
+    detectWebGPU()
+    loadScatterPlotData()
+  }, [detectWebGPU, loadScatterPlotData])
 
   const start = () => {
     console.log('Starting embedding...', selectedFile?.name)
@@ -386,6 +502,38 @@ function App() {
         </Drawer>
 
         {/* Main Content */}
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            p: 3,
+            width: {
+              sm: `calc(100% - ${sidebarOpen ? drawerWidth : isMobile ? 0 : miniDrawerWidth}px)`,
+            },
+            ml: { sm: sidebarOpen ? 0 : `${miniDrawerWidth}px` },
+            transition: (theme) =>
+              theme.transitions.create(['margin', 'width'], {
+                easing: theme.transitions.easing.sharp,
+                duration: theme.transitions.duration.leavingScreen,
+              }),
+          }}
+        >
+          {isLoadingData ? (
+            <Box display="flex" justifyContent="center" alignItems="center" height="400px">
+              <Typography>Loading scatter plot data...</Typography>
+            </Box>
+          ) : trainMappings && classNames.length > 0 ? (
+            <ScatterPlotWebGL
+              trainMappings={trainMappings}
+              classNames={classNames}
+              themeName="dark"
+            />
+          ) : (
+            <Box display="flex" justifyContent="center" alignItems="center" height="400px">
+              <Typography>No data available</Typography>
+            </Box>
+          )}
+        </Box>
       </Box>
     </ThemeProvider>
   )

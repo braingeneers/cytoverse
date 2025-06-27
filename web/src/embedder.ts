@@ -11,7 +11,6 @@
  * the h5 file in a separate thread towards keeping all the threads busy.
  */
 import h5wasm from 'h5wasm'
-import { tableFromIPC } from 'apache-arrow'
 
 import { InferenceSession, Tensor, env } from 'onnxruntime-web'
 

@@ -66,7 +66,12 @@ def main(
     print("Exporting metadata for sampled cells...")
     metadata_df: pd.DataFrame = df_strat.loc[sampled_indices].copy()
     metadata_df[labels] = metadata_df[labels].astype("category")
-    feather.write_feather(metadata_df, output_path / "labels.feather")
+    metadata_df.to_parquet(
+        str(output_path / "labels.parquet"),
+        engine="pyarrow",
+        compression="snappy",
+        index=False,
+    )
 
     print("Exporting corresponding cell embeddings...")
     embeddings = scimilarity.utils.embedding_from_tiledb(

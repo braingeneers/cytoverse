@@ -18,6 +18,7 @@
     "h5wasm": "^0.8.1",
     "mui-file-input": "^7.0.0",
     "onnxruntime-web": "^1.22.0",
+    "parquet-wasm": "^0.6.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

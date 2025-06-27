@@ -15,7 +15,7 @@
         "${workspaceFolder}/web/public/models/scimilarity/embeddings.npy",
         "${workspaceFolder}/web/public/models/scimilarity/",
         "--num-embeddings",
-        "100"
+        "1000"
       ]
     },
     {
@@ -30,7 +30,7 @@
         "${workspaceFolder}/web/public/models/scimilarity/embeddings.npy",
         "${workspaceFolder}/web/public/models/scimilarity/",
         "--num-embeddings",
-        "100"
+        "1000"
       ]
     },
     {

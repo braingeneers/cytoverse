@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   optimizeDeps: {
-    exclude: ['onnxruntime-web'],
+    exclude: ['onnxruntime-web', 'parquet-wasm'],
   },
   base: './', // For gh-pages
   server: {
@@ -18,6 +18,10 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'Cross-Origin-Opener-Policy': 'same-origin',
     },
+  },
+  esbuild: {
+    // Ensure .wasm files are not bundled by esbuild
+    target: 'esnext',
   },
   worker: {
     format: 'es',
@@ -33,9 +37,14 @@ export default defineConfig({
   plugins: [
     react(),
     viteStaticCopy({
+      serveStatic: true,
       targets: [
         {
           src: 'node_modules/onnxruntime-web/dist/*.wasm',
+          dest: 'assets',
+        },
+        {
+          src: 'node_modules/parquet-wasm/esm/*.wasm',
           dest: 'assets',
         },
         {

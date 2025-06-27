@@ -11,7 +11,10 @@ from umap_pytorch import PUMAP
 import anndata as ad
 import scanpy as sc
 from tqdm import tqdm
+
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 # Create Typer app
 app = typer.Typer(
@@ -309,7 +312,9 @@ def map(
     embeddings = np.load(sample_embeddings_path)
 
     # Determine number of embeddings to process
-    num_embeddings = num_embeddings if num_embeddings is not None else embeddings.shape[0]
+    num_embeddings = (
+        num_embeddings if num_embeddings is not None else embeddings.shape[0]
+    )
     if num_embeddings is not None:
         num_embeddings = min(embeddings.shape[0], num_embeddings)
 
@@ -339,12 +344,73 @@ def map(
     # Combine all batches
     mappings = np.concatenate(all_mappings)  # Shape: (num_embeddings, 2)
 
-    # Save mappings as feather file
-    mappings_df = pd.DataFrame(mappings, columns=['x', 'y'])
-    mappings_path = output_path / "mappings.feather"
-    mappings_df.to_feather(mappings_path)
+    # Read the labels file
+    labels_df = pd.read_parquet(output_path / "labels.parquet")
+    
+    # Ensure we have the same number of rows
+    if len(mappings) != len(labels_df):
+        raise ValueError(f"Mismatch between mappings ({len(mappings)}) and labels ({len(labels_df)}) count")
 
-    typer.echo(f"Saved mappings to {mappings_path}")
+    # Scale coordinates to INT16 for delta compression
+    scaled_coords = (mappings * 1000).astype(np.int16)
+    
+    # Create the base mappings dataframe with coordinates
+    mappings_df = pd.DataFrame({
+        'x': scaled_coords[:, 0],
+        'y': scaled_coords[:, 1]
+    })
+    
+    # Process each label column to create category mappings
+    categories_dict = {}
+    
+    for col in labels_df.columns:
+        if labels_df[col].dtype.name == 'category':
+            # Get unique categories and create mapping
+            categories = labels_df[col].cat.categories.tolist()
+            categories_dict[col] = categories
+            
+            # Add category indices to mappings dataframe as int16
+            mappings_df[f'{col}_idx'] = labels_df[col].cat.codes.astype(np.int16)
+        else:
+            # Handle non-categorical columns by creating categories
+            unique_values = labels_df[col].unique()
+            categories_dict[col] = unique_values.tolist()
+            
+            # Create mapping from values to indices
+            value_to_idx = {val: idx for idx, val in enumerate(unique_values)}
+            mappings_df[f'{col}_idx'] = labels_df[col].map(value_to_idx).astype(np.int16)
+    
+    # Sort by x coordinate for optimal delta compression
+    mappings_df = mappings_df.sort_values('x').reset_index(drop=True)
+    
+    # Save optimized mappings with delta-friendly format
+    mappings_path = output_path / "mappings.parquet"
+    mappings_df.to_parquet(
+        mappings_path,
+        engine="pyarrow",
+        compression="snappy",
+        index=False,
+    )
+    typer.echo(f"Saved optimized mappings to {mappings_path}")
+    
+    # Save categories mapping
+    categories_df = pd.DataFrame.from_dict(categories_dict, orient='index')
+    categories_df = categories_df.reset_index()
+    categories_df.columns = ['column_name'] + [f'category_{i}' for i in range(categories_df.shape[1] - 1)]
+    
+    categories_path = output_path / "categories.parquet"
+    categories_df.to_parquet(
+        categories_path,
+        engine="pyarrow", 
+        compression="snappy",
+        index=False,
+    )
+    typer.echo(f"Saved categories mapping to {categories_path}")
+    
+    # Print summary statistics
+    typer.echo(f"Processed {len(mappings_df)} mappings with {len(categories_dict)} label columns:")
+    for col, cats in categories_dict.items():
+        typer.echo(f"  {col}: {len(cats)} categories")
 
 
 if __name__ == "__main__":
