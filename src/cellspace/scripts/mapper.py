@@ -15,6 +15,7 @@ from tqdm import tqdm
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import matplotlib.pyplot as plt
 
 # Create Typer app
 app = typer.Typer(
@@ -344,6 +345,9 @@ def map(
     # Combine all batches
     mappings = np.concatenate(all_mappings)  # Shape: (num_embeddings, 2)
 
+    # Save raw mappings as PNG for comparison
+    save_mappings_png(output_path, mappings)
+
     # Read the labels file
     labels_df = pd.read_parquet(output_path / "labels.parquet")
     
@@ -411,6 +415,28 @@ def map(
     typer.echo(f"Processed {len(mappings_df)} mappings with {len(categories_dict)} label columns:")
     for col, cats in categories_dict.items():
         typer.echo(f"  {col}: {len(cats)} categories")
+
+
+def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
+    """
+    Save raw mappings as a PNG scatter plot for comparison.
+    
+    Args:
+        output_path: Directory where to save the PNG file
+        mappings: Raw float32 mappings array of shape (num_embeddings, 2)
+    """
+    plt.figure(figsize=(10, 10))
+    plt.scatter(mappings[:, 0], mappings[:, 1], alpha=0.6, s=1)
+    plt.xlabel('X coordinate')
+    plt.ylabel('Y coordinate')
+    plt.title('Raw Mappings Scatter Plot')
+    plt.axis('equal')
+    
+    # Save the plot
+    png_path = output_path / "mappings.png"
+    plt.savefig(png_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    typer.echo(f"Saved raw mappings plot to {png_path}")
 
 
 if __name__ == "__main__":

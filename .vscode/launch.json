@@ -5,6 +5,25 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "export",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cellspace/scripts/scimilarity_export_cells.py",
+      "console": "integratedTerminal",
+      "args": [
+        "${workspaceFolder}/data/scimilarity/model_v1.1/cellsearch",
+        "${workspaceFolder}/web/public/models/scimilarity",
+        "--labels",
+        "tissue",
+        "--labels",
+        "prediction",
+        "--labels",
+        "study",
+        "--num-cells",
+        "1000"
+      ]
+    },
+    {
       "name": "mapper train",
       "type": "debugpy",
       "request": "launch",

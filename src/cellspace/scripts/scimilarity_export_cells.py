@@ -12,15 +12,13 @@ from sklearn.model_selection import StratifiedShuffleSplit
 
 
 def main(
-    model_path: Path = typer.Option(
-        "data/scimilarity/model_v1.1/cellsearch",
+    model_path: Path = typer.Argument(
         exists=True,
         file_okay=False,
         dir_okay=True,
         help="Path to model directory",
     ),
-    output_path: Path = typer.Option(
-        "web/public/models/scimilarity",
+    output_path: Path = typer.Argument(
         file_okay=False,
         dir_okay=True,
         help="Output directory path",
@@ -29,7 +27,9 @@ def main(
         ["tissue"],
         help="labels to use for stratification",
     ),
-    count: int = typer.Option(1000, "-c", "--count", help="Number of cells to export"),
+    num_cells: int = typer.Option(
+        1000, "--num-cells", help="Number of cells to export"
+    ),
     export_h5ad: bool = typer.Option(
         False, "--export_h5ad", help="Export an h5ad file"
     ),
@@ -47,20 +47,23 @@ def main(
         print("Reading metadata for stratification...")
 
         # Read all rows for stratification
-        # df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[:]
+        df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[:]
 
         # Read a subset of rows to then stratify from
-        df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[0:1000000]
+        # df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[0:1000000]
 
         # Create compound label for stratification
-        strata_labels: pd.Series = df_strat[labels].agg("|".join, axis=1)
+        # strata_labels: pd.Series = df_strat[labels].agg("|".join, axis=1)
+
+        # Stratify on the first label
+        strata_labels: pd.Series = df_strat[labels[0]].astype("category")
 
         # Use stratified sampling
-        print("Stratifying on:", labels)
-        sss = StratifiedShuffleSplit(n_splits=1, train_size=count, random_state=42)
+        print("Stratifying on:", labels[0])
+        sss = StratifiedShuffleSplit(n_splits=1, train_size=num_cells, random_state=42)
         sampled_indices, _ = next(sss.split(df_strat.index, strata_labels))
 
-    print(f"Outputing {count} cells to {output_path}...")
+    print(f"Outputing {num_cells} cells to {output_path}...")
     os.makedirs(output_path, exist_ok=True)
 
     print("Exporting metadata for sampled cells...")
