@@ -57,6 +57,35 @@ const customColors = [
   '#c17e7f',
 ]
 
+// Utility function to calculate extents from scatter plot data
+const calculateExtents = (
+  data: Float32Array
+): { xExtent: [number, number]; yExtent: [number, number] } => {
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+
+  for (let i = 0; i < data.length; i += 3) {
+    const x = data[i]
+    const y = data[i + 1]
+
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+
+  // Add 5% padding to the bounds
+  const xPadding = (maxX - minX) * 0.05
+  const yPadding = (maxY - minY) * 0.05
+
+  return {
+    xExtent: [minX - xPadding, maxX + xPadding],
+    yExtent: [minY - yPadding, maxY + yPadding],
+  }
+}
+
 interface ScatterPlotWebGLProps {
   trainMappings: Float32Array
   testMappings?: Float32Array
@@ -86,32 +115,14 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     })
   }, [classNames])
 
-  // Calculate bounds from training only so extent doesn't shift as test mappings are added
+  // Calculate bounds from training data on first mount
   const calculateBounds = useCallback((data: Float32Array) => {
-    let minX = Infinity
-    let maxX = -Infinity
-    let minY = Infinity
-    let maxY = -Infinity
-
-    for (let i = 0; i < data.length; i += 3) {
-      const x = data[i]
-      const y = data[i + 1]
-
-      minX = Math.min(minX, x)
-      maxX = Math.max(maxX, x)
-      minY = Math.min(minY, y)
-      maxY = Math.max(maxY, y)
-    }
-
-    // Add 5% padding to the bounds
-    const xPadding = (maxX - minX) * 0.05
-    const yPadding = (maxY - minY) * 0.05
-
+    const extents = calculateExtents(data)
     return {
-      xMin: minX - xPadding,
-      xMax: maxX + xPadding,
-      yMin: minY - yPadding,
-      yMax: maxY + yPadding,
+      xMin: extents.xExtent[0],
+      xMax: extents.xExtent[1],
+      yMin: extents.yExtent[0],
+      yMax: extents.yExtent[1],
     }
   }, [])
 
@@ -119,15 +130,25 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
   const getChartOption = useCallback(() => {
     const currentBounds = calculateBounds(trainMappings)
     return {
+      backgroundColor: 'transparent', // Let the chart inherit the background color
+      grid: {
+        left: 150, // Reduced legend space for more chart width
+        right: 10,
+        top: 10,
+        bottom: 10,
+        containLabel: false,
+      },
       xAxis: {
         show: false,
         min: currentBounds.xMin,
         max: currentBounds.xMax,
+        type: 'value',
       },
       yAxis: {
         show: false,
         min: currentBounds.yMin,
         max: currentBounds.yMax,
+        type: 'value',
       },
       visualMap: {
         type: 'piecewise',
@@ -138,14 +159,17 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
         },
         show: true,
         orient: 'vertical',
-        left: 10,
-        top: 10,
-        itemWidth: 15,
-        itemHeight: 15,
+        left: 5,
+        top: 'center',
+        itemWidth: 12,
+        itemHeight: 12,
         textStyle: {
-          fontSize: 12,
+          fontSize: 11,
         },
+        calculable: false,
+        itemGap: 3,
       },
+      animation: false, // Disable animation for better performance
       series: [
         {
           name: 'Reference',
@@ -173,9 +197,22 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     if (chartRef.current) {
       chartRef.current.dispose()
     }
+
     chartRef.current = echarts.init(chartContainer.current, themeName)
     chartRef.current.setOption(getChartOption())
-    updateChart()
+
+    // Multiple resize calls to ensure proper sizing
+    setTimeout(() => {
+      if (chartRef.current) {
+        chartRef.current.resize()
+      }
+    }, 0)
+
+    setTimeout(() => {
+      if (chartRef.current) {
+        chartRef.current.resize()
+      }
+    }, 50)
   }, [themeName, getChartOption])
 
   const updateChart = useCallback(() => {
@@ -244,7 +281,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
         chartRef.current = null
       }
     }
-  }, [])
+  }, [initChart, trainMappings])
 
   useEffect(() => {
     initChart()
@@ -258,9 +295,44 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     updateChart()
   }, [showBoth, showTrainOnly, showTestOnly, updateChart])
 
+  // Add resize handler
+  useEffect(() => {
+    const handleResize = () => {
+      if (chartRef.current) {
+        chartRef.current.resize()
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+
+    // Use ResizeObserver for more precise container resize detection
+    let resizeObserver: ResizeObserver | null = null
+    if (chartContainer.current && 'ResizeObserver' in window) {
+      resizeObserver = new ResizeObserver(() => {
+        handleResize()
+      })
+      resizeObserver.observe(chartContainer.current)
+    }
+
+    // Also trigger resize after mount to ensure proper sizing
+    const timeoutId = setTimeout(() => {
+      if (chartRef.current) {
+        chartRef.current.resize()
+      }
+    }, 100)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (resizeObserver) {
+        resizeObserver.disconnect()
+      }
+      clearTimeout(timeoutId)
+    }
+  }, [])
+
   return (
-    <div className="chart-container">
-      <div className="controls-header">
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div className="controls-header" style={{ flexShrink: 0, marginBottom: '16px' }}>
         <div className="legend-controls">
           <button onClick={() => toggleAllClasses(true)}>Show All</button>
           <button onClick={() => toggleAllClasses(false)}>Hide All</button>

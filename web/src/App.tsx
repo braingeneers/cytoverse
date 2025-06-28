@@ -246,6 +246,7 @@ function App() {
 
       setTrainMappings(mappingsData)
       setClassNames(classNamesArray)
+
       console.log('Loaded scatter plot data:', {
         numPoints,
         numClasses: classNamesArray.length,
@@ -516,20 +517,25 @@ function App() {
                 easing: theme.transitions.easing.sharp,
                 duration: theme.transitions.duration.leavingScreen,
               }),
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
           {isLoadingData ? (
-            <Box display="flex" justifyContent="center" alignItems="center" height="400px">
+            <Box display="flex" justifyContent="center" alignItems="center" height="100%">
               <Typography>Loading scatter plot data...</Typography>
             </Box>
           ) : trainMappings && classNames.length > 0 ? (
-            <ScatterPlotWebGL
-              trainMappings={trainMappings}
-              classNames={classNames}
-              themeName="dark"
-            />
+            <Box>
+              <ScatterPlotWebGL
+                trainMappings={trainMappings}
+                classNames={classNames}
+                themeName="dark"
+              />
+            </Box>
           ) : (
-            <Box display="flex" justifyContent="center" alignItems="center" height="400px">
+            <Box display="flex" justifyContent="center" alignItems="center" height="100%">
               <Typography>No data available</Typography>
             </Box>
           )}
