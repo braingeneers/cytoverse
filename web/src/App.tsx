@@ -60,6 +60,7 @@ function App() {
   const [trainMappings, setTrainMappings] = useState<Float32Array | null>(null)
   const [classNames, setClassNames] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
+  const [category, setCategory] = useState('tissue')
 
   const detectWebGPU = useCallback(async () => {
     try {
@@ -160,73 +161,51 @@ function App() {
 
       const modelID = 'scimilarity'
       const mappingsUrl = `${sitePath}/models/${modelID}/mappings.compressed.parquet`
-      const categoriesUrl = `${sitePath}/models/${modelID}/categories.parquet`
+      const labelsUrl = `${sitePath}/models/${modelID}/labels.compressed.parquet`
 
       // Load both files in parallel
-      const [mappingsResponse, categoriesResponse] = await Promise.all([
+      const [mappingsResponse, labelsResponse] = await Promise.all([
         fetch(mappingsUrl),
-        fetch(categoriesUrl),
+        fetch(labelsUrl),
       ])
 
-      const [mappingsBuffer, categoriesBuffer] = await Promise.all([
+      const [mappingsBuffer, labelsBuffer] = await Promise.all([
         mappingsResponse.arrayBuffer(),
-        categoriesResponse.arrayBuffer(),
+        labelsResponse.arrayBuffer(),
       ])
 
       // Process mappings
       const mappingsTable = readParquet(new Uint8Array(mappingsBuffer))
       const mappingsArrowTable = tableFromIPC(mappingsTable.intoIPCStream())
 
-      // Process categories
-      const categoriesTable = readParquet(new Uint8Array(categoriesBuffer))
-      const categoriesArrowTable = tableFromIPC(categoriesTable.intoIPCStream())
+      // Process labels
+      const labelsTable = readParquet(new Uint8Array(labelsBuffer))
+      const labelsArrowTable = tableFromIPC(labelsTable.intoIPCStream())
 
-      // Extract x, y, and first category index columns from mappings
+      // Extract x, y coordinates from mappings
       const xColumn = mappingsArrowTable.getChild('x')
       const yColumn = mappingsArrowTable.getChild('y')
       if (!xColumn || !yColumn) {
         throw new Error('Missing x or y columns in mappings.compressed.parquet')
       }
 
-      // Find the first category index column (should end with '_idx')
-      let firstCategoryColumn = null
-      let firstCategoryName = null
-      for (let i = 0; i < mappingsArrowTable.schema.fields.length; i++) {
-        const fieldName = mappingsArrowTable.schema.fields[i].name
-        if (fieldName.endsWith('_idx')) {
-          firstCategoryColumn = mappingsArrowTable.getChildAt(i)
-          firstCategoryName = fieldName.slice(0, -4) // Remove '_idx' suffix
-          break
-        }
+      // Extract category index column from mappings
+      const categoryIdxColumnName = `${category}_idx`
+      const categoryIdxColumn = mappingsArrowTable.getChild(categoryIdxColumnName)
+      if (!categoryIdxColumn) {
+        throw new Error(`Missing ${categoryIdxColumnName} column in mappings.compressed.parquet`)
       }
 
-      if (!firstCategoryColumn || !firstCategoryName) {
-        throw new Error('No category index column found in mappings.compressed.parquet')
+      // Extract category labels from labels.compressed.parquet
+      const categoryColumn = labelsArrowTable.getChild(category)
+      if (!categoryColumn) {
+        throw new Error(`Missing ${category} column in labels.compressed.parquet`)
       }
 
-      // Extract category names for the first category from categories.parquet
-      const columnNameColumn = categoriesArrowTable.getChild('column_name')
-      if (!columnNameColumn) {
-        throw new Error('Missing column_name in categories.parquet')
-      }
-
-      // Find the row for our first category
-      let categoryRow = -1
-      for (let i = 0; i < categoriesArrowTable.numRows; i++) {
-        if (columnNameColumn.get(i) === firstCategoryName) {
-          categoryRow = i
-          break
-        }
-      }
-
-      if (categoryRow === -1) {
-        throw new Error(`Category '${firstCategoryName}' not found in categories.parquet`)
-      }
-
-      // Extract category names from the row (skip the column_name field)
+      // Extract category names (filter out null values)
       const classNamesArray: string[] = []
-      for (let i = 1; i < categoriesArrowTable.schema.fields.length; i++) {
-        const categoryValue = categoriesArrowTable.getChildAt(i)?.get(categoryRow)
+      for (let i = 0; i < labelsArrowTable.numRows; i++) {
+        const categoryValue = categoryColumn.get(i)
         if (categoryValue !== null && categoryValue !== undefined) {
           classNamesArray.push(categoryValue.toString())
         }
@@ -234,14 +213,14 @@ function App() {
 
       const numPoints = mappingsArrowTable.numRows
 
-      // Create the final Float32Array with x, y, classIndex triplets
+      // Create the final Float32Array with x, y, categoryIndex triplets
       // Minimize copying by directly accessing Arrow data
       const mappingsData = new Float32Array(numPoints * 3)
       for (let i = 0; i < numPoints; i++) {
         const idx = i * 3
         mappingsData[idx] = xColumn.get(i) || 0 // x coordinate (int16 -> float32)
         mappingsData[idx + 1] = yColumn.get(i) || 0 // y coordinate (int16 -> float32)
-        mappingsData[idx + 2] = firstCategoryColumn.get(i) || 0 // category index (int16 -> float32)
+        mappingsData[idx + 2] = categoryIdxColumn.get(i) || 0 // category index (int16 -> float32)
       }
 
       setTrainMappings(mappingsData)
@@ -250,7 +229,7 @@ function App() {
       console.log('Loaded scatter plot data:', {
         numPoints,
         numClasses: classNamesArray.length,
-        firstCategory: firstCategoryName,
+        category: category,
         classNames: classNamesArray.slice(0, 10), // Show first 10 for debugging
       })
     } catch (error) {
@@ -258,7 +237,7 @@ function App() {
     } finally {
       setIsLoadingData(false)
     }
-  }, [sitePath])
+  }, [sitePath, category])
 
   useEffect(() => {
     console.log('App mounted')
