@@ -159,7 +159,7 @@ function App() {
       await wasmInit()
 
       const modelID = 'scimilarity'
-      const mappingsUrl = `${sitePath}/models/${modelID}/mappings.parquet`
+      const mappingsUrl = `${sitePath}/models/${modelID}/mappings.compressed.parquet`
       const categoriesUrl = `${sitePath}/models/${modelID}/categories.parquet`
 
       // Load both files in parallel
@@ -185,7 +185,7 @@ function App() {
       const xColumn = mappingsArrowTable.getChild('x')
       const yColumn = mappingsArrowTable.getChild('y')
       if (!xColumn || !yColumn) {
-        throw new Error('Missing x or y columns in mappings.parquet')
+        throw new Error('Missing x or y columns in mappings.compressed.parquet')
       }
 
       // Find the first category index column (should end with '_idx')
@@ -201,7 +201,7 @@ function App() {
       }
 
       if (!firstCategoryColumn || !firstCategoryName) {
-        throw new Error('No category index column found in mappings.parquet')
+        throw new Error('No category index column found in mappings.compressed.parquet')
       }
 
       // Extract category names for the first category from categories.parquet

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Optional, Dict
+import json
 
 import numpy as np
 import torch
@@ -350,43 +351,44 @@ def map(
 
     # Read the labels file
     labels_df = pd.read_parquet(output_path / "labels.parquet")
-    
+
     # Ensure we have the same number of rows
     if len(mappings) != len(labels_df):
-        raise ValueError(f"Mismatch between mappings ({len(mappings)}) and labels ({len(labels_df)}) count")
+        raise ValueError(
+            f"Mismatch between mappings ({len(mappings)}) and labels ({len(labels_df)}) count"
+        )
 
     # Scale coordinates to INT16 for delta compression
     scaled_coords = (mappings * 1000).astype(np.int16)
-    
+
     # Create the base mappings dataframe with coordinates
-    mappings_df = pd.DataFrame({
-        'x': scaled_coords[:, 0],
-        'y': scaled_coords[:, 1]
-    })
-    
+    mappings_df = pd.DataFrame({"x": scaled_coords[:, 0], "y": scaled_coords[:, 1]})
+
     # Process each label column to create category mappings
     categories_dict = {}
-    
+
     for col in labels_df.columns:
-        if labels_df[col].dtype.name == 'category':
+        if labels_df[col].dtype.name == "category":
             # Get unique categories and create mapping
             categories = labels_df[col].cat.categories.tolist()
             categories_dict[col] = categories
-            
+
             # Add category indices to mappings dataframe as int16
-            mappings_df[f'{col}_idx'] = labels_df[col].cat.codes.astype(np.int16)
+            mappings_df[f"{col}_idx"] = labels_df[col].cat.codes.astype(np.int16)
         else:
             # Handle non-categorical columns by creating categories
             unique_values = labels_df[col].unique()
             categories_dict[col] = unique_values.tolist()
-            
+
             # Create mapping from values to indices
             value_to_idx = {val: idx for idx, val in enumerate(unique_values)}
-            mappings_df[f'{col}_idx'] = labels_df[col].map(value_to_idx).astype(np.int16)
-    
+            mappings_df[f"{col}_idx"] = (
+                labels_df[col].map(value_to_idx).astype(np.int16)
+            )
+
     # Sort by x coordinate for optimal delta compression
-    mappings_df = mappings_df.sort_values('x').reset_index(drop=True)
-    
+    mappings_df = mappings_df.sort_values("x").reset_index(drop=True)
+
     # Save optimized mappings with delta-friendly format
     mappings_path = output_path / "mappings.parquet"
     mappings_df.to_parquet(
@@ -396,45 +398,290 @@ def map(
         index=False,
     )
     typer.echo(f"Saved optimized mappings to {mappings_path}")
-    
+
     # Save categories mapping
-    categories_df = pd.DataFrame.from_dict(categories_dict, orient='index')
+    categories_df = pd.DataFrame.from_dict(categories_dict, orient="index")
     categories_df = categories_df.reset_index()
-    categories_df.columns = ['column_name'] + [f'category_{i}' for i in range(categories_df.shape[1] - 1)]
-    
+    categories_df.columns = ["column_name"] + [
+        f"category_{i}" for i in range(categories_df.shape[1] - 1)
+    ]
+
     categories_path = output_path / "categories.parquet"
     categories_df.to_parquet(
         categories_path,
-        engine="pyarrow", 
+        engine="pyarrow",
         compression="snappy",
         index=False,
     )
     typer.echo(f"Saved categories mapping to {categories_path}")
-    
+
     # Print summary statistics
-    typer.echo(f"Processed {len(mappings_df)} mappings with {len(categories_dict)} label columns:")
+    typer.echo(
+        f"Processed {len(mappings_df)} mappings with {len(categories_dict)} label columns:"
+    )
     for col, cats in categories_dict.items():
         typer.echo(f"  {col}: {len(cats)} categories")
+
+
+@app.command()
+def compress(
+    model_path: Path = typer.Argument(
+        ...,
+        help="Path to model directory containing mappings.parquet and labels.parquet",
+    )
+) -> None:
+    """
+    Compress mappings and labels data with validation and optimization.
+
+    Args:
+        model_path: Path to directory containing mappings.parquet and labels.parquet files
+    """
+    typer.echo(f"Compressing data from {model_path}")
+
+    # Load the data files
+    mappings_path = model_path / "mappings.parquet"
+    labels_path = model_path / "labels.parquet"
+
+    if not mappings_path.exists():
+        typer.echo(f"Error: {mappings_path} not found", err=True)
+        raise typer.Exit(1)
+
+    if not labels_path.exists():
+        typer.echo(f"Error: {labels_path} not found", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("Loading mappings and labels...")
+    mappings_df = pd.read_parquet(mappings_path)
+    labels_df = pd.read_parquet(labels_path)
+
+    # Validate x and y columns
+    typer.echo("Validating x and y coordinates...")
+    x_min, x_max = mappings_df["x"].min(), mappings_df["x"].max()
+    y_min, y_max = mappings_df["y"].min(), mappings_df["y"].max()
+
+    # INT16 limits are -32,768 to 32,767
+    int16_min, int16_max = -32768, 32767
+
+    typer.echo(f"X range: {x_min} to {x_max}")
+    typer.echo(f"Y range: {y_min} to {y_max}")
+
+    # Check if values are within safe INT16 bounds (with some margin)
+    if x_min < int16_min + 1000 or x_max > int16_max - 1000:
+        typer.echo(
+            f"Warning: X values are close to INT16 limits ({int16_min} to {int16_max})",
+            err=True,
+        )
+
+    if y_min < int16_min + 1000 or y_max > int16_max - 1000:
+        typer.echo(
+            f"Warning: Y values are close to INT16 limits ({int16_min} to {int16_max})",
+            err=True,
+        )
+
+    # Verify x column is sorted
+    is_x_sorted = mappings_df["x"].is_monotonic_increasing
+    typer.echo(f"X column sorted: {is_x_sorted}")
+
+    if not is_x_sorted:
+        typer.echo(
+            "Warning: X column is not sorted, delta compression may be less effective",
+            err=True,
+        )
+
+    # Validate label columns
+    typer.echo("Validating label columns...")
+    label_columns = [col for col in labels_df.columns]
+    mapping_label_columns = [
+        col.replace("_idx", "") for col in mappings_df.columns if col.endswith("_idx")
+    ]
+
+    # Check that all mapping label columns have corresponding labels
+    for mapping_col in mapping_label_columns:
+        if mapping_col not in label_columns:
+            typer.echo(
+                f"Error: Label column '{mapping_col}' not found in labels.parquet",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    # Validate categorical indices don't exceed label counts
+    category_counts = {}
+    for mapping_col in mapping_label_columns:
+        idx_col = f"{mapping_col}_idx"
+        if idx_col in mappings_df.columns:
+            max_idx = mappings_df[idx_col].max()
+
+            # Count unique categories in labels
+            if mapping_col in labels_df.columns:
+                if labels_df[mapping_col].dtype.name == "category":
+                    num_categories = len(labels_df[mapping_col].cat.categories)
+                else:
+                    num_categories = labels_df[mapping_col].nunique()
+
+                category_counts[mapping_col] = num_categories
+
+                if max_idx >= num_categories:
+                    typer.echo(
+                        f"Error: Max index {max_idx} in '{idx_col}' exceeds category count {num_categories}",
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+
+                typer.echo(
+                    f"Column '{mapping_col}': max_idx={max_idx}, categories={num_categories} ✓"
+                )
+
+    # Create model.json with metadata
+    typer.echo("Creating model metadata...")
+    model_metadata = {
+        "coordinates": {
+            "x_min": int(x_min),
+            "x_max": int(x_max),
+            "y_min": int(y_min),
+            "y_max": int(y_max),
+        },
+        "categories": category_counts,
+        "total_rows": len(mappings_df),
+        "x_sorted": is_x_sorted,
+    }
+
+    model_json_path = model_path / "model.json"
+    with open(model_json_path, "w") as f:
+        json.dump(model_metadata, f, indent=2)
+
+    typer.echo(f"Saved model metadata to {model_json_path}")
+
+    # Create compressed mappings using DELTA_BINARY_PACKED
+    typer.echo("Compressing mappings with DELTA_BINARY_PACKED encoding...")
+
+    # Define the schema with delta encoding for all columns
+    schema_fields = []
+    for col in mappings_df.columns:
+        if col in ["x", "y"] or col.endswith("_idx"):
+            # Use INT16 with delta encoding for coordinates and category indices
+            schema_fields.append(pa.field(col, pa.int16()))
+        else:
+            # Fallback for any other columns
+            schema_fields.append(pa.field(col, pa.int32()))
+
+    schema = pa.schema(schema_fields)
+
+    # Convert DataFrame to PyArrow Table with the defined schema
+    table = pa.Table.from_pandas(mappings_df, schema=schema)
+
+    # Configure parquet writer with delta encoding
+    compressed_path = model_path / "mappings.compressed.parquet"
+
+    # Use delta encoding for all integer columns
+    column_encodings = {}
+    for col in mappings_df.columns:
+        if col in ["x", "y"] or col.endswith("_idx"):
+            column_encodings[col] = "DELTA_BINARY_PACKED"
+
+    pq.write_table(
+        table,
+        compressed_path,
+        compression="snappy",
+        use_dictionary=False,
+        column_encoding=column_encodings,
+        write_statistics=True,
+        data_page_size=1024 * 1024,  # 1MB pages for better compression
+    )
+
+    # Compare file sizes
+    original_size = mappings_path.stat().st_size
+    compressed_size = compressed_path.stat().st_size
+    compression_ratio = (1 - compressed_size / original_size) * 100
+
+    typer.echo(f"Saved compressed mappings to {compressed_path}")
+    typer.echo(f"Original size: {original_size:,} bytes")
+    typer.echo(f"Compressed size: {compressed_size:,} bytes")
+    typer.echo(f"Compression ratio: {compression_ratio:.1f}%")
+
+    # Compress labels as lookup tables
+    typer.echo("Compressing labels as lookup tables...")
+    
+    # Create compressed labels with just the unique values for each category
+    # The order should match the index values used in mappings
+    compressed_labels_dict = {}
+    
+    for mapping_col in mapping_label_columns:
+        if mapping_col in labels_df.columns:
+            if labels_df[mapping_col].dtype.name == 'category':
+                # For categorical columns, get the categories in order
+                unique_labels = labels_df[mapping_col].cat.categories.tolist()
+            else:
+                # For non-categorical columns, get unique values
+                # We need to ensure they're in the same order as the index mapping
+                unique_values = labels_df[mapping_col].unique()
+                # Sort to ensure consistent ordering
+                unique_labels = sorted(unique_values.tolist())
+            
+            compressed_labels_dict[mapping_col] = unique_labels
+            typer.echo(f"  {mapping_col}: {len(unique_labels)} unique labels")
+    
+    # Convert to DataFrame with proper indexing
+    # Each column will have different lengths, so we'll pad with None
+    max_length = max(len(labels) for labels in compressed_labels_dict.values()) if compressed_labels_dict else 0
+    
+    padded_labels_dict = {}
+    for col, labels in compressed_labels_dict.items():
+        # Pad with None to make all columns the same length
+        padded_labels = labels + [None] * (max_length - len(labels))
+        padded_labels_dict[col] = padded_labels
+    
+    compressed_labels_df = pd.DataFrame(padded_labels_dict)
+    
+    # Save compressed labels
+    labels_compressed_path = model_path / "labels.compressed.parquet"
+    compressed_labels_df.to_parquet(
+        labels_compressed_path,
+        engine="pyarrow",
+        compression="snappy",
+        index=False,
+    )
+    
+    # Compare labels file sizes
+    labels_original_size = labels_path.stat().st_size
+    labels_compressed_size = labels_compressed_path.stat().st_size
+    labels_compression_ratio = (1 - labels_compressed_size / labels_original_size) * 100
+    
+    typer.echo(f"Saved compressed labels to {labels_compressed_path}")
+    typer.echo(f"Labels original size: {labels_original_size:,} bytes")
+    typer.echo(f"Labels compressed size: {labels_compressed_size:,} bytes")
+    typer.echo(f"Labels compression ratio: {labels_compression_ratio:.1f}%")
+    
+    # Total compression summary
+    total_original_size = original_size + labels_original_size
+    total_compressed_size = compressed_size + labels_compressed_size
+    total_compression_ratio = (1 - total_compressed_size / total_original_size) * 100
+    
+    typer.echo("\n=== Compression Summary ===")
+    typer.echo(f"Total original size: {total_original_size:,} bytes")
+    typer.echo(f"Total compressed size: {total_compressed_size:,} bytes")
+    typer.echo(f"Total compression ratio: {total_compression_ratio:.1f}%")
+
+    typer.echo("Compression complete! ✓")
 
 
 def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
     """
     Save raw mappings as a PNG scatter plot for comparison.
-    
+
     Args:
         output_path: Directory where to save the PNG file
         mappings: Raw float32 mappings array of shape (num_embeddings, 2)
     """
     plt.figure(figsize=(10, 10))
     plt.scatter(mappings[:, 0], mappings[:, 1], alpha=0.6, s=1)
-    plt.xlabel('X coordinate')
-    plt.ylabel('Y coordinate')
-    plt.title('Raw Mappings Scatter Plot')
-    plt.axis('equal')
-    
+    plt.xlabel("X coordinate")
+    plt.ylabel("Y coordinate")
+    plt.title("Raw Mappings Scatter Plot")
+    plt.axis("equal")
+
     # Save the plot
     png_path = output_path / "mappings.png"
-    plt.savefig(png_path, dpi=300, bbox_inches='tight')
+    plt.savefig(png_path, dpi=300, bbox_inches="tight")
     plt.close()
     typer.echo(f"Saved raw mappings plot to {png_path}")
 

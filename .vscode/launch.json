@@ -53,6 +53,14 @@
       ]
     },
     {
+      "name": "mapper compress",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cellspace/scripts/mapper.py",
+      "console": "integratedTerminal",
+      "args": ["compress", "${workspaceFolder}/web/public/models/scimilarity/"]
+    },
+    {
       "name": "Python Debugger: Current File",
       "type": "debugpy",
       "request": "launch",

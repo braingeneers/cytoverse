@@ -37,7 +37,6 @@ export default defineConfig({
   plugins: [
     react(),
     viteStaticCopy({
-      serveStatic: true,
       targets: [
         {
           src: 'node_modules/onnxruntime-web/dist/*.wasm',

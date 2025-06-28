@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "serve-dist-python": "python3 -m http.server 4173 -d dist/",
+    "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cellspace/"
   },
   "dependencies": {
     "@mui/icons-material": "^7.1.2",

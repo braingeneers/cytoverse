@@ -28,6 +28,7 @@ dev = [
     "jupyter>=1.1.1",
     "jupyter-console>=6.6.3",
     "netron>=8.3.9",
+    "parquet-tools>=0.2.16",
 ]
 
 [tool.uv.sources]

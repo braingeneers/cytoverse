@@ -19,3 +19,7 @@ map:
         web/public/models/scimilarity/embeddings.npy \
         web/public/models/scimilarity/ \
         --num-embeddings 100000
+
+inspect:
+	parquet-tools inspect web/public/models/scimilarity/mappings.parquet
+	parquet-tools inspect web/public/models/scimilarity/mappings.parquet
