@@ -325,9 +325,9 @@ function App() {
     setIsRunning(false)
     setProgress(0)
 
-    // Clear test data
-    setXTestData([])
-    setYTestData([])
+    // // Clear test data
+    // setXTestData([])
+    // setYTestData([])
 
     if (embedderWorker) {
       embedderWorker.terminate()
@@ -599,7 +599,6 @@ function App() {
               yTestData={yTestData}
               categoryData={categoryData}
               categoryLabels={categoryLabels}
-              isRunning={isRunning}
               onRef={setScatterPlotRef}
             />
           ) : (

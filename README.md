@@ -8,12 +8,13 @@ Search, display and label cells in foundation model embedding space
 
 ## Status
 
-- Scimilarity model runs in the browser streaming from local h5ad files using the CPU (~1k cells in 30 seconds). GPU doesn't work (yet)
-- Web app renders the exported training set only (no test set yet) using web gl
+- Training dataset of 1M points plotted using WebGL.
+- Run streams the selected h5ad, embeds client side using scimiliarity, maps using a parametric umap trained on the training dataset and plots as larger red dots.
+- CPU embedding and mapping functions - GPU in progress
+
 
 Next:
 
-- Display the results of running the encoding in the browser on the test dataset
 - Explore quantizing the encodings using PQ and sharding via IVF towards including the entire scimilarity training dataset (23.4M cells)
 
 ## Install
