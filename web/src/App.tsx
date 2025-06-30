@@ -55,13 +55,25 @@ function App() {
   const [useWebGPU, setUseWebGPU] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
-  // Scatter plot data state
-  const [xData, setXData] = useState<Vector | null>(null)
-  const [yData, setYData] = useState<Vector | null>(null)
+  // Scatter plot data state - training data (static)
+  const [xTrainData, setXTrainData] = useState<Vector | null>(null)
+  const [yTrainData, setYTrainData] = useState<Vector | null>(null)
   const [categoryData, setCategoryData] = useState<Vector | null>(null)
   const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string>('tissue') // TODO: Add category selector UI
+
+  // Test data state - incremental mappings
+  const [xTestData, setXTestData] = useState<number[]>([])
+  const [yTestData, setYTestData] = useState<number[]>([])
+  const [scatterPlotRef, setScatterPlotRef] = useState<{
+    drawNewPoints: (x: number[], y: number[]) => void
+  } | null>(null)
+
+  // Normalization parameters from metadata
+  const [xCenter, setXCenter] = useState<number>(0)
+  const [yCenter, setYCenter] = useState<number>(0)
+  const [maxRange, setMaxRange] = useState<number>(1)
 
   const detectWebGPU = useCallback(async () => {
     try {
@@ -133,7 +145,32 @@ function App() {
           console.log('Received embedding:', evt.data.embeddings.slice(0, 4), '...')
           break
         case 'mappings':
-          console.log('Received mappings:', evt.data.mappings.slice(0, 4), '...')
+          console.log('Received mappings batch:', evt.data.mappings.length, 'points')
+          // Add new mappings to test data - mappings contains [[x1, y1], [x2, y2], ...]
+          if (evt.data.mappings && evt.data.mappings.length > 0) {
+            const newXPoints: number[] = []
+            const newYPoints: number[] = []
+
+            // Extract X and Y coordinates from the array of tuples and normalize them
+            for (const mapping of evt.data.mappings) {
+              if (mapping && mapping.length >= 2) {
+                // Normalize the coordinates using the same transformation as mapper.py
+                const [normalizedX, normalizedY] = normalizeCoordinates(mapping[0], mapping[1])
+                newXPoints.push(normalizedX)
+                newYPoints.push(normalizedY)
+              }
+            }
+
+            setXTestData((prev) => [...prev, ...newXPoints])
+            setYTestData((prev) => [...prev, ...newYPoints])
+
+            // Draw the new points on the scatter plot if ref is available
+            if (scatterPlotRef) {
+              scatterPlotRef.drawNewPoints(newXPoints, newYPoints)
+            }
+
+            console.log('Added', newXPoints.length, 'new normalized test points')
+          }
           break
         case 'finished':
           setStatusMessage(
@@ -158,7 +195,14 @@ function App() {
     window.location.origin +
     window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
 
-  const loadScatterPlotData = useCallback(async () => {
+  // Helper function to normalize coordinates using the same transformation as mapper.py
+  const normalizeCoordinates = (x: number, y: number) => {
+    const normalizedX = (x - xCenter) / (maxRange / 2)
+    const normalizedY = (y - yCenter) / (maxRange / 2)
+    return [normalizedX, normalizedY]
+  }
+
+  const loadTrainingData = useCallback(async () => {
     setIsLoadingData(true)
     try {
       const modelID = 'scimilarity'
@@ -173,6 +217,11 @@ function App() {
       if (!labels || !Array.isArray(labels)) {
         throw new Error(`Missing or invalid category labels for '${selectedCategory}' in metadata`)
       }
+
+      // Store normalization parameters for test data
+      setXCenter(metadata.xCenter || 0)
+      setYCenter(metadata.yCenter || 0)
+      setMaxRange(metadata.maxRange || 1)
 
       // Load Arrow files in parallel
       const [xResponse, yResponse, categoryResponse] = await Promise.all([
@@ -209,8 +258,8 @@ function App() {
       }
 
       // Set the Vector objects directly - no need for data transformation
-      setXData(xColumn)
-      setYData(yColumn)
+      setXTrainData(xColumn)
+      setYTrainData(yColumn)
       setCategoryData(categoryColumn)
       setCategoryLabels(labels)
 
@@ -247,13 +296,18 @@ function App() {
     console.log('App mounted')
     fetchSampleFile()
     detectWebGPU()
-    loadScatterPlotData()
-  }, [detectWebGPU, loadScatterPlotData])
+    loadTrainingData()
+  }, [detectWebGPU, loadTrainingData])
 
   const start = () => {
     console.log('Starting embedding...', selectedFile?.name)
     setProgress(0)
     setIsRunning(true)
+
+    // Clear any existing test data
+    setXTestData([])
+    setYTestData([])
+
     const embedder = createWorkers()
     setEmbedderWorker(embedder)
     embedder.postMessage({
@@ -270,6 +324,10 @@ function App() {
     setStatusMessage('Stopping processing...')
     setIsRunning(false)
     setProgress(0)
+
+    // Clear test data
+    setXTestData([])
+    setYTestData([])
 
     if (embedderWorker) {
       embedderWorker.terminate()
@@ -470,10 +528,10 @@ function App() {
 
             {/* Dataset Statistics */}
             <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              {xData && yData && categoryData ? (
+              {xTrainData && yTrainData && categoryData ? (
                 <Box>
                   <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Cells:</strong> {xData.length.toLocaleString()}
+                    <strong>Cells:</strong> {xTrainData.length.toLocaleString()}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     <strong>Category:</strong> {selectedCategory}
@@ -533,12 +591,16 @@ function App() {
             <Box display="flex" justifyContent="center" alignItems="center" height="100%">
               <Typography>Loading scatter plot data...</Typography>
             </Box>
-          ) : xData && yData && categoryData && categoryLabels.length > 0 ? (
+          ) : xTrainData && yTrainData && categoryData && categoryLabels.length > 0 ? (
             <ScatterPlotWebGL
-              xData={xData}
-              yData={yData}
+              xTrainData={xTrainData}
+              yTrainData={yTrainData}
+              xTestData={xTestData}
+              yTestData={yTestData}
               categoryData={categoryData}
               categoryLabels={categoryLabels}
+              isRunning={isRunning}
+              onRef={setScatterPlotRef}
             />
           ) : (
             <Box display="flex" justifyContent="center" alignItems="center" height="100%">

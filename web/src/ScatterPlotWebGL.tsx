@@ -57,24 +57,33 @@ const generateCategoryColors = (numCategories: number): number[][] => {
 }
 
 interface ScatterPlotWebGLProps {
-  xData: Vector
-  yData: Vector
+  xTrainData: Vector
+  yTrainData: Vector
+  xTestData: number[]
+  yTestData: number[]
   categoryData: Vector
   categoryLabels: string[]
+  isRunning?: boolean // Add prop to control rendering behavior
+  onRef?: (ref: { drawNewPoints: (x: number[], y: number[]) => void } | null) => void
 }
 
 const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
-  xData,
-  yData,
+  xTrainData,
+  yTrainData,
+  xTestData,
+  yTestData,
   categoryData,
   categoryLabels,
+  isRunning = false,
+  onRef,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scatterplotRef = useRef<ReturnType<typeof createScatterplot> | null>(null)
 
   useEffect(() => {
-    if (!containerRef.current || !canvasRef.current || !xData || !yData || !categoryData) return
+    if (!containerRef.current || !canvasRef.current || !xTrainData || !yTrainData || !categoryData)
+      return
 
     // console.log('Setting up ScatterPlotWebGL with categories:', {
     //   numPoints: xData.length,
@@ -92,8 +101,11 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     //   ],
     // })
 
-    // Generate colors for each category
-    const categoryColors = generateCategoryColors(categoryLabels.length)
+    // Generate colors for each category + one extra color for test points
+    const categoryColors = generateCategoryColors(categoryLabels.length + 1)
+
+    // Set the last color to be a distinct color for test points (e.g., bright red)
+    categoryColors[categoryColors.length - 1] = [255, 0, 0, 255] // Bright red for test points
 
     // Create the scatterplot instance
     const scatterplot = createScatterplot({
@@ -105,7 +117,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     // Set up categorical coloring
     scatterplot.set({
-      pointSize: 0.5,
+      pointSize: 5.0, // Slightly larger default size
       pointColor: categoryColors,
       colorBy: 'valueA',
     })
@@ -114,30 +126,30 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     // Convert Arrow Vectors to typed arrays for regl-scatterplot
     // Try to access the underlying buffer directly if possible, otherwise convert
-    const numPoints = Math.min(xData.length, yData.length, categoryData.length)
+    const numPoints = Math.min(xTrainData.length, yTrainData.length, categoryData.length)
 
     // Check if we can access the underlying typed array directly
     let xArray: Float32Array
     let yArray: Float32Array
 
     // Arrow Vector.data should give us access to the underlying data
-    if (xData.data.length > 0 && xData.data[0].values instanceof Float32Array) {
-      xArray = xData.data[0].values as Float32Array
+    if (xTrainData.data.length > 0 && xTrainData.data[0].values instanceof Float32Array) {
+      xArray = xTrainData.data[0].values as Float32Array
     } else {
       // Fallback to copying data
       xArray = new Float32Array(numPoints)
       for (let i = 0; i < numPoints; i++) {
-        xArray[i] = xData.get(i) || 0
+        xArray[i] = xTrainData.get(i) || 0
       }
     }
 
-    if (yData.data.length > 0 && yData.data[0].values instanceof Float32Array) {
-      yArray = yData.data[0].values as Float32Array
+    if (yTrainData.data.length > 0 && yTrainData.data[0].values instanceof Float32Array) {
+      yArray = yTrainData.data[0].values as Float32Array
     } else {
       // Fallback to copying data
       yArray = new Float32Array(numPoints)
       for (let i = 0; i < numPoints; i++) {
-        yArray[i] = yData.get(i) || 0
+        yArray[i] = yTrainData.get(i) || 0
       }
     }
 
@@ -154,10 +166,26 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     }
 
     // Use column-based data format with valueA for categorical coloring
+    // Include both training and existing test data
+    const trainX = Array.from(xArray)
+    const trainY = Array.from(yArray)
+
+    // For debugging: disable training data when running to see test points clearly
+    const showTrainingData = !isRunning
+
+    const allX = new Float32Array(showTrainingData ? [...trainX, ...xTestData] : [...xTestData])
+    const allY = new Float32Array(showTrainingData ? [...trainY, ...yTestData] : [...yTestData])
+
+    // Create category data for test points (use a special category for test data)
+    const testCategories = new Array(xTestData.length).fill(categoryColors.length - 1)
+    const allCategories = showTrainingData
+      ? [...categoryArrayData, ...testCategories]
+      : testCategories
+
     const columnData = {
-      x: xArray,
-      y: yArray,
-      valueA: categoryArrayData,
+      x: allX,
+      y: allY,
+      valueA: allCategories,
     }
 
     // Draw the points using column format
@@ -165,11 +193,36 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     console.log(
       'Drew',
-      numPoints,
-      'points with',
+      allX.length,
+      'points (',
+      showTrainingData ? numPoints : 0,
+      'training +',
+      xTestData.length,
+      'test) with',
       categoryColors.length,
       'category colors using valueA'
     )
+
+    // Create a reference object with drawNewPoints method
+    const scatterplotRefObj = {
+      drawNewPoints: (newX: number[], newY: number[]) => {
+        // This function is mainly for triggering redraws
+        // The actual new data should already be added to xTestData/yTestData by the parent
+        // and the useEffect will handle the redraw automatically
+        console.log(
+          'drawNewPoints called with',
+          newX.length,
+          'new points at coordinates:',
+          newX[0],
+          newY[0]
+        )
+      },
+    }
+
+    // Set the reference for parent component
+    if (onRef) {
+      onRef(scatterplotRefObj)
+    }
 
     // Handle resize
     const handleResize = () => {
@@ -189,8 +242,11 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       if (scatterplot) {
         scatterplot.destroy()
       }
+      if (onRef) {
+        onRef(null)
+      }
     }
-  }, [xData, yData, categoryData, categoryLabels])
+  }, [xTrainData, yTrainData, xTestData, yTestData, categoryData, categoryLabels, isRunning, onRef])
 
   return (
     <div
