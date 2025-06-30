@@ -162,23 +162,23 @@ function App() {
     setIsLoadingData(true)
     try {
       const modelID = 'scimilarity'
-      const defaultCategory = selectedCategory
+      setSelectedCategory('tissue') // Default category, can be changed later
 
       // Load metadata to get categories information
       const metadataResponse = await fetch(`${sitePath}/models/${modelID}/metadata.json`)
       const metadata = await metadataResponse.json()
 
       // Get category labels from metadata
-      const labels = metadata.categories?.[defaultCategory]
+      const labels = metadata.categories?.[selectedCategory]
       if (!labels || !Array.isArray(labels)) {
-        throw new Error(`Missing or invalid category labels for '${defaultCategory}' in metadata`)
+        throw new Error(`Missing or invalid category labels for '${selectedCategory}' in metadata`)
       }
 
       // Load Arrow files in parallel
       const [xResponse, yResponse, categoryResponse] = await Promise.all([
         fetch(`${sitePath}/models/${modelID}/x.arrow`),
         fetch(`${sitePath}/models/${modelID}/y.arrow`),
-        fetch(`${sitePath}/models/${modelID}/${defaultCategory}.arrow`),
+        fetch(`${sitePath}/models/${modelID}/${selectedCategory}.arrow`),
       ])
 
       const [xBuffer, yBuffer, categoryBuffer] = await Promise.all([
@@ -195,7 +195,7 @@ function App() {
       // Extract columns
       const xColumn = xTable.getChild('x')
       const yColumn = yTable.getChild('y')
-      const categoryColumn = categoryTable.getChild(defaultCategory)
+      const categoryColumn = categoryTable.getChild(selectedCategory)
 
       if (!xColumn || !yColumn || !categoryColumn) {
         throw new Error('Missing required columns in Arrow files')
@@ -217,7 +217,7 @@ function App() {
       // console.log('Loaded scatter plot data:', {
       //   numPoints,
       //   numCategories: labels.length,
-      //   category: defaultCategory,
+      //   category: selectedCategory,
       //   xRange: [
       //     Math.min(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
       //     Math.max(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
