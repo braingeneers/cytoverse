@@ -6,9 +6,10 @@ import { Vector } from 'apache-arrow'
 const generateCategoryColors = (numCategories: number): number[][] => {
   const colors: number[][] = []
 
-  // Use HSL to generate evenly spaced colors
+  // Use HSL to generate evenly spaced colors, avoiding bright red (hue 0)
   for (let i = 0; i < numCategories; i++) {
-    const hue = (i * 360) / numCategories
+    // Skip hue 0 (red) and start from 30 degrees to avoid bright red
+    const hue = 30 + (i * 330) / numCategories
     const saturation = 0.7
     const lightness = 0.5
 
@@ -115,11 +116,12 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       // performanceMode: true, // Enable performance mode for better rendering
     })
 
-    // Set up categorical coloring
+    // Set up categorical coloring and sizing
     scatterplot.set({
-      pointSize: 5.0, // Slightly larger default size
       pointColor: categoryColors,
       colorBy: 'valueA',
+      // @ts-expect-error - sizeBy might not be in TypeScript definitions but exists in regl-scatterplot
+      sizeBy: 'valueB',
     })
 
     scatterplotRef.current = scatterplot
@@ -182,10 +184,16 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       ? [...categoryArrayData, ...testCategories]
       : testCategories
 
+    // Create size data: 1.0 for training data (smaller), 10.0 for test data (larger)
+    const trainSize = new Array(numPoints).fill(1.0)
+    const testSize = new Array(xTestData.length).fill(10.0)
+    const allSizes = showTrainingData ? [...trainSize, ...testSize] : testSize
+
     const columnData = {
       x: allX,
       y: allY,
       valueA: allCategories,
+      valueB: allSizes,
     }
 
     // Draw the points using column format
@@ -200,7 +208,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       xTestData.length,
       'test) with',
       categoryColors.length,
-      'category colors using valueA'
+      'category colors using valueA and sizing using valueB'
     )
 
     // Create a reference object with drawNewPoints method
