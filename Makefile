@@ -1,24 +1,30 @@
-subset:
+scimilarity-export:
 	python src/cellspace/scripts/scimilarity_export_cells.py \
 	data/scimilarity/model_v1.1/cellsearch \
-	web/public/models/scimilarity \
+	data/scimilarity/ \
 	--labels tissue \
 	--labels prediction \
 	--labels study \
-	--num-cells 100000
+	--num-cells 1000000
 
-train:
+mapper-train:
 	python src/cellspace/scripts/mapper.py train \
-        web/public/models/scimilarity/embeddings.npy \
+        data/scimilarity/embeddings.npy \
         web/public/models/scimilarity/ \
-        --num-embeddings 100000
+        --num-embeddings 1000000
 
-map:
+mapper-map:
 	python src/cellspace/scripts/mapper.py map \
         web/public/models/scimilarity/mapper.onnx \
-        web/public/models/scimilarity/embeddings.npy \
-        web/public/models/scimilarity/ \
-        --num-embeddings 100000
+        data/scimilarity/embeddings.npy \
+        data/scimilarity/ \
+		--export-png \
+        --num-embeddings 1000000
+
+mapper-export:
+	python src/cellspace/scripts/mapper.py export \
+        data/scimilarity/ \
+        web/public/models/scimilarity/ 
 
 inspect:
 	parquet-tools inspect web/public/models/scimilarity/mappings.parquet

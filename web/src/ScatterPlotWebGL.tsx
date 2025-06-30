@@ -1,360 +1,214 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
-import * as echarts from 'echarts'
-import { ScatterGLChart } from 'echarts-gl/charts'
-import { GridComponent, VisualMapComponent, LegendComponent } from 'echarts/components'
+import React, { useRef, useEffect } from 'react'
+import createScatterplot from 'regl-scatterplot'
+import { Vector } from 'apache-arrow'
 
-// Register necessary components
-echarts.use([ScatterGLChart, GridComponent, VisualMapComponent, LegendComponent])
+// Generate distinct colors for categories
+const generateCategoryColors = (numCategories: number): number[][] => {
+  const colors: number[][] = []
 
-// Custom color palette
-const customColors = [
-  // first 12 colours generated with:
-  // RColorBrewer::brewer.pal(n = 12, name = "Paired")
-  '#A6CEE3',
-  '#1F78B4',
-  '#B2DF8A',
-  '#33A02C',
-  '#FB9A99',
-  '#E31A1C',
-  '#FDBF6F',
-  '#FF7F00',
-  '#CAB2D6',
-  '#6A3D9A',
-  '#FFFF99',
-  '#B15928',
-  // vivid interlude
-  '#1ff8ff', // a bright blue
-  // next 8 colours generated with:
-  // RColorBrewer::brewer.pal(n = 8, "Dark2")
-  '#1B9E77',
-  '#D95F02',
-  '#7570B3',
-  '#E7298A',
-  '#66A61E',
-  '#E6AB02',
-  '#A6761D',
-  '#666666',
-  // list below generated with iwanthue: all colours soft kmeans 20
-  '#4b6a53',
-  '#b249d5',
-  '#7edc45',
-  '#5c47b8',
-  '#cfd251',
-  '#ff69b4',
-  '#69c86c',
-  '#cd3e50',
-  '#83d5af',
-  '#da6130',
-  '#5e79b2',
-  '#c29545',
-  '#532a5a',
-  '#5f7b35',
-  '#c497cf',
-  '#773a27',
-  '#7cb9cb',
-  '#594e50',
-  '#d3c4a8',
-  '#c17e7f',
-]
+  // Use HSL to generate evenly spaced colors
+  for (let i = 0; i < numCategories; i++) {
+    const hue = (i * 360) / numCategories
+    const saturation = 0.7
+    const lightness = 0.5
 
-// Utility function to calculate extents from scatter plot data
-const calculateExtents = (
-  data: Float32Array
-): { xExtent: [number, number]; yExtent: [number, number] } => {
-  let minX = Infinity
-  let maxX = -Infinity
-  let minY = Infinity
-  let maxY = -Infinity
+    // Convert HSL to RGB
+    const c = (1 - Math.abs(2 * lightness - 1)) * saturation
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1))
+    const m = lightness - c / 2
 
-  for (let i = 0; i < data.length; i += 3) {
-    const x = data[i]
-    const y = data[i + 1]
+    let r: number, g: number, b: number
 
-    minX = Math.min(minX, x)
-    maxX = Math.max(maxX, x)
-    minY = Math.min(minY, y)
-    maxY = Math.max(maxY, y)
+    if (hue >= 0 && hue < 60) {
+      r = c
+      g = x
+      b = 0
+    } else if (hue >= 60 && hue < 120) {
+      r = x
+      g = c
+      b = 0
+    } else if (hue >= 120 && hue < 180) {
+      r = 0
+      g = c
+      b = x
+    } else if (hue >= 180 && hue < 240) {
+      r = 0
+      g = x
+      b = c
+    } else if (hue >= 240 && hue < 300) {
+      r = x
+      g = 0
+      b = c
+    } else {
+      r = c
+      g = 0
+      b = x
+    }
+
+    colors.push([
+      Math.round((r + m) * 255),
+      Math.round((g + m) * 255),
+      Math.round((b + m) * 255),
+      255, // Alpha
+    ])
   }
 
-  // Add 5% padding to the bounds
-  const xPadding = (maxX - minX) * 0.05
-  const yPadding = (maxY - minY) * 0.05
-
-  return {
-    xExtent: [minX - xPadding, maxX + xPadding],
-    yExtent: [minY - yPadding, maxY + yPadding],
-  }
+  return colors
 }
 
 interface ScatterPlotWebGLProps {
-  trainMappings: Float32Array
-  testMappings?: Float32Array
-  classNames: string[]
-  themeName?: string
+  xData: Vector
+  yData: Vector
+  categoryData: Vector
+  categoryLabels: string[]
 }
 
 const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
-  trainMappings,
-  testMappings,
-  classNames,
-  themeName = 'light',
+  xData,
+  yData,
+  categoryData,
+  categoryLabels,
 }) => {
-  const chartContainer = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<echarts.ECharts | null>(null)
-  const [showBoth, setShowBoth] = useState(true)
-  const [showTrainOnly, setShowTrainOnly] = useState(false)
-  const [showTestOnly, setShowTestOnly] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const scatterplotRef = useRef<ReturnType<typeof createScatterplot> | null>(null)
 
-  const pieces = useMemo(() => {
-    return classNames.map((name, index) => {
-      return {
-        value: index,
-        label: name,
-        color: customColors[index % customColors.length],
-      }
-    })
-  }, [classNames])
+  useEffect(() => {
+    if (!containerRef.current || !canvasRef.current || !xData || !yData || !categoryData) return
 
-  // Calculate bounds from training data on first mount
-  const calculateBounds = useCallback((data: Float32Array) => {
-    const extents = calculateExtents(data)
-    return {
-      xMin: extents.xExtent[0],
-      xMax: extents.xExtent[1],
-      yMin: extents.yExtent[0],
-      yMax: extents.yExtent[1],
-    }
-  }, [])
-
-  // Function to initialize or reinitialize the chart
-  const getChartOption = useCallback(() => {
-    const currentBounds = calculateBounds(trainMappings)
-    return {
-      backgroundColor: 'transparent', // Let the chart inherit the background color
-      grid: {
-        left: 150, // Reduced legend space for more chart width
-        right: 10,
-        top: 10,
-        bottom: 10,
-        containLabel: false,
-      },
-      xAxis: {
-        show: false,
-        min: currentBounds.xMin,
-        max: currentBounds.xMax,
-        type: 'value',
-      },
-      yAxis: {
-        show: false,
-        min: currentBounds.yMin,
-        max: currentBounds.yMax,
-        type: 'value',
-      },
-      visualMap: {
-        type: 'piecewise',
-        dimension: 2,
-        pieces: pieces,
-        outOfRange: {
-          symbolSize: 0,
-        },
-        show: true,
-        orient: 'vertical',
-        left: 5,
-        top: 'center',
-        itemWidth: 12,
-        itemHeight: 12,
-        textStyle: {
-          fontSize: 11,
-        },
-        calculable: false,
-        itemGap: 3,
-      },
-      animation: false, // Disable animation for better performance
-      series: [
-        {
-          name: 'Reference',
-          type: 'scatterGL',
-          data: [],
-          dimensions: ['x', 'y', 'class'],
-          symbolSize: 1,
-          itemStyle: {
-            opacity: 0.3,
-          },
-        },
-        {
-          name: 'Predictions',
-          type: 'scatterGL',
-          data: [],
-          dimensions: ['x', 'y', 'class'],
-          symbolSize: 5,
-        },
-      ],
-    }
-  }, [trainMappings, pieces, calculateBounds])
-
-  const initChart = useCallback(() => {
-    if (!chartContainer.current) return
-    if (chartRef.current) {
-      chartRef.current.dispose()
-    }
-
-    chartRef.current = echarts.init(chartContainer.current, themeName)
-    chartRef.current.setOption(getChartOption())
-
-    // Multiple resize calls to ensure proper sizing
-    setTimeout(() => {
-      if (chartRef.current) {
-        chartRef.current.resize()
-      }
-    }, 0)
-
-    setTimeout(() => {
-      if (chartRef.current) {
-        chartRef.current.resize()
-      }
-    }, 50)
-  }, [themeName, getChartOption])
-
-  const updateChart = useCallback(() => {
-    if (!chartRef.current) return
-
-    const options = chartRef.current.getOption() as echarts.EChartsOption
-    const visualMap = Array.isArray(options.visualMap) ? options.visualMap[0] : options.visualMap
-    const currentSelection =
-      (visualMap as echarts.PiecewiseVisualMapComponentOption)?.selected || {}
-
-    let trainDataToShow: Float32Array | number[][] = new Float32Array()
-    if ((showBoth || showTrainOnly) && trainMappings) {
-      trainDataToShow = trainMappings
-    }
-
-    let testDataToShow: Float32Array | number[][] = new Float32Array()
-    if ((showBoth || showTestOnly) && testMappings) {
-      testDataToShow = testMappings
-    }
-
-    chartRef.current.setOption({
-      visualMap: {
-        selected: currentSelection,
-      },
-      series: [
-        { name: 'Reference', data: trainDataToShow },
-        { name: 'Predictions', data: testDataToShow },
+    console.log('Setting up ScatterPlotWebGL with categories:', {
+      numPoints: xData.length,
+      numCategories: categoryLabels.length,
+      categoryLabels,
+      categoryRange: [
+        Math.min(
+          ...(categoryData.data[0]?.values ||
+            Array.from({ length: categoryData.length }, (_, i) => categoryData.get(i) || 0))
+        ),
+        Math.max(
+          ...(categoryData.data[0]?.values ||
+            Array.from({ length: categoryData.length }, (_, i) => categoryData.get(i) || 0))
+        ),
       ],
     })
-  }, [showBoth, showTrainOnly, showTestOnly, trainMappings, testMappings])
 
-  const setVisibility = useCallback((mode: 'both' | 'train' | 'test') => {
-    setShowBoth(mode === 'both')
-    setShowTrainOnly(mode === 'train')
-    setShowTestOnly(mode === 'test')
-  }, [])
+    // Generate colors for each category
+    const categoryColors = generateCategoryColors(categoryLabels.length)
 
-  const toggleAllClasses = useCallback((show: boolean) => {
-    if (!chartRef.current) return
-
-    const options = chartRef.current.getOption() as echarts.EChartsOption
-    const visualMap = (
-      Array.isArray(options.visualMap) ? options.visualMap[0] : options.visualMap
-    ) as echarts.PiecewiseVisualMapComponentOption
-    const currentSelection = visualMap?.selected || {}
-
-    for (let i = 0; i < visualMap.pieces!.length; i++) {
-      currentSelection[i] = show
-    }
-
-    chartRef.current.setOption({
-      visualMap: {
-        selected: currentSelection,
-      },
+    // Create the scatterplot instance
+    const scatterplot = createScatterplot({
+      canvas: canvasRef.current,
+      width: containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight,
+      // performanceMode: true, // Enable performance mode for better rendering
     })
-  }, [])
 
-  // Effects
-  useEffect(() => {
-    if (trainMappings && trainMappings.length > 0) {
-      initChart()
-    }
-    return () => {
-      if (chartRef.current) {
-        chartRef.current.dispose()
-        chartRef.current = null
+    // Set up categorical coloring
+    scatterplot.set({
+      pointSize: 0.5,
+      pointColor: categoryColors,
+      colorBy: 'valueA',
+    })
+
+    scatterplotRef.current = scatterplot
+
+    // Convert Arrow Vectors to typed arrays for regl-scatterplot
+    // Try to access the underlying buffer directly if possible, otherwise convert
+    const numPoints = Math.min(xData.length, yData.length, categoryData.length)
+
+    // Check if we can access the underlying typed array directly
+    let xArray: Float32Array
+    let yArray: Float32Array
+
+    // Arrow Vector.data should give us access to the underlying data
+    if (xData.data.length > 0 && xData.data[0].values instanceof Float32Array) {
+      xArray = xData.data[0].values as Float32Array
+    } else {
+      // Fallback to copying data
+      xArray = new Float32Array(numPoints)
+      for (let i = 0; i < numPoints; i++) {
+        xArray[i] = xData.get(i) || 0
       }
     }
-  }, [initChart, trainMappings])
 
-  useEffect(() => {
-    initChart()
-  }, [classNames, trainMappings, themeName, initChart])
+    if (yData.data.length > 0 && yData.data[0].values instanceof Float32Array) {
+      yArray = yData.data[0].values as Float32Array
+    } else {
+      // Fallback to copying data
+      yArray = new Float32Array(numPoints)
+      for (let i = 0; i < numPoints; i++) {
+        yArray[i] = yData.get(i) || 0
+      }
+    }
 
-  useEffect(() => {
-    updateChart()
-  }, [testMappings, updateChart])
+    // Get category indices for valueA
+    let categoryArrayData: number[]
+    if (categoryData.data.length > 0 && categoryData.data[0].values) {
+      categoryArrayData = Array.from(categoryData.data[0].values)
+    } else {
+      // Fallback to vector access
+      categoryArrayData = Array.from(
+        { length: categoryData.length },
+        (_, i) => categoryData.get(i) || 0
+      )
+    }
 
-  useEffect(() => {
-    updateChart()
-  }, [showBoth, showTrainOnly, showTestOnly, updateChart])
+    // Use column-based data format with valueA for categorical coloring
+    const columnData = {
+      x: xArray,
+      y: yArray,
+      valueA: categoryArrayData,
+    }
 
-  // Add resize handler
-  useEffect(() => {
+    // Draw the points using column format
+    scatterplot.draw(columnData)
+
+    console.log(
+      'Drew',
+      numPoints,
+      'points with',
+      categoryColors.length,
+      'category colors using valueA'
+    )
+
+    // Handle resize
     const handleResize = () => {
-      if (chartRef.current) {
-        chartRef.current.resize()
+      if (containerRef.current && scatterplot) {
+        scatterplot.set({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        })
       }
     }
 
     window.addEventListener('resize', handleResize)
 
-    // Use ResizeObserver for more precise container resize detection
-    let resizeObserver: ResizeObserver | null = null
-    if (chartContainer.current && 'ResizeObserver' in window) {
-      resizeObserver = new ResizeObserver(() => {
-        handleResize()
-      })
-      resizeObserver.observe(chartContainer.current)
-    }
-
-    // Also trigger resize after mount to ensure proper sizing
-    const timeoutId = setTimeout(() => {
-      if (chartRef.current) {
-        chartRef.current.resize()
-      }
-    }, 100)
-
+    // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize)
-      if (resizeObserver) {
-        resizeObserver.disconnect()
+      if (scatterplot) {
+        scatterplot.destroy()
       }
-      clearTimeout(timeoutId)
     }
-  }, [])
+  }, [xData, yData, categoryData, categoryLabels])
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="controls-header" style={{ flexShrink: 0, marginBottom: '16px' }}>
-        <div className="legend-controls">
-          <button onClick={() => toggleAllClasses(true)}>Show All</button>
-          <button onClick={() => toggleAllClasses(false)}>Hide All</button>
-        </div>
-        {trainMappings && trainMappings.length > 0 && testMappings && testMappings.length > 0 && (
-          <div className="visibility-controls">
-            <button className={showBoth ? 'active' : ''} onClick={() => setVisibility('both')}>
-              Both
-            </button>
-            <button
-              className={showTrainOnly ? 'active' : ''}
-              onClick={() => setVisibility('train')}
-            >
-              Training
-            </button>
-            <button className={showTestOnly ? 'active' : ''} onClick={() => setVisibility('test')}>
-              Test
-            </button>
-          </div>
-        )}
-      </div>
-      <div ref={chartContainer} style={{ width: '100%', height: '600px' }} />
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden', // Prevent any overflow
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'block',
+        }}
+      />
     </div>
   )
 }

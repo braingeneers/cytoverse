@@ -1,11 +1,60 @@
-# cellspace
+# Cell Space
 
 Search, display and label cells in foundation model embedding space
 
-# Install
+[https://cells-test.gi.ucsc.edu/cellspace](https://cells-test.gi.ucsc.edu/cellspace)
+
+![Alt text](screenshot.png?raw=true 'Cell Space Screenshot')
+
+## Status
+
+- Scimilarity model runs in the browser streaming from local h5ad files using the CPU (~1k cells in 30 seconds). GPU doesn't work (yet)
+- Web app renders the exported training set only (no test set yet) using web gl
+
+Next:
+
+- Display the results of running the encoding in the browser on the test dataset
+- Explore quantizing the encodings using PQ and sharding via IVF towards including the entire scimilarity training dataset (23.4M cells)
+
+## Install
+
+Download and unpack the scimilarity model and dataset (~30GB) into data/scimilarity/model_v1.1.
+
+Install python dependencies and create a virtual env:
 
 ```
 uv venv
 source .venv/bin/activate
 uv sync
 ```
+
+Select a stratified subset of 1M cells from the scimilarity tiledb, export their embeddings, train a parametric umap model, export it as onnx and save the mappings and labels in compressed arrow files for the web app to render:
+
+```
+make scimilarity-export mapper-train mapper-map mapper-export
+```
+
+Verify that web/public/models/scimilarity is populated
+
+```
+❯ ls web/public/models/scimilarity
+embedder.genes   metadata.json    tissue.arrow
+embedder.onnx    prediction.arrow x.arrow
+mapper.onnx      study.arrow      y.arrow
+```
+
+Install web app dependencies and run local dev server:
+
+```
+cd web
+npm install
+npm run dev
+```
+
+## Reference
+
+SCimilarity [paper](https://doi.org/10.1038/s41586-024-08411-y), [repo](https://github.com/Genentech/scimilarity), [model and dataset](https://zenodo.org/records/10685499)
+
+SIMS Web [repo](https://github.com/braingeneers/sims-web) and [demo](https://cells-test.gi.ucsc.edu/sims/)
+
+[Similarity Search with IVFPQ](https://towardsdatascience.com/similarity-search-with-ivfpq-9c6348fd4db3/?source=post_page-----2f1f67c5fddd---------------------------------------)

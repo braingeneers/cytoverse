@@ -31,7 +31,7 @@ def main(
         1000, "--num-cells", help="Number of cells to export"
     ),
     export_h5ad: bool = typer.Option(
-        False, "--export_h5ad", help="Export an h5ad file"
+        False, "--export-h5ad", help="Export an h5ad file"
     ),
 ) -> None:
 

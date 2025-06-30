@@ -22,8 +22,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import { MuiFileInput } from 'mui-file-input'
-import wasmInit, { readParquet } from 'parquet-wasm'
-import { tableFromIPC } from 'apache-arrow'
+import { tableFromIPC, Vector } from 'apache-arrow'
 
 import EmbeddingWorker from './embedder?worker'
 import ScatterPlotWebGL from './ScatterPlotWebGL'
@@ -57,10 +56,11 @@ function App() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
   // Scatter plot data state
-  const [trainMappings, setTrainMappings] = useState<Float32Array | null>(null)
-  const [classNames, setClassNames] = useState<string[]>([])
+  const [xData, setXData] = useState<Vector | null>(null)
+  const [yData, setYData] = useState<Vector | null>(null)
+  const [categoryData, setCategoryData] = useState<Vector | null>(null)
+  const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
-  const [category, setCategory] = useState('tissue')
 
   const detectWebGPU = useCallback(async () => {
     try {
@@ -156,88 +156,87 @@ function App() {
   const loadScatterPlotData = useCallback(async () => {
     setIsLoadingData(true)
     try {
-      // Initialize parquet-wasm
-      await wasmInit()
-
       const modelID = 'scimilarity'
-      const mappingsUrl = `${sitePath}/models/${modelID}/mappings.compressed.parquet`
-      const labelsUrl = `${sitePath}/models/${modelID}/labels.compressed.parquet`
+      const defaultCategory = 'tissue'
 
-      // Load both files in parallel
-      const [mappingsResponse, labelsResponse] = await Promise.all([
-        fetch(mappingsUrl),
-        fetch(labelsUrl),
+      // Load metadata to get categories information
+      const metadataResponse = await fetch(`${sitePath}/models/${modelID}/metadata.json`)
+      const metadata = await metadataResponse.json()
+
+      // Get category labels from metadata
+      const labels = metadata.categories?.[defaultCategory]
+      if (!labels || !Array.isArray(labels)) {
+        throw new Error(`Missing or invalid category labels for '${defaultCategory}' in metadata`)
+      }
+
+      // Load Arrow files in parallel
+      const [xResponse, yResponse, categoryResponse] = await Promise.all([
+        fetch(`${sitePath}/models/${modelID}/x.arrow`),
+        fetch(`${sitePath}/models/${modelID}/y.arrow`),
+        fetch(`${sitePath}/models/${modelID}/${defaultCategory}.arrow`),
       ])
 
-      const [mappingsBuffer, labelsBuffer] = await Promise.all([
-        mappingsResponse.arrayBuffer(),
-        labelsResponse.arrayBuffer(),
+      const [xBuffer, yBuffer, categoryBuffer] = await Promise.all([
+        xResponse.arrayBuffer(),
+        yResponse.arrayBuffer(),
+        categoryResponse.arrayBuffer(),
       ])
 
-      // Process mappings
-      const mappingsTable = readParquet(new Uint8Array(mappingsBuffer))
-      const mappingsArrowTable = tableFromIPC(mappingsTable.intoIPCStream())
+      // Convert Arrow buffers to tables
+      const xTable = tableFromIPC(new Uint8Array(xBuffer))
+      const yTable = tableFromIPC(new Uint8Array(yBuffer))
+      const categoryTable = tableFromIPC(new Uint8Array(categoryBuffer))
 
-      // Process labels
-      const labelsTable = readParquet(new Uint8Array(labelsBuffer))
-      const labelsArrowTable = tableFromIPC(labelsTable.intoIPCStream())
+      // Extract columns
+      const xColumn = xTable.getChild('x')
+      const yColumn = yTable.getChild('y')
+      const categoryColumn = categoryTable.getChild(defaultCategory)
 
-      // Extract x, y coordinates from mappings
-      const xColumn = mappingsArrowTable.getChild('x')
-      const yColumn = mappingsArrowTable.getChild('y')
-      if (!xColumn || !yColumn) {
-        throw new Error('Missing x or y columns in mappings.compressed.parquet')
+      if (!xColumn || !yColumn || !categoryColumn) {
+        throw new Error('Missing required columns in Arrow files')
       }
 
-      // Extract category index column from mappings
-      const categoryIdxColumnName = `${category}_idx`
-      const categoryIdxColumn = mappingsArrowTable.getChild(categoryIdxColumnName)
-      if (!categoryIdxColumn) {
-        throw new Error(`Missing ${categoryIdxColumnName} column in mappings.compressed.parquet`)
+      const numPoints = xTable.numRows
+
+      // Validate all tables have the same number of rows
+      if (yTable.numRows !== numPoints || categoryTable.numRows !== numPoints) {
+        throw new Error('Mismatched number of rows between Arrow files')
       }
 
-      // Extract category labels from labels.compressed.parquet
-      const categoryColumn = labelsArrowTable.getChild(category)
-      if (!categoryColumn) {
-        throw new Error(`Missing ${category} column in labels.compressed.parquet`)
-      }
-
-      // Extract category names (filter out null values)
-      const classNamesArray: string[] = []
-      for (let i = 0; i < labelsArrowTable.numRows; i++) {
-        const categoryValue = categoryColumn.get(i)
-        if (categoryValue !== null && categoryValue !== undefined) {
-          classNamesArray.push(categoryValue.toString())
-        }
-      }
-
-      const numPoints = mappingsArrowTable.numRows
-
-      // Create the final Float32Array with x, y, categoryIndex triplets
-      // Minimize copying by directly accessing Arrow data
-      const mappingsData = new Float32Array(numPoints * 3)
-      for (let i = 0; i < numPoints; i++) {
-        const idx = i * 3
-        mappingsData[idx] = xColumn.get(i) || 0 // x coordinate (int16 -> float32)
-        mappingsData[idx + 1] = yColumn.get(i) || 0 // y coordinate (int16 -> float32)
-        mappingsData[idx + 2] = categoryIdxColumn.get(i) || 0 // category index (int16 -> float32)
-      }
-
-      setTrainMappings(mappingsData)
-      setClassNames(classNamesArray)
+      // Set the Vector objects directly - no need for data transformation
+      setXData(xColumn)
+      setYData(yColumn)
+      setCategoryData(categoryColumn)
+      setCategoryLabels(labels)
 
       console.log('Loaded scatter plot data:', {
         numPoints,
-        numClasses: classNamesArray.length,
-        category: category,
-        classNames: classNamesArray.slice(0, 10), // Show first 10 for debugging
+        numCategories: labels.length,
+        category: defaultCategory,
+        xRange: [
+          Math.min(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
+          Math.max(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
+        ],
+        yRange: [
+          Math.min(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
+          Math.max(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
+        ],
+        categoryRange: [
+          Math.min(
+            ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
+          ),
+          Math.max(
+            ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
+          ),
+        ],
+        sampleLabels: labels.slice(0, 10), // Show first 10 for debugging
       })
     } catch (error) {
       console.error('Error loading scatter plot data:', error)
     } finally {
       setIsLoadingData(false)
     }
-  }, [sitePath, category])
+  }, [sitePath])
 
   useEffect(() => {
     console.log('App mounted')
@@ -486,7 +485,6 @@ function App() {
           component="main"
           sx={{
             flexGrow: 1,
-            p: 3,
             width: {
               sm: `calc(100% - ${sidebarOpen ? drawerWidth : isMobile ? 0 : miniDrawerWidth}px)`,
             },
@@ -496,7 +494,7 @@ function App() {
                 easing: theme.transitions.easing.sharp,
                 duration: theme.transitions.duration.leavingScreen,
               }),
-            minHeight: '100vh',
+            height: '100vh',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -505,14 +503,13 @@ function App() {
             <Box display="flex" justifyContent="center" alignItems="center" height="100%">
               <Typography>Loading scatter plot data...</Typography>
             </Box>
-          ) : trainMappings && classNames.length > 0 ? (
-            <Box>
-              <ScatterPlotWebGL
-                trainMappings={trainMappings}
-                classNames={classNames}
-                themeName="dark"
-              />
-            </Box>
+          ) : xData && yData && categoryData && categoryLabels.length > 0 ? (
+            <ScatterPlotWebGL
+              xData={xData}
+              yData={yData}
+              categoryData={categoryData}
+              categoryLabels={categoryLabels}
+            />
           ) : (
             <Box display="flex" justifyContent="center" alignItems="center" height="100%">
               <Typography>No data available</Typography>
