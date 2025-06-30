@@ -76,21 +76,21 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
   useEffect(() => {
     if (!containerRef.current || !canvasRef.current || !xData || !yData || !categoryData) return
 
-    console.log('Setting up ScatterPlotWebGL with categories:', {
-      numPoints: xData.length,
-      numCategories: categoryLabels.length,
-      categoryLabels,
-      categoryRange: [
-        Math.min(
-          ...(categoryData.data[0]?.values ||
-            Array.from({ length: categoryData.length }, (_, i) => categoryData.get(i) || 0))
-        ),
-        Math.max(
-          ...(categoryData.data[0]?.values ||
-            Array.from({ length: categoryData.length }, (_, i) => categoryData.get(i) || 0))
-        ),
-      ],
-    })
+    // console.log('Setting up ScatterPlotWebGL with categories:', {
+    //   numPoints: xData.length,
+    //   numCategories: categoryLabels.length,
+    //   categoryLabels,
+    //   categoryRange: [
+    //     Math.min(
+    //       ...(categoryData.data[0]?.values ||
+    //         Array.from({ length: categoryData.length }, (_, i) => categoryData.get(i) || 0))
+    //     ),
+    //     Math.max(
+    //       ...(categoryData.data[0]?.values ||
+    //         Array.from({ length: categoryData.length }, (_, i) => categoryData.get(i) || 0))
+    //     ),
+    //   ],
+    // })
 
     // Generate colors for each category
     const categoryColors = generateCategoryColors(categoryLabels.length)

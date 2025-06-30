@@ -11,7 +11,7 @@ mapper-train:
 	python src/cellspace/scripts/mapper.py train \
         data/scimilarity/embeddings.npy \
         web/public/models/scimilarity/ \
-        --num-embeddings 1000000
+        --num-embeddings 100000
 
 mapper-map:
 	python src/cellspace/scripts/mapper.py map \

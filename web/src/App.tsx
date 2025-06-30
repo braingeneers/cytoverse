@@ -61,6 +61,7 @@ function App() {
   const [categoryData, setCategoryData] = useState<Vector | null>(null)
   const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string>('tissue') // TODO: Add category selector UI
 
   const detectWebGPU = useCallback(async () => {
     try {
@@ -161,7 +162,7 @@ function App() {
     setIsLoadingData(true)
     try {
       const modelID = 'scimilarity'
-      const defaultCategory = 'tissue'
+      const defaultCategory = selectedCategory
 
       // Load metadata to get categories information
       const metadataResponse = await fetch(`${sitePath}/models/${modelID}/metadata.json`)
@@ -213,34 +214,34 @@ function App() {
       setCategoryData(categoryColumn)
       setCategoryLabels(labels)
 
-      console.log('Loaded scatter plot data:', {
-        numPoints,
-        numCategories: labels.length,
-        category: defaultCategory,
-        xRange: [
-          Math.min(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
-          Math.max(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
-        ],
-        yRange: [
-          Math.min(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
-          Math.max(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
-        ],
-        categoryRange: [
-          Math.min(
-            ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
-          ),
-          Math.max(
-            ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
-          ),
-        ],
-        sampleLabels: labels.slice(0, 10), // Show first 10 for debugging
-      })
+      // console.log('Loaded scatter plot data:', {
+      //   numPoints,
+      //   numCategories: labels.length,
+      //   category: defaultCategory,
+      //   xRange: [
+      //     Math.min(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
+      //     Math.max(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
+      //   ],
+      //   yRange: [
+      //     Math.min(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
+      //     Math.max(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
+      //   ],
+      //   categoryRange: [
+      //     Math.min(
+      //       ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
+      //     ),
+      //     Math.max(
+      //       ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
+      //     ),
+      //   ],
+      //   sampleLabels: labels.slice(0, 10), // Show first 10 for debugging
+      // })
     } catch (error) {
       console.error('Error loading scatter plot data:', error)
     } finally {
       setIsLoadingData(false)
     }
-  }, [sitePath])
+  }, [sitePath, selectedCategory])
 
   useEffect(() => {
     console.log('App mounted')
@@ -466,6 +467,31 @@ function App() {
             >
               {isRunning ? 'STOP' : 'RUN'}
             </Button>
+
+            {/* Dataset Statistics */}
+            <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              {xData && yData && categoryData ? (
+                <Box>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Cells:</strong> {xData.length.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Category:</strong> {selectedCategory}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Labels:</strong> {categoryLabels.length}
+                  </Typography>
+                </Box>
+              ) : isLoadingData ? (
+                <Typography variant="body2" color="text.secondary">
+                  Loading statistics...
+                </Typography>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No data loaded
+                </Typography>
+              )}
+            </Box>
           </Box>
 
           {/* Status and Progress */}
