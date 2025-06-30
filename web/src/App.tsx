@@ -10,6 +10,7 @@ import {
   Typography,
   IconButton,
   LinearProgress,
+  Link,
   useMediaQuery,
   Button,
   FormControl,
@@ -18,6 +19,7 @@ import {
   Radio,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
+import GitHubIcon from '@mui/icons-material/GitHub'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
@@ -464,6 +466,9 @@ function App() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               CellSpace
             </Typography>
+            <Link href="https://github.com/braingeneers/cellspace" target="_blank" underline="none">
+              <GitHubIcon />
+            </Link>
             <IconButton onClick={handleDrawerToggle}>
               <ChevronLeftIcon />
             </IconButton>
