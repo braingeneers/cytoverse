@@ -73,6 +73,10 @@ function App() {
       setHasWebGPU(false)
       setUseWebGPU(false)
     }
+
+    // REMIND: Remove once we have a stable WebGPU implementation
+    setHasWebGPU(false)
+    setUseWebGPU(false)
   }, [])
 
   // Function to check WebGPU support
