@@ -18,8 +18,8 @@ dependencies = [
     "zarr<3.0",
     "pytorch-lightning>=2.5.2",
     "pyarrow>=20.0.0",
-    "cellxgene>=1.3.0",
-    "cellxgene-census",
+    # "cellxgene>=1.3.0",
+    # "cellxgene-census",
 ]
 
 [dependency-groups]
@@ -31,6 +31,7 @@ dev = [
     "jupyter-console>=6.6.3",
     "netron>=8.3.9",
     "parquet-tools>=0.2.16",
+    "pytest>=8.0.0",
 ]
 
 [tool.uv.sources]

@@ -29,3 +29,30 @@ mapper-export:
 inspect:
 	parquet-tools inspect web/public/models/scimilarity/mappings.parquet
 	parquet-tools inspect web/public/models/scimilarity/mappings.parquet
+
+# IVFPQ commands
+test-milestone1:
+	python test_milestone1.py
+
+pq-train:
+	python src/cellspace/scripts/pq_train.py train \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/pq/ \
+		--m 64 \
+		--k 256 \
+		--max-vectors 10000 \
+		--n-iterations 30
+
+pq-train-full:
+	python src/cellspace/scripts/pq_train.py train \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/pq/ \
+		--m 64 \
+		--k 256 \
+		--n-iterations 50
+
+pq-test:
+	python src/cellspace/scripts/pq_train.py test \
+		web/public/models/scimilarity/pq/pq_model.pkl \
+		data/scimilarity/embeddings.npy \
+		--n-test 1000
