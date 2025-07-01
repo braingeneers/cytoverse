@@ -158,6 +158,35 @@ def train(
         else:
             logger.error("ONNX model outputs don't match PyTorch model!")
 
+    # Export codebooks and metadata for browser
+    logger.info("Exporting codebooks and metadata for browser...")
+
+    # Export codebooks as binary file
+    codebooks_path = output_dir / "codebooks.bin"
+    codebooks_array = pq.codebooks.data.cpu().numpy().astype(np.float32)
+    with open(codebooks_path, "wb") as f:
+        f.write(codebooks_array.tobytes())
+    logger.info(f"Saved codebooks to {codebooks_path}")
+
+    # Export metadata as JSON
+    metadata = {
+        "d": pq.d,
+        "m": pq.m,
+        "k": pq.k,
+        "d_sub": pq.d_sub,
+        "compression_ratio": (pq.d * 32) / (pq.m * 8),
+        "codebooks_shape": [pq.m, pq.k, pq.d_sub],
+        "codebooks_size": int(pq.m * pq.k * pq.d_sub),
+        "version": "1.0",
+    }
+
+    metadata_path = output_dir / "metadata.json"
+    import json
+
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logger.info(f"Saved metadata to {metadata_path}")
+
     logger.info("🎉 PQ training completed successfully!")
 
 
