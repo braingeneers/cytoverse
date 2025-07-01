@@ -56,3 +56,47 @@ pq-train-test:
 		web/public/models/scimilarity/pq/pq_model.pkl \
 		data/scimilarity/embeddings.npy \
 		--n-test 1000
+
+# IVF
+ivf-train:
+	python src/cellspace/scripts/ivfpq_train.py train-ivf \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/ivf/ \
+		--n-clusters 64 \
+		--max-vectors 10000 \
+		--n-iterations 30
+
+ivf-train-full:
+	python src/cellspace/scripts/ivfpq_train.py train-ivf \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/ivf/ \
+		--n-clusters 256 \
+		--n-iterations 50
+
+# IVFPQ
+ivfpq-train:
+	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/ivfpq/ \
+		--m 16 \
+		--k 256 \
+		--n-clusters 64 \
+		--max-vectors 10000 \
+		--pq-iterations 30 \
+		--ivf-iterations 30
+
+ivfpq-train-full:
+	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/ivfpq/ \
+		--m 64 \
+		--k 256 \
+		--n-clusters 256 \
+		--pq-iterations 50 \
+		--ivf-iterations 50
+
+ivfpq-test:
+	python src/cellspace/scripts/ivfpq_train.py test-trained-models \
+		web/public/models/scimilarity/ivfpq/ \
+		--embeddings-path data/scimilarity/embeddings.npy \
+		--n-test-vectors 1000

@@ -130,14 +130,6 @@ Visit `/pq_demo.html` for a self-contained demo:
 - Tests all core functionality
 - Performance benchmarks
 
-### Import Verification
-
-Visit `/pq_import_test.html` for basic import testing:
-
-- Verifies TypeScript module loading
-- Tests basic instantiation
-- Helpful for debugging import issues
-
 ## Development
 
 To work with the browser implementation:
