@@ -68,7 +68,7 @@ class ProductQuantizer(nn.Module):
         )
 
         logger.info(
-            f"Initialized ProductQuantizer: d={self.d}, m={self.m}, k={self.k}, d_sub={self.d_sub} for a compression ratio of {self.d * 32 / (self.m * self.k)}x"
+            f"Initialized ProductQuantizer: d={self.d}, m={self.m}, k={self.k}, d_sub={self.d_sub} for a compression ratio of {self.d * 32 / (self.m * 8)}x"
         )
 
         # Whether the quantizer has been trained
