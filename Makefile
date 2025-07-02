@@ -1,14 +1,23 @@
 test:
 	python -m pytest tests/ -v
 
-scimilarity-export:
-	python src/cellspace/scripts/scimilarity_export_cells.py \
+# SCimilarity
+scimilarity-export-model:
+	python src/cellspace/scripts/scimilarity_export.py model \
+	data/scimilarity/model_v1.1 \
+	web/public/models/scimilarity
+
+scimilarity-export-embeddings:
+	python src/cellspace/scripts/scimilarity_export.py embeddings \
 	data/scimilarity/model_v1.1/cellsearch \
 	data/scimilarity/ \
 	--labels tissue \
 	--labels prediction \
 	--labels study \
-	--num-cells 1000000
+	--validate \
+	--stratify \
+	--num-embeddings 100000
+	parquet-tools inspect data/scimilarity/labels.parquet
 
 mapper-train:
 	python src/cellspace/scripts/mapper.py train \
@@ -28,10 +37,6 @@ mapper-export:
 	python src/cellspace/scripts/mapper.py export \
         data/scimilarity/ \
         web/public/models/scimilarity/ 
-
-inspect:
-	parquet-tools inspect web/public/models/scimilarity/mappings.parquet
-	parquet-tools inspect web/public/models/scimilarity/mappings.parquet
 
 # PQ
 pq-train:

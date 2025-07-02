@@ -64,7 +64,7 @@ make pq-train-test
 
 - **Synthetic data (128D)**: 6.7% relative error, 85x compression
 - **Real embeddings (128D)**: 1.25% relative error, 43x compression
-- **SCimilarity config (512D)**: ~32x compression target
+- **SCimilarity config (128D)**: ~32x compression target
 - Training time: ~30 seconds for 1K vectors, 16 subquantizers
 - ONNX export: ✅ Validated, browser-ready
 
@@ -202,7 +202,7 @@ python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
 - ✅ Save/load round-trip validation
 - ✅ Error handling for edge cases
 - ✅ Performance validation with different cluster counts
-- ✅ High-dimensional data testing (512D)
+- ✅ High-dimensional data testing (128D)
 
 **Technical Implementation**:
 
@@ -273,18 +273,18 @@ python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
 
 ### Product Quantization Parameters
 
-For SCimilarity embeddings (512 dimensions):
+For SCimilarity embeddings (128 dimensions):
 
 | Parameter | Value | Description                |
 | --------- | ----- | -------------------------- |
-| d         | 512   | Embedding dimension        |
-| m         | 64    | Number of subquantizers    |
+| d         | 128   | Embedding dimension        |
+| m         | 16    | Number of subquantizers    |
 | k         | 256   | Centroids per subquantizer |
 | d_sub     | 8     | Subvector dimension (d/m)  |
 
 This configuration provides:
 
-- **Compression**: 32x (16KB → 512 bytes per vector)
+- **Compression**: 32x (4096 bits → 128 bits per vector)
 - **Memory per vector**: 64 bytes (64 × 8-bit codes)
 - **Search complexity**: O(m×k) = O(64×256) distance computations
 
