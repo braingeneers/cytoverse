@@ -22,6 +22,8 @@ from pathlib import Path
 import pickle
 import logging
 import json
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from .pq import ProductQuantizer
 from .ivf import InvertedFileIndex
@@ -382,3 +384,233 @@ class IVFPQ:
                 "is_trained": self.pq.is_trained,
             },
         }
+
+    def export_browser_assets(self, output_dir: Path) -> None:
+        """
+        Export complete IVFPQ model for browser consumption using Arrow format.
+
+        This creates:
+        1. Individual partition files (partition_*.arrow) with PQ codes and vector IDs
+        2. Centroid index file (centroids.arrow) with partition metadata
+        3. Browser-compatible metadata files
+
+        Args:
+            output_dir: Directory to save browser assets
+        """
+        if not self.is_trained:
+            raise RuntimeError("IVFPQ must be trained before exporting browser assets")
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Exporting browser assets to {output_dir}")
+
+        # 1. Export individual partition files
+        self._export_partition_files(output_dir)
+
+        # 2. Export centroid index with partition metadata
+        self._export_centroid_index(output_dir)
+
+        # 3. Export existing browser assets (PQ ONNX, codebooks, etc.)
+        self._export_pq_browser_assets(output_dir)
+
+        # 4. Export complete metadata
+        metadata_path = output_dir / "ivfpq_metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(self.export_metadata(), f, indent=2)
+
+        logger.info(f"Browser assets exported successfully to {output_dir}")
+
+    def _export_partition_files(self, output_dir: Path) -> None:
+        """Export each partition as a separate Arrow file."""
+        partitions_dir = output_dir / "partitions"
+        partitions_dir.mkdir(exist_ok=True)
+
+        for partition_id, partition_data in self.partition_data.items():
+            if partition_data["size"] > 0:  # Only export non-empty partitions
+                # Convert lists back to numpy arrays for processing
+                vector_ids = np.array(partition_data["vector_ids"])
+                pq_codes = np.array(partition_data["pq_codes"])
+
+                # Store PQ codes as individual columns (code_0, code_1, ..., code_m-1)
+                table_data = {"vector_id": vector_ids}
+
+                # Add each PQ code as a separate column
+                for i in range(self.m):
+                    table_data[f"code_{i}"] = pq_codes[:, i]
+
+                # Create Arrow table with partition data
+                table = pa.table(table_data)
+
+                # Use zero-padded naming convention for proper sorting
+                partition_file = partitions_dir / f"partition_{partition_id:04d}.arrow"
+
+                # Write Arrow file
+                with pa.OSFile(str(partition_file), "wb") as sink:
+                    with pa.RecordBatchFileWriter(sink, table.schema) as writer:
+                        writer.write_table(table)
+
+        logger.info(
+            f"Exported {len([p for p in self.partition_data.values() if p['size'] > 0])} partition files to {partitions_dir}"
+        )
+
+    def _export_centroid_index(self, output_dir: Path) -> None:
+        """Export centroid index with partition metadata."""
+        # Prepare centroid data with metadata
+        centroids = self.ivf.coarse_centroids.detach().cpu().numpy()
+
+        # Create partition metadata
+        partition_ids = []
+        partition_sizes = []
+        partition_files = []
+
+        for partition_id in range(self.n_clusters):
+            partition_ids.append(partition_id)
+
+            if partition_id in self.partition_data:
+                partition_sizes.append(self.partition_data[partition_id]["size"])
+                partition_files.append(f"partitions/partition_{partition_id:04d}.arrow")
+            else:
+                # Empty partition
+                partition_sizes.append(0)
+                partition_files.append(None)
+
+        # Create Arrow table
+        # Store centroids as a nested array (list of coordinates)
+        centroid_lists = [centroid.tolist() for centroid in centroids]
+
+        table = pa.table(
+            {
+                "centroid_id": partition_ids,
+                "centroid_coords": centroid_lists,
+                "partition_size": partition_sizes,
+                "partition_file": partition_files,
+            }
+        )
+
+        # Export centroid index as Arrow file
+        centroids_file = output_dir / "centroids.arrow"
+        with pa.OSFile(str(centroids_file), "wb") as sink:
+            with pa.RecordBatchFileWriter(sink, table.schema) as writer:
+                writer.write_table(table)
+
+        logger.info(f"Exported centroid index to {centroids_file}")
+
+    def _export_pq_browser_assets(self, output_dir: Path) -> None:
+        """Export PQ-specific browser assets."""
+        # Export PQ ONNX model
+        onnx_path = output_dir / "pq_model.onnx"
+        self.pq.export_onnx(onnx_path, batch_size=-1)
+
+        # Export codebooks as binary file (using existing method)
+        codebooks_path = output_dir / "codebooks.bin"
+        codebooks_np = self.pq.codebooks.detach().cpu().numpy()
+        codebooks_np.astype(np.float32).tofile(codebooks_path)
+
+        # Export PQ metadata
+        pq_metadata = {
+            "d": self.d,
+            "m": self.m,
+            "k": self.k,
+            "d_sub": self.pq.d_sub,
+            "codebooks_shape": list(codebooks_np.shape),
+            "is_trained": self.pq.is_trained,
+        }
+
+        pq_metadata_path = output_dir / "pq_metadata.json"
+        with open(pq_metadata_path, "w") as f:
+            json.dump(pq_metadata, f, indent=2)
+
+        logger.info(f"Exported PQ browser assets (ONNX, codebooks, metadata)")
+
+    @classmethod
+    def load_from_browser_assets(cls, assets_dir: Path) -> "IVFPQ":
+        """
+        Load IVFPQ model from browser assets (Arrow format).
+
+        This is primarily for testing the browser export format.
+        For production use, prefer the standard pickle format.
+
+        Args:
+            assets_dir: Directory containing browser assets
+
+        Returns:
+            Loaded IVFPQ instance
+        """
+        # Load metadata
+        metadata_path = assets_dir / "ivfpq_metadata.json"
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+
+        ivfpq_meta = metadata["ivfpq"]
+
+        # Create instance
+        ivfpq = cls(
+            d=ivfpq_meta["d"],
+            m=ivfpq_meta["m"],
+            k=ivfpq_meta["k"],
+            n_clusters=ivfpq_meta["n_clusters"],
+        )
+
+        # Load centroids from Arrow format
+        centroids_file = assets_dir / "centroids.arrow"
+        with pa.OSFile(str(centroids_file), "rb") as source:
+            with pa.RecordBatchFileReader(source) as reader:
+                centroids_table = reader.read_all()
+        centroids_df = centroids_table.to_pandas()
+
+        # Reconstruct centroid coordinates
+        centroids = np.array(centroids_df["centroid_coords"].tolist())
+
+        # Create IVF index (minimal reconstruction for testing)
+        ivfpq.ivf = InvertedFileIndex(d=ivfpq.d, n_clusters=ivfpq.n_clusters)
+        ivfpq.ivf.coarse_centroids = torch.nn.Parameter(
+            torch.from_numpy(centroids).float()
+        )
+        ivfpq.ivf.is_trained = True
+
+        # Load PQ model from pickle (browser assets don't include full PQ state)
+        # This is a limitation - for full reconstruction we'd need the pickle files
+        logger.warning("Loading from browser assets provides limited functionality")
+        logger.warning("For full model loading, use IVFPQ.load() with pickle files")
+
+        # Load partition data from Arrow files
+        ivfpq._load_partition_data_from_arrow(assets_dir)
+
+        ivfpq.is_trained = True
+        return ivfpq
+
+    def _load_partition_data_from_arrow(self, assets_dir: Path) -> None:
+        """Load partition data from Arrow files."""
+        partitions_dir = assets_dir / "partitions"
+        self.partition_data = {}
+
+        # Load centroid index to get partition info
+        centroids_file = assets_dir / "centroids.arrow"
+        with pa.OSFile(str(centroids_file), "rb") as source:
+            with pa.RecordBatchFileReader(source) as reader:
+                centroids_table = reader.read_all()
+        centroids_df = centroids_table.to_pandas()
+
+        for _, row in centroids_df.iterrows():
+            partition_id = row["centroid_id"]
+            partition_size = row["partition_size"]
+            partition_file = row["partition_file"]
+
+            if partition_size > 0 and partition_file is not None:
+                # Load partition data
+                partition_path = assets_dir / partition_file
+                if partition_path.exists():
+                    with pa.OSFile(str(partition_path), "rb") as source:
+                        with pa.RecordBatchFileReader(source) as reader:
+                            partition_table = reader.read_all()
+                    partition_df = partition_table.to_pandas()
+
+                    # Reconstruct PQ codes array from separate columns
+                    pq_codes = np.zeros((len(partition_df), self.m), dtype=np.uint8)
+                    for i in range(self.m):
+                        pq_codes[:, i] = partition_df[f"code_{i}"].values
+
+                    self.partition_data[partition_id] = {
+                        "vector_ids": partition_df["vector_id"].values.tolist(),
+                        "pq_codes": pq_codes.tolist(),
+                        "size": len(partition_df),
+                    }

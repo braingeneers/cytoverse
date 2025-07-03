@@ -2,8 +2,8 @@
 Product Quantization (PQ) implementation in PyTorch.
 
 This module implements Product Quantization for vector compression and approximate
-similarity search. It supports training on embedding vectors, ONNX export for
-browser inference, and efficient encoding/decoding operations.
+similarity search. It supports training on embedding vectors and efficient
+encoding/decoding operations.
 
 Based on the paper "Product Quantization for Nearest Neighbor Search" by Jégou et al.
 """
@@ -11,10 +11,10 @@ Based on the paper "Product Quantization for Nearest Neighbor Search" by Jégou 
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Optional, Tuple, List
 from pathlib import Path
 import pickle
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -146,16 +146,13 @@ class ProductQuantizer(nn.Module):
 
         return decoded
 
-    def train_pq(
-        self, vectors: torch.Tensor, n_iterations: int = 50, verbose: bool = True
-    ) -> None:
+    def train_pq(self, vectors: torch.Tensor, n_iterations: int = 50) -> None:
         """
         Train the product quantizer using k-means clustering.
 
         Args:
             vectors: Training vectors of shape [N, d]
             n_iterations: Number of k-means iterations per subspace
-            verbose: Whether to print training progress
         """
         if vectors.shape[1] != self.d:
             raise ValueError(
@@ -164,26 +161,29 @@ class ProductQuantizer(nn.Module):
 
         n_vectors = vectors.shape[0]
 
-        if verbose:
-            logger.info(f"Training PQ with {n_vectors} vectors")
-            logger.info(f"Parameters: d={self.d}, m={self.m}, k={self.k}")
-
         # Split vectors into subvectors
         vectors_split = vectors.view(n_vectors, self.m, self.d_sub)
 
         with torch.no_grad():
-            for i in range(self.m):
-                if verbose:
-                    logger.info(f"Training subquantizer {i+1}/{self.m}")
+            # Progress bar for subquantizers
+            subquantizer_pbar = tqdm(range(self.m), desc="Training subquantizers")
 
+            for i in subquantizer_pbar:
                 sub_vectors = vectors_split[:, i]  # [N, d_sub]
 
                 # Initialize centroids randomly from data points
                 perm = torch.randperm(n_vectors)[: self.k]
                 centroids = sub_vectors[perm].clone()  # [k, d_sub]
 
+                # Progress bar for k-means iterations
+                iteration_pbar = tqdm(
+                    range(n_iterations),
+                    desc=f"K-means subspace {i+1}/{self.m}",
+                    leave=False,
+                )
+
                 # K-means iterations
-                for iteration in range(n_iterations):
+                for iteration in iteration_pbar:
                     # Assign points to nearest centroids using broadcasting
                     sub_vectors_expanded = sub_vectors.unsqueeze(1)  # [N, 1, d_sub]
                     centroids_expanded = centroids.unsqueeze(0)  # [1, k, d_sub]
@@ -205,22 +205,24 @@ class ProductQuantizer(nn.Module):
                     centroid_shift = torch.norm(centroids - new_centroids).item()
                     centroids = new_centroids
 
-                    if verbose and (iteration + 1) % 10 == 0:
-                        logger.info(
-                            f"  Iteration {iteration+1}: centroid shift = {centroid_shift:.6f}"
-                        )
+                    # Update progress bar with convergence info
+                    iteration_pbar.set_postfix(shift=f"{centroid_shift:.6f}")
 
                     if centroid_shift < 1e-6:
-                        if verbose:
-                            logger.info(f"  Converged after {iteration+1} iterations")
+                        iteration_pbar.set_description(
+                            f"K-means subspace {i+1}/{self.m} (converged)"
+                        )
+                        iteration_pbar.close()
                         break
+                else:
+                    iteration_pbar.close()
 
                 # Store learned centroids
                 self.codebooks.data[i] = centroids
 
+            subquantizer_pbar.close()
+
         self.is_trained = True
-        if verbose:
-            logger.info("PQ training completed")
 
     def compute_reconstruction_error(self, vectors: torch.Tensor) -> float:
         """
@@ -271,40 +273,3 @@ class ProductQuantizer(nn.Module):
         quantizer.is_trained = save_dict["is_trained"]
 
         return quantizer
-
-    def export_onnx(self, output_path: Path, batch_size: int = 1) -> None:
-        """
-        Export the trained quantizer to ONNX format for browser inference.
-
-        Args:
-            output_path: Path to save the ONNX model
-            batch_size: Batch size for the exported model (use -1 for dynamic)
-        """
-        if not self.is_trained:
-            raise RuntimeError("Cannot export untrained quantizer")
-
-        self.eval()
-
-        # Create dummy input
-        if batch_size == -1:
-            dummy_input = torch.randn(1, self.d)
-            dynamic_axes = {"input": {0: "batch_size"}, "output": {0: "batch_size"}}
-        else:
-            dummy_input = torch.randn(batch_size, self.d)
-            dynamic_axes = None
-
-        # Export to ONNX
-        torch.onnx.export(
-            self,
-            dummy_input,
-            output_path,
-            export_params=True,
-            opset_version=14,
-            do_constant_folding=True,
-            input_names=["input"],
-            output_names=["output"],
-            dynamic_axes=dynamic_axes,
-            verbose=False,
-        )
-
-        logger.info(f"PQ model exported to {output_path}")

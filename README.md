@@ -31,7 +31,7 @@ uv sync
 Select a stratified subset of 1M cells from the scimilarity tiledb, export their embeddings, train a parametric umap model, export it as onnx and save the mappings and labels in compressed arrow files for the web app to render:
 
 ```
-make scimilarity-export mapper-train mapper-map mapper-export
+make scimilarity-export umap-train umap-map umap-export
 ```
 
 Verify that web/public/models/scimilarity is populated
@@ -40,7 +40,7 @@ Verify that web/public/models/scimilarity is populated
 ❯ ls web/public/models/scimilarity
 embedder.genes   metadata.json    tissue.arrow
 embedder.onnx    prediction.arrow x.arrow
-mapper.onnx      study.arrow      y.arrow
+umap.onnx      study.arrow      y.arrow
 ```
 
 Install web app dependencies and run local dev server:
@@ -50,6 +50,14 @@ cd web
 npm install
 npm run dev
 ```
+
+## Terminology
+
+Vector IDs: Generic id for a vector which in our case is a sample id used to get back to the original sample and/or related annotations/labels.
+
+Partition: Subset of vectors or samples. There could be many 'clusters' in a partition. Partition is used in the IVF implementations. A sample can only be in a single partition (but it 'could' be in multiple clusters or neighborhoods)
+
+Clusters: Group of vectors/samples that somehow go together. Might be from multiple partitions. Similar to a neighborhood in fuziness.
 
 ## References
 

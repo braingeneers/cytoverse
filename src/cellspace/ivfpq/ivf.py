@@ -1,9 +1,7 @@
 """
-Inverted File Index (IVF) implementation for coarse quantization.
+Inverted File Index (IVF) implementation for vector partitioning.
 
-This module implements the IVF component of IVFPQ for partitioning large datasets
-into manageable chunks using coarse quantization. Each vector is assigned to one
-of n_clusters partitions based on proximity to coarse centroids.
+This module implements the IVF component of IVFPQ for partitioning large vector datasets into manageable chunks. Each vector is assigned to one of n_partitions partitions based on proximity to the partition centroids.
 
 The IVF index enables efficient approximate nearest neighbor search by:
 1. Assigning query vectors to the most promising partitions
@@ -27,44 +25,44 @@ logger = logging.getLogger(__name__)
 
 class InvertedFileIndex(nn.Module):
     """
-    Inverted File Index for coarse quantization and dataset partitioning.
+    Inverted File Index for dataset partitioning.
 
-    The IVF index partitions vectors into clusters using k-means clustering,
-    creating an inverted index where each cluster contains a list of vector IDs.
+    The IVF index partitions vectors using k-means clustering,
+    creating an inverted index where each partition contains a list of vector IDs.
     This enables efficient nearest neighbor search by constraining search to
-    the most relevant partitions.
+    the most relevant partition.
 
     Args:
         d: Input vector dimension
-        n_clusters: Number of coarse clusters (partitions)
+        n_partitions: Number of partitions
 
     Training Process:
-    1. Run k-means clustering on the dataset to find coarse centroids
-    2. Assign each vector to its nearest coarse centroid
-    3. Build inverted lists mapping cluster_id -> [vector_ids]
+    1. Run k-means clustering on the dataset to find centroids
+    2. Assign each vector to its nearest centroid
+    3. Build inverted lists mapping partition_id -> [vector_ids]
 
     Search Process:
-    1. Find nearest coarse centroids for query vector
+    1. Find nearest centroids for query vector
     2. Search only within those partitions
     3. Rank results using refined distance computation
     """
 
-    def __init__(self, d: int, n_clusters: int):
+    def __init__(self, d: int, n_partitions: int):
         super().__init__()
 
         self.d = d  # Input dimension
-        self.n_clusters = n_clusters  # Number of coarse clusters
+        self.n_partitions = n_partitions  # Number of partitions
 
-        # Coarse centroids: [n_clusters, d]
-        self.coarse_centroids = nn.Parameter(
-            torch.randn(n_clusters, d), requires_grad=False
+        # Centroids: [n_partitions, d]
+        self.centroids = nn.Parameter(
+            torch.randn(n_partitions, d), requires_grad=False
         )
 
-        # Inverted lists: cluster_id -> list of vector indices
+        # Inverted lists: partition_id -> list of vector indices
         # This will be populated during training
         self.inverted_lists = None
 
-        # Vector assignments: vector_id -> cluster_id
+        # Vector assignments: vector_id -> partition_id
         # This helps with updates and debugging
         self.assignments = None
 
@@ -72,13 +70,13 @@ class InvertedFileIndex(nn.Module):
         self.is_trained = False
 
         logger.info(
-            f"Initialized InvertedFileIndex: d={self.d}, n_clusters={self.n_clusters}"
+            f"Initialized InvertedFileIndex: d={self.d}, n_partitions={self.n_partitions}"
         )
 
     def train_ivf(
         self,
         vectors: torch.Tensor,
-        vector_ids: Optional[torch.Tensor] = None,
+        vector_ids: torch.Tensor,
         n_iterations: int = 50,
         verbose: bool = True,
     ) -> None:
@@ -92,10 +90,6 @@ class InvertedFileIndex(nn.Module):
             verbose: Whether to print training progress
         """
         n_vectors = vectors.shape[0]
-        device = vectors.device
-
-        if vector_ids is None:
-            vector_ids = torch.arange(n_vectors, device=device)
 
         if len(vector_ids) != n_vectors:
             raise ValueError(
@@ -104,7 +98,7 @@ class InvertedFileIndex(nn.Module):
 
         if verbose:
             logger.info(
-                f"Training IVF index on {n_vectors} vectors with {self.n_clusters} clusters"
+                f"Training IVF index on {n_vectors} vectors with {self.n_partitions} partitions"
             )
 
         # Initialize centroids using k-means++
@@ -141,19 +135,18 @@ class InvertedFileIndex(nn.Module):
         self.is_trained = True
 
         if verbose:
-            self._print_cluster_stats()
+            self._print_partition_stats()
 
     def _init_centroids_kmeans_plus_plus(self, vectors: torch.Tensor) -> None:
         """Initialize centroids using k-means++ algorithm for better convergence."""
         n_vectors, d = vectors.shape
-        device = vectors.device
 
         # Choose first centroid randomly
-        first_idx = torch.randint(0, n_vectors, (1,), device=device)
+        first_idx = torch.randint(0, n_vectors, (1,))
         centroids = vectors[first_idx].clone()
 
         # Choose remaining centroids with probability proportional to squared distance
-        for i in range(1, self.n_clusters):
+        for i in range(1, self.n_partitions):
             # Compute distances to nearest existing centroids
             distances = torch.cdist(vectors, centroids).min(dim=1)[0]
 
@@ -165,12 +158,12 @@ class InvertedFileIndex(nn.Module):
             next_idx = torch.multinomial(probabilities, 1)
             centroids = torch.cat([centroids, vectors[next_idx]], dim=0)
 
-        self.coarse_centroids.data = centroids
+        self.centroids.data = centroids
 
     def _assign_vectors(self, vectors: torch.Tensor) -> torch.Tensor:
-        """Assign vectors to nearest coarse centroids."""
-        # Compute distances to all coarse centroids
-        distances = torch.cdist(vectors, self.coarse_centroids)  # [N, n_clusters]
+        """Assign vectors to nearest centroids."""
+        # Compute distances to all centroids
+        distances = torch.cdist(vectors, self.centroids)  # [N, n_partitions]
 
         # Find nearest centroid for each vector
         assignments = torch.argmin(distances, dim=1)  # [N]
@@ -180,39 +173,39 @@ class InvertedFileIndex(nn.Module):
     def _update_centroids(
         self, vectors: torch.Tensor, assignments: torch.Tensor
     ) -> None:
-        """Update coarse centroids based on current assignments."""
-        for cluster_id in range(self.n_clusters):
-            mask = assignments == cluster_id
+        """Update centroids based on current assignments."""
+        for partition_id in range(self.n_partitions):
+            mask = assignments == partition_id
             if mask.sum() > 0:
                 # Update centroid to mean of assigned vectors
-                self.coarse_centroids.data[cluster_id] = vectors[mask].mean(dim=0)
-            # If no vectors assigned to this cluster, keep the current centroid
+                self.centroids.data[partition_id] = vectors[mask].mean(dim=0)
+            # If no vectors assigned to this partition, keep the current centroid
 
     def _build_inverted_lists(
         self, vector_ids: torch.Tensor, assignments: torch.Tensor
     ) -> None:
-        """Build inverted lists mapping cluster_id -> [vector_ids]."""
+        """Build inverted lists mapping partition_id -> [vector_ids]."""
         self.inverted_lists = {}
 
-        for cluster_id in range(self.n_clusters):
-            mask = assignments == cluster_id
-            cluster_vector_ids = vector_ids[mask].cpu().numpy().tolist()
-            self.inverted_lists[cluster_id] = cluster_vector_ids
+        for partition_id in range(self.n_partitions):
+            mask = assignments == partition_id
+            partition_vector_ids = vector_ids[mask].cpu().numpy().tolist()
+            self.inverted_lists[partition_id] = partition_vector_ids
 
-    def _print_cluster_stats(self) -> None:
-        """Print statistics about cluster sizes."""
-        cluster_sizes = [len(self.inverted_lists[i]) for i in range(self.n_clusters)]
+    def _print_partition_stats(self) -> None:
+        """Print statistics about partition sizes."""
+        partition_sizes = [len(self.inverted_lists[i]) for i in range(self.n_partitions)]
 
-        logger.info(f"Cluster size statistics:")
-        logger.info(f"  Min: {min(cluster_sizes)}")
-        logger.info(f"  Max: {max(cluster_sizes)}")
-        logger.info(f"  Mean: {np.mean(cluster_sizes):.1f}")
-        logger.info(f"  Std: {np.std(cluster_sizes):.1f}")
+        logger.info(f"Partition size statistics:")
+        logger.info(f"  Min: {min(partition_sizes)}")
+        logger.info(f"  Max: {max(partition_sizes)}")
+        logger.info(f"  Mean: {np.mean(partition_sizes):.1f}")
+        logger.info(f"  Std: {np.std(partition_sizes):.1f}")
 
-        # Check for empty clusters
-        empty_clusters = sum(1 for size in cluster_sizes if size == 0)
-        if empty_clusters > 0:
-            logger.warning(f"Found {empty_clusters} empty clusters")
+        # Check for empty partitions
+        empty_partitions = sum(1 for size in partition_sizes if size == 0)
+        if empty_partitions > 0:
+            logger.warning(f"Found {empty_partitions} empty partitions  (out of {self.n_partitions})")
 
     def search_partitions(
         self, query_vectors: torch.Tensor, n_probe: int = 1
@@ -232,20 +225,20 @@ class InvertedFileIndex(nn.Module):
 
         n_queries = query_vectors.shape[0]
 
-        # Compute distances to all coarse centroids
+        # Compute distances to all centroids
         distances = torch.cdist(
-            query_vectors, self.coarse_centroids
-        )  # [N_queries, n_clusters]
+            query_vectors, self.centroids
+        )  # [N_queries, n_partitions]
 
         # Find top-k nearest centroids for each query
-        _, top_clusters = torch.topk(
-            distances, k=min(n_probe, self.n_clusters), dim=1, largest=False
+        _, top_partitions = torch.topk(
+            distances, k=min(n_probe, self.n_partitions), dim=1, largest=False
         )
 
         # Convert to list of lists
         partition_lists = []
         for i in range(n_queries):
-            partitions = top_clusters[i].cpu().numpy().tolist()
+            partitions = top_partitions[i].cpu().numpy().tolist()
             partition_lists.append(partitions)
 
         return partition_lists
@@ -263,29 +256,29 @@ class InvertedFileIndex(nn.Module):
         if not self.is_trained:
             raise RuntimeError("IVF index must be trained before accessing partitions")
 
-        if partition_id < 0 or partition_id >= self.n_clusters:
+        if partition_id < 0 or partition_id >= self.n_partitions:
             raise ValueError(
-                f"partition_id {partition_id} out of range [0, {self.n_clusters})"
+                f"partition_id {partition_id} out of range [0, {self.n_partitions})"
             )
 
         return self.inverted_lists[partition_id]
 
-    def get_cluster_stats(self) -> dict:
-        """Get statistics about the cluster distribution."""
+    def get_partition_stats(self) -> dict:
+        """Get statistics about the partitions distribution."""
         if not self.is_trained:
             raise RuntimeError("IVF index must be trained to get statistics")
 
-        cluster_sizes = [len(self.inverted_lists[i]) for i in range(self.n_clusters)]
+        partition_sizes = [len(self.inverted_lists[i]) for i in range(self.n_partitions)]
 
         return {
-            "n_clusters": self.n_clusters,
-            "total_vectors": sum(cluster_sizes),
-            "min_size": min(cluster_sizes),
-            "max_size": max(cluster_sizes),
-            "mean_size": np.mean(cluster_sizes),
-            "std_size": np.std(cluster_sizes),
-            "empty_clusters": sum(1 for size in cluster_sizes if size == 0),
-            "cluster_sizes": cluster_sizes,
+            "n_partitions": self.n_partitions,
+            "total_vectors": sum(partition_sizes),
+            "min_size": min(partition_sizes),
+            "max_size": max(partition_sizes),
+            "mean_size": np.mean(partition_sizes),
+            "std_size": np.std(partition_sizes),
+            "empty_partitions": sum(1 for size in partition_sizes if size == 0),
+            "partition_sizes": partition_sizes,
         }
 
     def save(self, path: Path) -> None:
@@ -295,8 +288,8 @@ class InvertedFileIndex(nn.Module):
 
         save_dict = {
             "d": self.d,
-            "n_clusters": self.n_clusters,
-            "coarse_centroids": self.coarse_centroids.data.cpu(),
+            "n_partitions": self.n_partitions,
+            "centroids": self.centroids.data.cpu(),
             "inverted_lists": self.inverted_lists,
             "assignments": (
                 self.assignments.cpu() if self.assignments is not None else None
@@ -315,8 +308,8 @@ class InvertedFileIndex(nn.Module):
         with open(path, "rb") as f:
             save_dict = pickle.load(f)
 
-        ivf = cls(save_dict["d"], save_dict["n_clusters"])
-        ivf.coarse_centroids.data = save_dict["coarse_centroids"]
+        ivf = cls(save_dict["d"], save_dict["n_partitions"])
+        ivf.centroids.data = save_dict["centroids"]
         ivf.inverted_lists = save_dict["inverted_lists"]
         ivf.assignments = save_dict["assignments"]
         ivf.is_trained = save_dict["is_trained"]
@@ -329,12 +322,12 @@ class InvertedFileIndex(nn.Module):
         if not self.is_trained:
             raise RuntimeError("Cannot export untrained IVF index")
 
-        stats = self.get_cluster_stats()
+        stats = self.get_partition_stats()
 
         return {
             "d": self.d,
-            "n_clusters": self.n_clusters,
+            "n_partitions": self.n_partitions,
             "is_trained": self.is_trained,
-            "cluster_stats": stats,
-            "coarse_centroids_shape": list(self.coarse_centroids.shape),
+            "partition_stats": stats,
+            "centroids_shape": list(self.centroids.shape),
         }

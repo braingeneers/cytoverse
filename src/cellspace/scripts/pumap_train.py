@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import typer
 import onnxruntime as ort
-from umap_pytorch import PUMAP
+import umap_pytorch
 import anndata as ad
 import scanpy as sc
 from tqdm import tqdm
@@ -56,7 +56,7 @@ def train(
     embeddings = embeddings[:num_embeddings]
 
     # Create and fit the model
-    model = PUMAP(
+    model = umap_pytorch.PUMAP(
         encoder=None,  # nn.Module, None for default
         decoder=None,  # nn.Module, True for default, None for encoder only
         n_neighbors=10,
@@ -76,7 +76,8 @@ def train(
     model.fit(torch.from_numpy(embeddings))
 
     # Export to ONNX
-    model_output_path = output_path / "mapper.onnx"
+    model_output_path = output_path / "model.onnx"
+    model_output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         model.model.encoder.encoder,
         torch.zeros(1, embeddings.shape[1]),
@@ -115,7 +116,7 @@ def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
 
 @app.command()
 def map(
-    model_path: Path = typer.Argument(..., help="Path to mapper.onnx"),
+    model_path: Path = typer.Argument(..., help="Path to model.onnx"),
     sample_embeddings_path: Path = typer.Argument(
         ..., help="Path to sample-embeddings.npy file"
     ),
@@ -182,6 +183,7 @@ def map(
 
     # Save raw mappings as a numpy file
     mappings_path = output_path / "mappings.npy"
+    mappings_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(mappings_path, mappings)
     typer.echo(f"Saved raw float mappings to {mappings_path}")
 
@@ -210,7 +212,7 @@ def export(
     typer.echo(f"Exporting data from {input_path} to {output_path}")
 
     # Create output directory if it doesn't exist
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Load mappings.npy
     mappings_file = input_path / "mappings.npy"

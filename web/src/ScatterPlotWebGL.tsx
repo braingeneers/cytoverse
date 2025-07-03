@@ -169,10 +169,19 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     }
 
     // Draw the initial training points
-    scatterplot.draw(initialColumnData)
-    isInitializedRef.current = true
-
-    console.log('Drew', numPoints, 'training points with', categoryColors.length, 'category colors')
+    const drawInitialData = async () => {
+      // REMIND: Still getting duplicate draw calls
+      await scatterplot.draw(initialColumnData)
+      isInitializedRef.current = true
+      console.log(
+        'Drew',
+        numPoints,
+        'training points with',
+        categoryColors.length,
+        'category colors'
+      )
+    }
+    drawInitialData()
 
     // Handle resize
     const handleResize = () => {
@@ -272,17 +281,19 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     }
 
     // Redraw all points (training + test)
-    scatterplot.draw(columnData)
-
-    console.log(
-      'Redrew all points:',
-      allX.length,
-      'total (',
-      numPoints,
-      'training +',
-      xTestData.length,
-      'test)'
-    )
+    const redrawAllData = async () => {
+      await scatterplot.draw(columnData)
+      console.log(
+        'Redrew all points:',
+        allX.length,
+        'total (',
+        numPoints,
+        'training +',
+        xTestData.length,
+        'test)'
+      )
+    }
+    redrawAllData()
   }, [xTestData, yTestData, xTrainData, yTrainData, categoryData, categoryLabels])
 
   // Setup the ref object for parent component

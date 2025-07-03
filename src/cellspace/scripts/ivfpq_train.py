@@ -45,13 +45,37 @@ app = typer.Typer(
 )
 
 
+def _load_embeddings(
+    embeddings_path: Path, max_vectors: Optional[int] = None
+) -> tuple[torch.Tensor, int]:
+    """Load embeddings from file and return as tensor with dimension."""
+    logger.info(f"Loading embeddings from {embeddings_path}")
+
+    embeddings = np.load(embeddings_path)
+    logger.info(
+        f"Loaded {embeddings.shape[0]} embeddings of dimension {embeddings.shape[1]} from .npy file"
+    )
+
+    # Limit number of vectors if specified
+    if max_vectors is not None and embeddings.shape[0] > max_vectors:
+        logger.info(f"Using random subset of {max_vectors} vectors for training")
+        indices = np.random.choice(embeddings.shape[0], max_vectors, replace=False)
+        embeddings = embeddings[indices]
+
+    # Convert to torch tensor
+    embeddings_tensor = torch.from_numpy(embeddings.astype(np.float32))
+    d = embeddings_tensor.shape[1]
+
+    return embeddings_tensor, d
+
+
 @app.command()
-def train_pq(
+def pq_train(
     embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings file (.npy or .parquet)", exists=True
+        ..., help="Path to embeddings.npy", exists=True
     ),
     output_dir: Path = typer.Argument(
-        ..., help="Output directory for trained model and exports"
+        ..., help="Output directory for trained model and codebooks"
     ),
     m: int = typer.Option(
         64, help="Number of subquantizers (must divide embedding dimension)"
@@ -64,10 +88,6 @@ def train_pq(
     ),
     n_iterations: int = typer.Option(
         50, help="Number of k-means iterations per subquantizer"
-    ),
-    export_onnx: bool = typer.Option(True, help="Export trained model to ONNX format"),
-    test_reconstruction: bool = typer.Option(
-        True, help="Test reconstruction error on a subset of data"
     ),
 ) -> None:
     """
@@ -82,87 +102,137 @@ def train_pq(
 
     # Create and train PQ model
     pq = ProductQuantizer(d=d, m=m, k=k)
-    pq.train_pq(embeddings_tensor, n_iterations=n_iterations, verbose=True)
-
-    # Save trained model
-    model_path = output_dir / "pq_model.pkl"
-    pq.save(model_path)
-    logger.info(f"Saved PQ model to {model_path}")
-
-    # Export ONNX model
-    if export_onnx:
-        onnx_path = output_dir / "pq_model.onnx"
-        pq.export_onnx(onnx_path, batch_size=-1)
-
-        # Export codebooks for browser decoding
-        _export_browser_assets(pq, output_dir)
+    pq.train_pq(embeddings_tensor, n_iterations=n_iterations)
 
     # Test reconstruction error
-    if test_reconstruction:
-        _test_pq_reconstruction(pq, embeddings_tensor)
+    _test_pq_reconstruction(pq, embeddings_tensor)
+
+    # Export ONNX model
+    onnx_path = output_dir / "model.onnx"
+    pq.eval()
+    torch.onnx.export(
+        pq,
+        torch.zeros(1, pq.d),
+        onnx_path,
+        export_params=True,
+        opset_version=14,
+        do_constant_folding=True,
+        input_names=["input"],
+        output_names=["output"],
+        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+        verbose=False,
+    )
+    logger.info(f"PQ model exported to {onnx_path}")
+
+    # Export codebooks for browser decoding
+    codebooks_path = output_dir / "codebooks.bin"
+    codebooks_np = pq.codebooks.detach().cpu().numpy()
+    codebooks_np.astype(np.float32).tofile(codebooks_path)
+
+    # Export metadata as JSON
+    metadata = {
+        "d": pq.d,
+        "m": pq.m,
+        "k": pq.k,
+        "d_sub": pq.d_sub,
+        "codebooks_shape": list(codebooks_np.shape),
+        "is_trained": pq.is_trained,
+    }
+
+    metadata_path = output_dir / "metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    logger.info(f"Exported PQ browser assets:")
+    logger.info(f"  Codebooks: {codebooks_path}")
+    logger.info(f"  Metadata: {metadata_path}")
+
+
+def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> None:
+    """Test PQ reconstruction error."""
+    # Use a subset for testing
+    n_test = min(1000, embeddings.shape[0])
+    test_vectors = embeddings[:n_test]
+
+    # Encode and decode
+    codes = pq(test_vectors)
+    reconstructed = pq.decode(codes)
+
+    # Calculate errors
+    mse = torch.mean((test_vectors - reconstructed) ** 2).item()
+    relative_error = mse / torch.mean(test_vectors**2).item()
+
+    # Calculate compression ratio
+    original_bits = test_vectors.numel() * 32  # 32-bit floats
+    compressed_bits = codes.numel() * 8  # 8-bit codes
+    compression_ratio = original_bits / compressed_bits
+
+    logger.info(f"PQ Reconstruction Results:")
+    logger.info(f"  Test vectors: {n_test}")
+    logger.info(f"  MSE: {mse:.6f}")
+    logger.info(f"  Relative error: {relative_error:.4f} ({relative_error * 100:.2f}%)")
+    logger.info(f"  Compression ratio: {compression_ratio:.1f}x")
 
 
 @app.command()
-def train_ivf(
+def ivf_train(
     embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings file (.npy or .parquet)", exists=True
+        ..., help="Path to embeddings.npy", exists=True
+    ),
+    sample_ids: Path = typer.Argument(
+        ..., help="Path to sample IDs file (.npy)", exists=True
     ),
     output_dir: Path = typer.Argument(..., help="Output directory for trained index"),
-    n_clusters: int = typer.Option(256, help="Number of coarse clusters for IVF index"),
+    n_partitions: int = typer.Option(256, help="Number of partitions for IVF index"),
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to use for training (None = all)"
     ),
     n_iterations: int = typer.Option(
         50, help="Number of k-means iterations for coarse quantization"
     ),
-    vector_ids: Optional[Path] = typer.Option(
-        None, help="Path to vector IDs file (.npy) - if None, uses indices 0...N-1"
-    ),
 ) -> None:
     """
     Train an Inverted File Index on embedding vectors.
     """
-    embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
+    # embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
+    embeddings_tensor, d = _load_embeddings(embeddings_path)
 
     # Load vector IDs if provided
-    vector_ids_tensor = None
-    if vector_ids is not None:
-        ids = np.load(vector_ids)
-        vector_ids_tensor = torch.from_numpy(ids)
-        logger.info(f"Loaded {len(ids)} vector IDs")
+    sample_ids_tensor = None
+    ids = np.load(sample_ids)
+    sample_ids_tensor = torch.from_numpy(ids)
+    logger.info(f"Loaded {len(ids)} sample IDs")
 
-        if len(ids) != embeddings_tensor.shape[0]:
-            raise ValueError(
-                f"Number of vector IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
-            )
+    if len(ids) != embeddings_tensor.shape[0]:
+        raise ValueError(
+            f"Number of sample IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
+        )
 
-    logger.info(f"Training IVF with parameters: d={d}, n_clusters={n_clusters}")
+    logger.info(f"Training IVF with parameters: d={d}, n_partitions={n_partitions}")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create and train IVF index
-    ivf = InvertedFileIndex(d=d, n_clusters=n_clusters)
+    ivf = InvertedFileIndex(d=d, n_partitions=n_partitions)
     ivf.train_ivf(
-        embeddings_tensor, vector_ids_tensor, n_iterations=n_iterations, verbose=True
+        embeddings_tensor, sample_ids_tensor, n_iterations=n_iterations, verbose=True
     )
 
-    # Save trained index
-    index_path = output_dir / "ivf_index.pkl"
-    ivf.save(index_path)
-    logger.info(f"Saved IVF index to {index_path}")
+    _test_ivf_search(ivf, embeddings_tensor, n_probe_values=[1, 2, 4, 8])
 
     # Export metadata
-    metadata_path = output_dir / "ivf_metadata.json"
+    metadata_path = output_dir / "metadata.json"
     metadata = ivf.export_metadata()
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
     logger.info(f"Saved IVF metadata to {metadata_path}")
 
-    # Export coarse centroids for browser use
-    centroids_path = output_dir / "coarse_centroids.npy"
-    np.save(centroids_path, ivf.coarse_centroids.detach().cpu().numpy())
-    logger.info(f"Saved coarse centroids to {centroids_path}")
+    # Export centroids for browser use
+    centroids_path = output_dir / "centroids.arrow"
+    centroids_df = pd.DataFrame(ivf.centroids.detach().cpu().numpy())
+    centroids_df.to_parquet(centroids_path)
+    logger.info(f"Saved centroids to {centroids_path}")
 
 
 @app.command()
@@ -170,6 +240,7 @@ def train_ivfpq(
     embeddings_path: Path = typer.Argument(
         ..., help="Path to embeddings file (.npy or .parquet)", exists=True
     ),
+    sample_ids: Path = typer.Argument(None, help="Path to sample IDs file (.npy)"),
     output_dir: Path = typer.Argument(..., help="Output directory for trained models"),
     # PQ parameters
     m: int = typer.Option(
@@ -190,10 +261,6 @@ def train_ivfpq(
     ivf_iterations: int = typer.Option(
         50, help="Number of k-means iterations for IVF training"
     ),
-    vector_ids: Optional[Path] = typer.Option(
-        None, help="Path to vector IDs file (.npy) - if None, uses indices 0...N-1"
-    ),
-    export_onnx: bool = typer.Option(True, help="Export trained models to ONNX format"),
     test_reconstruction: bool = typer.Option(
         True, help="Test reconstruction error and search performance"
     ),
@@ -203,17 +270,15 @@ def train_ivfpq(
     """
     embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
 
-    # Load vector IDs if provided
-    vector_ids_tensor = None
-    if vector_ids is not None:
-        ids = np.load(vector_ids)
-        vector_ids_tensor = torch.from_numpy(ids)
-        logger.info(f"Loaded {len(ids)} vector IDs")
+    # Load sample IDs if provided
+    ids = np.load(sample_ids)
+    sample_ids_tensor = torch.from_numpy(ids)
+    logger.info(f"Loaded {len(ids)} sample IDs")
 
-        if len(ids) != embeddings_tensor.shape[0]:
-            raise ValueError(
-                f"Number of vector IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
-            )
+    if len(ids) != embeddings_tensor.shape[0]:
+        raise ValueError(
+            f"Number of sample IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
+        )
 
     logger.info(f"Training IVFPQ with parameters:")
     logger.info(f"  PQ: d={d}, m={m}, k={k}")
@@ -225,7 +290,7 @@ def train_ivfpq(
     # Train PQ model
     logger.info("=== Training Product Quantization ===")
     pq = ProductQuantizer(d=d, m=m, k=k)
-    pq.train_pq(embeddings_tensor, n_iterations=pq_iterations, verbose=True)
+    pq.train(embeddings_tensor, n_iterations=pq_iterations, verbose=True)
 
     # Save PQ model
     pq_path = output_dir / "pq_model.pkl"
@@ -236,7 +301,7 @@ def train_ivfpq(
     logger.info("=== Training Inverted File Index ===")
     ivf = InvertedFileIndex(d=d, n_clusters=n_clusters)
     ivf.train_ivf(
-        embeddings_tensor, vector_ids_tensor, n_iterations=ivf_iterations, verbose=True
+        embeddings_tensor, sample_ids_tensor, n_iterations=ivf_iterations, verbose=True
     )
 
     # Save IVF index
@@ -253,7 +318,7 @@ def train_ivfpq(
         pq.export_onnx(onnx_path, batch_size=-1)
 
         # Export PQ browser assets
-        _export_browser_assets(pq, output_dir)
+        _export_pq(pq, output_dir)
 
         # Export IVF assets
         metadata_path = output_dir / "ivf_metadata.json"
@@ -415,30 +480,38 @@ def train_complete_ivfpq(
         verbose=True,
     )
 
-    # Save the complete model
-    ivfpq.save(output_dir)
-    logger.info(f"Saved complete IVFPQ model to {output_dir}")
-
-    # Export browser assets
-    if export_onnx:
-        logger.info("=== Exporting Browser Assets ===")
-
-        # Export PQ ONNX model
-        onnx_path = output_dir / "pq_model.onnx"
-        ivfpq.pq.export_onnx(onnx_path, batch_size=-1)
-
-        # Export codebooks for browser decoding
-        _export_browser_assets(ivfpq.pq, output_dir)
-
-        # Export coarse centroids
-        centroids_path = output_dir / "coarse_centroids.npy"
-        np.save(centroids_path, ivfpq.ivf.coarse_centroids.detach().cpu().numpy())
-        logger.info(f"Saved coarse centroids to {centroids_path}")
+    # Export browser assets (Arrow format) - this is now the primary export
+    logger.info("=== Exporting Browser Assets (Arrow Format) ===")
+    ivfpq.export_browser_assets(output_dir)
 
     # Test performance with sample queries
     if test_performance:
         logger.info("=== Testing Performance ===")
         _test_ivfpq_performance(ivfpq, embeddings_tensor)
+
+
+@app.command()
+def export_browser_assets(
+    model_dir: Path = typer.Argument(
+        ..., help="Directory containing trained IVFPQ model", exists=True
+    ),
+    output_dir: Path = typer.Argument(..., help="Output directory for browser assets"),
+) -> None:
+    """
+    Export trained IVFPQ model to Arrow format for browser consumption.
+
+    This creates optimized browser assets including:
+    - Individual partition files in Parquet format
+    - Centroid index with partition metadata
+    - ONNX models and codebooks for client-side inference
+    """
+    # Load the trained model
+    ivfpq = IVFPQ.load(model_dir)
+
+    # Export browser assets
+    ivfpq.export_browser_assets(output_dir)
+
+    logger.info(f"Browser assets exported successfully to {output_dir}")
 
 
 def _test_ivfpq_performance(
@@ -475,103 +548,9 @@ def _test_ivfpq_performance(
     # Show partition statistics
     stats = ivfpq.get_partition_stats()
     logger.info(
-        f"Dataset organized into {stats['non_empty_partitions']}/{stats['total_partitions']} partitions"
+        f"Dataset organized into {stats['non_empty_partitions']}/{stats['n_partitions']} partitions"
     )
     logger.info(f"Average partition size: {stats['avg_partition_size']:.0f} vectors")
-
-
-def _load_embeddings(
-    embeddings_path: Path, max_vectors: Optional[int]
-) -> tuple[torch.Tensor, int]:
-    """Load embeddings from file and return as tensor with dimension."""
-    logger.info(f"Loading embeddings from {embeddings_path}")
-
-    # Load embeddings based on file extension
-    if embeddings_path.suffix == ".npy":
-        embeddings = np.load(embeddings_path)
-        logger.info(
-            f"Loaded {embeddings.shape[0]} embeddings of dimension {embeddings.shape[1]} from .npy file"
-        )
-    elif embeddings_path.suffix == ".parquet":
-        df = pd.read_parquet(embeddings_path)
-        # Assume embedding columns are named 'embedding_0', 'embedding_1', etc.
-        embedding_cols = [col for col in df.columns if col.startswith("embedding_")]
-        if not embedding_cols:
-            raise ValueError(
-                "No embedding columns found in parquet file. Expected columns like 'embedding_0', 'embedding_1', etc."
-            )
-        embeddings = df[embedding_cols].values
-        logger.info(
-            f"Loaded {embeddings.shape[0]} embeddings of dimension {embeddings.shape[1]} from .parquet file"
-        )
-    else:
-        raise ValueError(
-            f"Unsupported file format: {embeddings_path.suffix}. Use .npy or .parquet"
-        )
-
-    # Limit number of vectors if specified
-    if max_vectors is not None and embeddings.shape[0] > max_vectors:
-        logger.info(f"Using random subset of {max_vectors} vectors for training")
-        indices = np.random.choice(embeddings.shape[0], max_vectors, replace=False)
-        embeddings = embeddings[indices]
-
-    # Convert to torch tensor
-    embeddings_tensor = torch.from_numpy(embeddings.astype(np.float32))
-    d = embeddings_tensor.shape[1]
-
-    return embeddings_tensor, d
-
-
-def _export_browser_assets(pq: ProductQuantizer, output_dir: Path) -> None:
-    """Export PQ assets for browser consumption."""
-    # Export codebooks as binary file
-    codebooks_path = output_dir / "codebooks.bin"
-    codebooks_np = pq.codebooks.detach().cpu().numpy()
-    codebooks_np.astype(np.float32).tofile(codebooks_path)
-
-    # Export metadata as JSON
-    metadata = {
-        "d": pq.d,
-        "m": pq.m,
-        "k": pq.k,
-        "d_sub": pq.d_sub,
-        "codebooks_shape": list(codebooks_np.shape),
-        "is_trained": pq.is_trained,
-    }
-
-    metadata_path = output_dir / "pq_metadata.json"
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    logger.info(f"Exported PQ browser assets:")
-    logger.info(f"  Codebooks: {codebooks_path}")
-    logger.info(f"  Metadata: {metadata_path}")
-
-
-def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> None:
-    """Test PQ reconstruction error."""
-    # Use a subset for testing
-    n_test = min(1000, embeddings.shape[0])
-    test_vectors = embeddings[:n_test]
-
-    # Encode and decode
-    codes = pq(test_vectors)
-    reconstructed = pq.decode(codes)
-
-    # Calculate errors
-    mse = torch.mean((test_vectors - reconstructed) ** 2).item()
-    relative_error = mse / torch.mean(test_vectors**2).item()
-
-    # Calculate compression ratio
-    original_bits = test_vectors.numel() * 32  # 32-bit floats
-    compressed_bits = codes.numel() * 8  # 8-bit codes
-    compression_ratio = original_bits / compressed_bits
-
-    logger.info(f"PQ Reconstruction Results:")
-    logger.info(f"  Test vectors: {n_test}")
-    logger.info(f"  MSE: {mse:.6f}")
-    logger.info(f"  Relative error: {relative_error:.4f} ({relative_error * 100:.2f}%)")
-    logger.info(f"  Compression ratio: {compression_ratio:.1f}x")
 
 
 def _test_ivf_search(
@@ -583,16 +562,18 @@ def _test_ivf_search(
 
     logger.info(f"IVF Search Results:")
     logger.info(f"  Test queries: {n_test}")
-    logger.info(f"  Total clusters: {ivf.n_clusters}")
+    logger.info(f"  Total partitions: {ivf.n_partitions}")
 
-    stats = ivf.get_cluster_stats()
-    logger.info(f"  Cluster stats:")
+    stats = ivf.get_partition_stats()
+    logger.info(f"  Partition stats:")
     logger.info(f"    Mean size: {stats['mean_size']:.1f}")
     logger.info(f"    Min/Max size: {stats['min_size']}/{stats['max_size']}")
-    logger.info(f"    Empty clusters: {stats['empty_clusters']}")
+    logger.info(
+        f"    Empty partitions: {stats['empty_partitions']}/{stats['n_partitions']}"
+    )
 
     for n_probe in n_probe_values:
-        if n_probe > ivf.n_clusters:
+        if n_probe > ivf.n_partitions:
             continue
 
         partitions = ivf.search_partitions(test_queries, n_probe=n_probe)

@@ -32,10 +32,10 @@
       ]
     },
     {
-      "name": "mapper train",
+      "name": "umap train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/mapper.py",
+      "program": "${workspaceFolder}/src/cellspace/scripts/umap.py",
       "console": "integratedTerminal",
       "args": [
         "train",
@@ -46,14 +46,14 @@
       ]
     },
     {
-      "name": "mapper map",
+      "name": "umap map",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/mapper.py",
+      "program": "${workspaceFolder}/src/cellspace/scripts/umap.py",
       "console": "integratedTerminal",
       "args": [
         "map",
-        "${workspaceFolder}/web/public/models/scimilarity/mapper.onnx",
+        "${workspaceFolder}/web/public/models/scimilarity/umap.onnx",
         "${workspaceFolder}/data/scimilarity/embeddings.npy",
         "${workspaceFolder}/data/scimilarity/",
         "--export-png",
@@ -62,15 +62,35 @@
       ]
     },
     {
-      "name": "mapper export",
+      "name": "umap export",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/mapper.py",
+      "program": "${workspaceFolder}/src/cellspace/scripts/umap.py",
       "console": "integratedTerminal",
       "args": [
         "export",
         "${workspaceFolder}/data/scimilarity/",
         "${workspaceFolder}/web/public/models/scimilarity/"
+      ]
+    },
+    {
+      "name": "pq train",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cellspace/scripts/ivfpq_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "train-pq",
+        "${workspaceFolder}/data/scimilarity/embeddings.npy",
+        "${workspaceFolder}/web/public/models/scimilarity/pq",
+        "--m",
+        "16",
+        "--k",
+        "256",
+        "--max-vectors",
+        "1000",
+        "--n-iterations",
+        "30"
       ]
     },
     {

@@ -90,6 +90,7 @@ function App() {
     }
 
     // REMIND: Remove once we have a stable WebGPU implementation
+    console.warn('WebGPU is currently disabled as Apple silicon limits input vectors to 16384')
     setHasWebGPU(false)
     setUseWebGPU(false)
   }, [])
@@ -156,7 +157,7 @@ function App() {
             // Extract X and Y coordinates from the array of tuples and normalize them
             for (const mapping of evt.data.mappings) {
               if (mapping && mapping.length >= 2) {
-                // Normalize the coordinates using the same transformation as mapper.py
+                // Normalize the coordinates using the same transformation as pumap.py
                 const [normalizedX, normalizedY] = normalizeCoordinates(mapping[0], mapping[1])
                 newXPoints.push(normalizedX)
                 newYPoints.push(normalizedY)
@@ -197,7 +198,7 @@ function App() {
     window.location.origin +
     window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
 
-  // Helper function to normalize coordinates using the same transformation as mapper.py
+  // Helper function to normalize coordinates using the same transformation as pumap.py
   const normalizeCoordinates = (x: number, y: number) => {
     const normalizedX = (x - xCenter) / (maxRange / 2)
     const normalizedY = (y - yCenter) / (maxRange / 2)
@@ -211,7 +212,7 @@ function App() {
       setSelectedCategory('tissue') // Default category, can be changed later
 
       // Load metadata to get categories information
-      const metadataResponse = await fetch(`${sitePath}/models/${modelID}/metadata.json`)
+      const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)
       const metadata = await metadataResponse.json()
 
       // Get category labels from metadata
@@ -227,9 +228,9 @@ function App() {
 
       // Load Arrow files in parallel
       const [xResponse, yResponse, categoryResponse] = await Promise.all([
-        fetch(`${sitePath}/models/${modelID}/x.arrow`),
-        fetch(`${sitePath}/models/${modelID}/y.arrow`),
-        fetch(`${sitePath}/models/${modelID}/${selectedCategory}.arrow`),
+        fetch(`${sitePath}/models/${modelID}/pumap/x.arrow`),
+        fetch(`${sitePath}/models/${modelID}/pumap/y.arrow`),
+        fetch(`${sitePath}/models/${modelID}/pumap/${selectedCategory}.arrow`),
       ])
 
       const [xBuffer, yBuffer, categoryBuffer] = await Promise.all([

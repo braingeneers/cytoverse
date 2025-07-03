@@ -1,5 +1,5 @@
 /**
- * Browser Web Worker that runs embedding and parametric umap models
+ * Browser Web Worker that runs embedding and parametric pumap models
  *
  * The h5 file is read using h5wasm which is a WebAssembly of the h5 library.
  * We utilize its ability to map the file into the browsers file system and
@@ -110,7 +110,7 @@ async function instantiateModel(
 
   // Fetch the model gene list
   // REMIND: Switch to .gz and have browser de-compress
-  let response = await fetch(`${modelsURL}/${modelID}/embedder.genes`)
+  let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`)
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -118,7 +118,7 @@ async function instantiateModel(
   console.log('Model Genes', genes.slice(0, 5))
 
   // Fetch the model ONNX file incrementally to show progress
-  response = await fetch(`${modelsURL}/${modelID}/embedder.onnx`)
+  response = await fetch(`${modelsURL}/${modelID}/embedding/model.onnx`)
   if (!response.ok) {
     throw new Error(`Error fetching onnx file: ${response.status}`)
   }
@@ -193,7 +193,7 @@ async function instantiateModel(
 
   // Create the MappingSession
   const mappingSession = await InferenceSession.create(
-    `${modelsURL}/${modelID}/mapper.onnx`,
+    `${modelsURL}/${modelID}/pumap/model.onnx`,
     sessionOptions
   )
   console.log('Mapper Output names', mappingSession.outputNames)

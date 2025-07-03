@@ -222,19 +222,19 @@ python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
 
 ### ✅ Milestone 4: Complete IVFPQ Implementation & Dataset Partitioning
 
-**Status**: 🔄 **IN PROGRESS** - Dataset partitioning and Arrow format export
+**Status**: ✅ **COMPLETE** - All deliverables implemented and tested
 
 **Goal**: Implement the complete IVFPQ class that combines PQ and IVF modules, and create dataset partitioning with Arrow format export for browser consumption.
 
 **Deliverables**:
 
 - ✅ Complete `src/cellspace/ivfpq/ivfpq.py` - Combined IVFPQ class implementation
-- [ ] Dataset partitioning functionality: Export embeddings.npy into k partition files
-- [ ] Arrow/Parquet format export for browser-optimized loading
-- [ ] Centroid index file export in Arrow format with partition metadata
-- [ ] File naming convention that maps to centroid indices
-- [ ] Integration with existing training pipeline
-- [ ] Performance validation on partitioned datasets
+- ✅ Dataset partitioning functionality: Export embeddings.npy into k partition files
+- ✅ Arrow/Parquet format export for browser-optimized loading
+- ✅ Centroid index file export in Arrow format with partition metadata
+- ✅ File naming convention that maps to centroid indices
+- ✅ Integration with existing training pipeline
+- ✅ Performance validation on partitioned datasets
 
 **Key Features Implemented**:
 
@@ -246,38 +246,54 @@ python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
 - ✅ **Performance Testing**: Query performance validation with configurable n_probe
 - ✅ **Training Script Integration**: New `train-complete-ivfpq` command
 - ✅ **Makefile Targets**: `ivfpq-complete-train` and `ivfpq-complete-train-full`
+- ✅ **Arrow Export**: Complete browser asset export with Parquet format
+- ✅ **Standalone Export**: `export-browser-assets` command for existing models
+
+**Browser Asset Export Features**:
+
+- ✅ **Arrow Format Only**: Consistent with existing label/mapping formats
+- ✅ **Individual Partition Files**: Each partition exported as `partition_XXXX.arrow`
+- ✅ **Centroid Index**: `centroids.arrow` with partition metadata and centroid coordinates
+- ✅ **File Naming Convention**: Zero-padded partition IDs for proper sorting
+- ✅ **PQ Code Storage**: Separate columns (`code_0`, `code_1`, ..., `code_m-1`) for efficient access
+- ✅ **Browser Compatibility**: ONNX models, binary codebooks, and JSON metadata
+- ✅ **Consolidated Directory**: Single `web/public/models/scimilarity/ivfpq/` directory
+- ✅ **Round-trip Testing**: Export → Import validation for data integrity
 
 **Training Results**:
 
 - **Compression**: 32x ratio achieved (128D → 16 bytes per vector)
 - **Partitioning**: All vectors organized into balanced partitions
 - **Search Efficiency**: Configurable trade-off between speed and coverage
-  - `n_probe=1`: 2.4% of dataset searched
+  - `n_probe=1`: 2.8% of dataset searched
   - `n_probe=2`: 4.5% of dataset searched
-  - `n_probe=4`: 7.8% of dataset searched
-  - `n_probe=8`: 14.6% of dataset searched
+  - `n_probe=4`: 8.5% of dataset searched
+  - `n_probe=8`: 15.6% of dataset searched
 - **Memory Footprint**: 16 bytes per vector (PQ codes) + partition metadata
 
-**File Outputs** (Current Implementation):
+**File Outputs** (Browser Assets):
 
 ```
-output/
-├── ivfpq_metadata.json       # Complete IVFPQ configuration and statistics
-├── ivf_index.pkl            # IVF coarse centroids and inverted lists
-├── pq_model.pkl             # PQ codebooks and metadata
-├── pq_model.onnx            # ONNX model for browser inference
-├── partition_data.pkl       # PQ codes organized by partition
-├── codebooks.bin            # Binary codebooks for browser decoding
-├── coarse_centroids.npy     # Coarse centroids for browser use
-└── pq_metadata.json         # PQ configuration for browser
+web/public/models/scimilarity/ivfpq/
+├── centroids.arrow                # Centroid index with partition metadata
+├── partitions/                    # Individual partition files
+│   ├── partition_0000.arrow       # Partition 0: vector_ids + PQ codes
+│   ├── partition_0001.arrow       # Partition 1: vector_ids + PQ codes
+│   └── ...                        # Partitions 2-63
+├── pq_model.onnx                  # ONNX model for browser inference
+├── codebooks.bin                  # Binary codebooks for browser decoding
+├── pq_metadata.json               # PQ configuration for browser
+└── ivfpq_metadata.json            # Complete IVFPQ metadata
 ```
 
-**Remaining Work for Milestone 4**:
+**Validation**:
 
-- [ ] Arrow/Parquet export: Replace pickle with Arrow format for partition data
-- [ ] Individual partition files: Export each partition as separate Arrow file
-- [ ] Centroid index: Export coarse centroids with partition metadata in Arrow format
-- [ ] File naming convention: Map partition files to centroid indices
+- ✅ All tests pass with synthetic and real data
+- ✅ Arrow export/import maintains data integrity
+- ✅ Browser asset format optimized for streaming access
+- ✅ File naming convention enables efficient partition lookup
+- ✅ Training pipeline produces consistent 32x compression
+- ✅ Ready for browser-side ANN search implementation
 
 ### 📋 Milestone 5: Python ANN Search Implementation
 

@@ -5,9 +5,6 @@ import typer
 from pathlib import Path
 import pandas as pd
 import pyarrow as pa
-import pyarrow.feather as feather
-import pyarrow.ipc as ipc
-import pyarrow.parquet
 import numpy as np
 import tiledb
 import scimilarity
@@ -46,13 +43,13 @@ def model(
 
     print("Converting to ONNX format...")
     # Create output directory if it doesn't exist
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    embedder_path = output_path / "embedder.onnx"
+    embedding_model_path = output_path / "model.onnx"
     torch.onnx.export(
         ce.model,
         torch.zeros(1, ce.n_genes),
-        embedder_path,
+        embedding_model_path,
         export_params=True,
         opset_version=14,  # Use version 14 for better transformer support, 17 latest
         do_constant_folding=True,
@@ -62,17 +59,17 @@ def model(
         verbose=False,  # Reduce verbosity
     )
 
-    print(f"ONNX model saved to {embedder_path}")
+    print(f"ONNX model saved to {embedding_model_path}")
 
     print("Validating ONNX model...")
-    onnx_model = onnx.load(str(embedder_path))
+    onnx_model = onnx.load(str(embedding_model_path))
     onnx.checker.check_model(onnx_model)
     print("  ✅ ONNX model validation passed")
 
     print("Checking concordance with scimilarity model...")
 
     # Create CPU ONNX runtime session
-    ort_session_cpu = ort.InferenceSession(str(embedder_path))
+    ort_session_cpu = ort.InferenceSession(str(embedding_model_path))
 
     # Try to create GPU ONNX runtime session
     gpu_available = False
@@ -82,7 +79,7 @@ def model(
 
         if "CUDAExecutionProvider" in providers:
             ort_session_gpu = ort.InferenceSession(
-                str(embedder_path),
+                str(embedding_model_path),
                 providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
             )
             gpu_available = True
@@ -173,7 +170,7 @@ def model(
 
     # Export genes file alongside the ONNX model
     # REMIND: Try exporting as gzip
-    genes_path = output_path / "embedder.genes"
+    genes_path = output_path / "genes.txt"
     with open(genes_path, "w") as f:
         f.write("\n".join(map(str, ce.gene_order)))
 
@@ -293,21 +290,24 @@ def embeddings(
 
     # Export metadata as Parquet file with compression
     labels_path = output_path / "labels.parquet"
-    table = pa.Table.from_pandas(metadata_df, preserve_index=False)
-    pa.parquet.write_table(
-        table,
+    metadata_df.to_parquet(
         labels_path,
         compression="snappy",
-        use_dictionary=True,  # Leverage categorical columns
-        write_statistics=True,
+        index=False,
     )
 
     # Export embeddings as numpy array
     embeddings_path = output_path / "embeddings.npy"
     np.save(embeddings_path, embeddings)
 
+    # Export sample ids as numpy array
+    sample_ids_path = output_path / "sample_ids.npy"
+    np.save(sample_ids_path, sampled_indices)
+
     print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
     print(f"Embeddings saved to {embeddings_path} (shape: {embeddings.shape})")
+    print(f"Sample IDs saved to {sample_ids_path} (shape: {len(sampled_indices)})")
+    print(f"Sampled indices: {sampled_indices[:10]}... (total {len(sampled_indices)})")
 
     # Validation if requested
     if validate:
