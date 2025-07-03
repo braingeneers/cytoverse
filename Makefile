@@ -66,13 +66,6 @@ ivf-train:
 		--max-vectors 10000 \
 		--n-iterations 30
 
-# ivf-train-full:
-# 	python src/cellspace/scripts/ivfpq_train.py train-ivf \
-# 		data/scimilarity/vectors.npy \
-# 		web/public/models/scimilarity/ivf/ \
-# 		--n-clusters 256 \
-# 		--n-iterations 50
-
 # IVFPQ
 ivfpq-train:
 	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \

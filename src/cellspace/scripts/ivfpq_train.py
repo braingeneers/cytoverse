@@ -46,32 +46,39 @@ app = typer.Typer(
 
 
 def _load_vectors(
-    vectors_path: Path, max_vectors: Optional[int] = None
-) -> tuple[torch.Tensor, int]:
-    """Load vectors from file and return as tensor with dimension."""
+    vectors_path: Path, vector_ids_path: Path, max_vectors: Optional[int] = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Load vectors and vector IDs from files and return as numpy arrays."""
     logger.info(f"Loading vectors from {vectors_path}")
-
     vectors = np.load(vectors_path)
     logger.info(
         f"Loaded {vectors.shape[0]} vectors of dimension {vectors.shape[1]} from .npy file"
     )
 
-    # Limit number of vectors if specified
+    logger.info(f"Loading vector IDs from {vector_ids_path}")
+    vector_ids = np.load(vector_ids_path)
+    logger.info(f"Loaded {len(vector_ids)} vector IDs")
+
+    if len(vector_ids) != vectors.shape[0]:
+        raise ValueError(
+            f"Number of vector IDs ({len(vector_ids)}) must match number of vectors ({vectors.shape[0]})"
+        )
+
+    # Limit number of vectors if specified (take first max_vectors)
     if max_vectors is not None and vectors.shape[0] > max_vectors:
-        logger.info(f"Using random subset of {max_vectors} vectors for training")
-        indices = np.random.choice(vectors.shape[0], max_vectors, replace=False)
-        vectors = vectors[indices]
+        logger.info(f"Using first {max_vectors} vectors for training")
+        vectors = vectors[:max_vectors]
+        vector_ids = vector_ids[:max_vectors]
 
-    # Convert to torch tensor
-    vectors_tensor = torch.from_numpy(vectors.astype(np.float32))
-    d = vectors_tensor.shape[1]
-
-    return vectors_tensor, d
+    return vectors.astype(np.float32), vector_ids
 
 
 @app.command()
 def pq_train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
+    vector_ids_path: Path = typer.Argument(
+        ..., help="Path to vector IDs.npy", exists=True
+    ),
     output_dir: Path = typer.Argument(
         ..., help="Output directory for trained model and codebooks"
     ),
@@ -91,7 +98,9 @@ def pq_train(
     """
     Train a Product Quantization model on vectors.
     """
-    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors)
+    embeddings, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
+    embeddings_tensor = torch.from_numpy(embeddings)
+    d = embeddings_tensor.shape[1]
 
     logger.info(f"Training PQ with parameters: d={d}, m={m}, k={k}")
 
@@ -175,8 +184,8 @@ def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> N
 @app.command()
 def ivf_train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
-    sample_ids: Path = typer.Argument(
-        ..., help="Path to sample IDs file (.npy)", exists=True
+    vector_ids_path: Path = typer.Argument(
+        ..., help="Path to vector IDs file (.npy)", exists=True
     ),
     output_dir: Path = typer.Argument(..., help="Output directory for trained index"),
     n_partitions: int = typer.Option(256, help="Number of partitions for IVF index"),
@@ -190,18 +199,10 @@ def ivf_train(
     """
     Train an Inverted File Index on vectors.
     """
-    embeddings_tensor, d = _load_vectors(vectors_path)
-
-    # Load vector IDs if provided
-    sample_ids_tensor = None
-    ids = np.load(sample_ids)
-    sample_ids_tensor = torch.from_numpy(ids)
-    logger.info(f"Loaded {len(ids)} sample IDs")
-
-    if len(ids) != embeddings_tensor.shape[0]:
-        raise ValueError(
-            f"Number of sample IDs ({len(ids)}) must match number of vectors ({embeddings_tensor.shape[0]})"
-        )
+    vectors, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
+    vectors_tensor = torch.from_numpy(vectors)
+    vector_ids_tensor = torch.from_numpy(vector_ids)
+    d = vectors_tensor.shape[1]
 
     logger.info(f"Training IVF with parameters: d={d}, n_partitions={n_partitions}")
 
@@ -211,10 +212,10 @@ def ivf_train(
     # Create and train IVF index
     ivf = InvertedFileIndex(d=d, n_partitions=n_partitions)
     ivf.train_ivf(
-        embeddings_tensor, sample_ids_tensor, n_iterations=n_iterations, verbose=True
+        vectors_tensor, vector_ids_tensor, n_iterations=n_iterations, verbose=True
     )
 
-    _test_ivf_search(ivf, embeddings_tensor, n_probe_values=[1, 2, 4, 8])
+    _test_ivf_search(ivf, vectors_tensor, n_probe_values=[1, 2, 4, 8])
 
     # Export metadata
     metadata_path = output_dir / "metadata.json"
@@ -264,17 +265,10 @@ def train_ivfpq(
     """
     Train complete IVFPQ models (both PQ and IVF) on vectors and export assets.
     """
-    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors)
-
-    # Load sample IDs if provided
-    ids = np.load(sample_ids)
+    embeddings, ids = _load_vectors(vectors_path, sample_ids, max_vectors)
+    embeddings_tensor = torch.from_numpy(embeddings)
     sample_ids_tensor = torch.from_numpy(ids)
-    logger.info(f"Loaded {len(ids)} sample IDs")
-
-    if len(ids) != embeddings_tensor.shape[0]:
-        raise ValueError(
-            f"Number of sample IDs ({len(ids)}) must match number of vectors ({embeddings_tensor.shape[0]})"
-        )
+    d = embeddings_tensor.shape[1]
 
     logger.info(f"Training IVFPQ with parameters:")
     logger.info(f"  PQ: d={d}, m={m}, k={k}")
@@ -358,6 +352,9 @@ def test_trained_models(
     vectors_path: Optional[Path] = typer.Option(
         None, help="Path to test vectors (uses training data if None)"
     ),
+    vector_ids_path: Optional[Path] = typer.Option(
+        None, help="Path to vector IDs (generates indices if None)"
+    ),
     n_test_vectors: int = typer.Option(
         100, help="Number of vectors to use for testing"
     ),
@@ -394,7 +391,32 @@ def test_trained_models(
             logger.error("No test vectors found. Please specify --vectors-path")
             return
 
-    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors=None)
+    # Handle vector_ids - if not provided, try to find or generate them
+    if vector_ids_path is None:
+        # Try to find vector_ids in common locations
+        possible_id_paths = [
+            Path("data/scimilarity/vector_ids.npy"),
+            model_dir / "vector_ids.npy",
+        ]
+
+        for path in possible_id_paths:
+            if path.exists():
+                vector_ids_path = path
+                break
+
+        if vector_ids_path is None:
+            # Generate temporary vector IDs file
+            logger.info("No vector IDs found, generating sequential indices")
+            temp_vectors = np.load(vectors_path)
+            temp_ids = np.arange(len(temp_vectors))
+            vector_ids_path = Path("/tmp/temp_vector_ids.npy")
+            np.save(vector_ids_path, temp_ids)
+
+    embeddings, vector_ids = _load_vectors(
+        vectors_path, vector_ids_path, max_vectors=None
+    )
+    embeddings_tensor = torch.from_numpy(embeddings)
+    d = embeddings_tensor.shape[1]
 
     # Subsample for testing
     if embeddings_tensor.shape[0] > n_test_vectors:
@@ -458,19 +480,19 @@ def train_complete_ivfpq(
     and PQ encoding within each partition, providing the foundation for
     efficient approximate nearest neighbor search.
     """
-    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors)
+    # Handle vector_ids - if not provided, generate sequential indices
+    if vector_ids is None:
+        logger.info("No vector IDs provided, will generate sequential indices")
+        temp_vectors = np.load(vectors_path)
+        temp_ids = np.arange(len(temp_vectors))
+        vector_ids_path = Path("/tmp/temp_vector_ids.npy")
+        np.save(vector_ids_path, temp_ids)
+        vector_ids = vector_ids_path
 
-    # Load vector IDs if provided
-    vector_ids_tensor = None
-    if vector_ids is not None:
-        ids = np.load(vector_ids)
-        vector_ids_tensor = torch.from_numpy(ids)
-        logger.info(f"Loaded {len(ids)} vector IDs")
-
-        if len(ids) != embeddings_tensor.shape[0]:
-            raise ValueError(
-                f"Number of vector IDs ({len(ids)}) must match number of vectors ({embeddings_tensor.shape[0]})"
-            )
+    embeddings, ids = _load_vectors(vectors_path, vector_ids, max_vectors)
+    embeddings_tensor = torch.from_numpy(embeddings)
+    vector_ids_tensor = torch.from_numpy(ids)
+    d = embeddings_tensor.shape[1]
 
     logger.info(f"Training complete IVFPQ model with parameters:")
     logger.info(f"  Dimension: {d}")
