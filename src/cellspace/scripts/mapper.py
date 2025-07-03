@@ -73,7 +73,7 @@ def train(
         match_nonparametric_umap=False,  # Train network to match embeddings from non parametric umap
     )
 
-    model.fit(torch.from_numpy(embeddings).to("mps"))
+    model.fit(torch.from_numpy(embeddings))
 
     # Export to ONNX
     model_output_path = output_path / "mapper.onnx"
@@ -291,6 +291,11 @@ def export(
     categories_dict = {}
 
     for col in labels_df.columns:
+        # Skip the index column as it has too many categories and is not useful metadata
+        if col == "index":
+            typer.echo(f"  Skipping index column: {col}")
+            continue
+
         typer.echo(f"  Processing column: {col}")
 
         if labels_df[col].dtype.name == "category":
@@ -311,6 +316,11 @@ def export(
                 .astype(np.int16)
             )
 
+        # Validate that the column doesn't have too many categories
+        assert (
+            len(categories) <= 500
+        ), f"Column '{col}' has {len(categories)} categories, which exceeds the maximum of 500"
+
         # Store categories for metadata
         categories_dict[col] = categories
 
@@ -328,7 +338,7 @@ def export(
         "categories": categories_dict,
         "xCenter": float(x_center),
         "yCenter": float(y_center),
-        "maxRange": float(max_range)
+        "maxRange": float(max_range),
     }
 
     metadata_path = output_path / "metadata.json"

@@ -233,23 +233,23 @@ def embeddings(
         schema_fields = [f.name for f in metadata_db.schema]
         print("Available fields:", schema_fields)
 
+        # Get total number of cells without loading data
+        total_cells = (
+            metadata_db.nonempty_domain()[0][1] + 1
+        )  # TileDB uses 0-based indexing
+        print(f"Total cells in TileDB: {total_cells}")
+
         # Step 1: Generate the list of indices to export
         if num_embeddings is None:
             # Export all cells in TileDB order
             print("Exporting ALL cells in TileDB order...")
-            # Get total number of cells without loading data
-            total_cells = (
-                metadata_db.nonempty_domain()[0][1] + 1
-            )  # TileDB uses 0-based indexing
             sampled_indices = list(range(total_cells))
-            print(f"Found {len(sampled_indices)} total cells")
-
         elif not stratify:
-            # Export first num_embeddings in TileDB order (no stratification)
-            print(f"Exporting first {num_embeddings} embeddings in TileDB order...")
-            sampled_indices = list(range(num_embeddings))
-            print(f"Selected {len(sampled_indices)} embeddings")
-
+            # Export random num_embeddings in TileDB order (no stratification)
+            print(f"Exporting random {num_embeddings} embeddings in TileDB order...")
+            sampled_indices = np.random.choice(
+                total_cells, size=num_embeddings, replace=False
+            )
         else:
             # Stratified sampling for subset
             print(f"Stratified sampling {num_embeddings} embeddings...")
@@ -266,25 +266,28 @@ def embeddings(
             sss = StratifiedShuffleSplit(
                 n_splits=1, train_size=num_embeddings, random_state=42
             )
-            sampled_indices, _ = next(sss.split(df_strat.index, strata_labels))
-            sampled_indices = sampled_indices.tolist()  # Convert to list
+            strat_sample_indices, _ = next(sss.split(df_strat.index, strata_labels))
+
+            # Convert stratified sample indices back to original TileDB indices
+            sampled_indices = df_strat.index[strat_sample_indices].tolist()
+
+    sampled_indices.sort()  # TileDB requires sorted indices
 
     print(f"Outputting {len(sampled_indices)} embeddings to {output_path}...")
     os.makedirs(output_path, exist_ok=True)
 
-    # Step 2: Load all metadata and embeddings at once
+    # Step 2: Load metadata and embeddings for sampled indices only
     print("Loading metadata...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-        metadata_df = metadata_db.query(attrs=labels, coords=sampled_indices).df[:]
+        metadata_df = metadata_db.query(attrs=labels).df[sampled_indices]
+    print(f"  Loaded metadata shape: {metadata_df.shape}")
 
     print("Loading embeddings...")
     embeddings = scimilarity.utils.embedding_from_tiledb(
         sampled_indices, str(model_path / "cell_embedding")
     )
+    print(f"  Loaded embeddings shape: {embeddings.shape}")
 
-    # Step 3: Process and export
-    # Process metadata
-    metadata_df = metadata_df.reset_index()
     for label in labels:
         metadata_df[label] = metadata_df[label].astype("category")
 
@@ -303,14 +306,14 @@ def embeddings(
     embeddings_path = output_path / "embeddings.npy"
     np.save(embeddings_path, embeddings)
 
-    print(f"Labels saved to {labels_path}")
-    print(f"Embeddings saved to {embeddings_path}")
+    print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
+    print(f"Embeddings saved to {embeddings_path} (shape: {embeddings.shape})")
 
     # Validation if requested
     if validate:
         print("\n🔍 Validating exported files...")
         _validate_exports(
-            model_path, labels_path, embeddings_path, labels, sampled_indices
+            model_path, labels_path, embeddings_path, labels, sampled_indices[0:10]
         )
 
     print(f"Exported {len(sampled_indices)} cells to {output_path}")
@@ -325,86 +328,46 @@ def _validate_exports(
 ) -> None:
     """Validate exported Parquet and numpy files against original TileDB data."""
 
-    # Select 10 random indices for validation
-    np.random.seed(123)  # Different seed for validation
-    if len(original_indices) >= 10:
-        validation_indices = np.random.choice(
-            original_indices, size=10, replace=False
-        ).tolist()
-    else:
-        validation_indices = original_indices
-
-    print(f"Validating {len(validation_indices)} random samples...")
-
-    # Read validation samples from exported files
-    print("  Reading from exported labels.parquet...")
-    labels_df_exported = pd.read_parquet(labels_path)
-
-    print("  Reading from exported embeddings.npy...")
-    embeddings_exported = np.load(embeddings_path)
+    # Read exported files
+    print("  Reading from exported files...")
+    labels_df_exported = pd.read_parquet(labels_path)[: len(original_indices)]
+    embeddings_exported = np.load(embeddings_path)[: len(original_indices)]
 
     # Read validation samples from original TileDB
     print("  Reading from original TileDB...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-        original_metadata = metadata_db.query(
-            attrs=labels, coords=validation_indices
-        ).df[:]
+        original_metadata = metadata_db.query(attrs=labels).df[original_indices]
 
     original_embeddings = scimilarity.utils.embedding_from_tiledb(
-        validation_indices, str(model_path / "cell_embedding")
+        original_indices, str(model_path / "cell_embedding")
     )
 
-    # Validate labels
+    # Validate labels using DataFrame comparison
     print("  Validating labels...")
-    labels_match = True
-    for idx in validation_indices:
-        # Find the row in exported labels data using the 'index' column
-        exported_rows = labels_df_exported[labels_df_exported["index"] == idx]
-        if len(exported_rows) == 0:
-            print(f"    ❌ TileDB index {idx} not found in exported labels")
-            labels_match = False
-            continue
 
-        exported_row = exported_rows.iloc[0]
-        original_row = original_metadata.loc[idx]
-
-        for label in labels:
-            if str(exported_row[label]) != str(original_row[label]):
-                print(
-                    f"    ❌ Label mismatch for cell {idx}, {label}: {exported_row[label]} != {original_row[label]}"
-                )
-                labels_match = False
-
-    if labels_match:
+    if labels_df_exported.astype(str).equals(original_metadata.astype(str)):
+        labels_match = True
         print("    ✅ All label values match")
+    else:
+        labels_match = False
+        print(f"    ❌ Label mismatch")
 
     # Validate embeddings
     print("  Validating embeddings...")
-    embeddings_match = True
-
-    # Create a mapping from original indices to exported array positions
-    index_to_position = {idx: pos for pos, idx in enumerate(original_indices)}
-
-    for i, idx in enumerate(validation_indices):
-        # Find the position in the exported embeddings array
-        if idx not in index_to_position:
-            print(f"    ❌ TileDB index {idx} not found in exported embeddings")
-            embeddings_match = False
-            continue
-
-        exported_position = index_to_position[idx]
-        exported_embedding = embeddings_exported[exported_position]
-        original_embedding = original_embeddings[i]
-
-        max_diff = np.max(np.abs(exported_embedding - original_embedding))
-        if max_diff > 1e-10:  # Very small tolerance for numerical precision
-            print(
-                f"    ❌ Embedding mismatch for cell {idx}: max diff = {max_diff:.2e}"
-            )
-            embeddings_match = False
+    embeddings_match = np.allclose(
+        embeddings_exported,
+        original_embeddings,
+        rtol=1e-10,
+        atol=1e-10,
+    )
 
     if embeddings_match:
         print("    ✅ All embedding values match")
+    else:
+        max_diff = np.max(
+            np.abs(embeddings_exported[: len(original_indices)] - original_embeddings)
+        )
+        print(f"    ❌ Embedding mismatch: max diff = {max_diff:.2e}")
 
     if labels_match and embeddings_match:
         print("  🎉 Validation passed! All exported data matches original TileDB.")

@@ -16,7 +16,7 @@ scimilarity-export-embeddings:
 	--labels study \
 	--validate \
 	--stratify \
-	--num-embeddings 100000
+	--num-embeddings 1000000
 	parquet-tools inspect data/scimilarity/labels.parquet
 
 mapper-train:
@@ -31,7 +31,6 @@ mapper-map:
         data/scimilarity/embeddings.npy \
         data/scimilarity/ \
 		--export-png \
-        --num-embeddings 1000000
 
 mapper-export:
 	python src/cellspace/scripts/mapper.py export \

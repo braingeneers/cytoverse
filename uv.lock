@@ -2782,7 +2782,7 @@ wheels = [
 
 [[package]]
 name = "scimilarity"
-version = "0.4.0.post1.dev3+g52824e5"
+version = "0.4.1"
 source = { directory = "../scimilarity" }
 dependencies = [
     { name = "captum" },
@@ -2817,7 +2817,7 @@ requires-dist = [
     { name = "tiledb-vector-search", specifier = ">=0.11.0" },
     { name = "torch", specifier = ">=1.10.1" },
     { name = "tqdm" },
-    { name = "zarr", specifier = ">=2.6.1" },
+    { name = "zarr", specifier = ">=2.6.1,<3.0.0" },
 ]
 provides-extras = ["testing"]
 

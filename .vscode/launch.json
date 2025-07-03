@@ -5,30 +5,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "scimilarity embeddings",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/scimilarity_export.py",
-      "console": "integratedTerminal",
-      "args": [
-        "embeddings",
-        "${workspaceFolder}/data/scimilarity/model_v1.1/cellsearch",
-        "${workspaceFolder}/data/scimilarity"
-      ]
-    },
-    {
-      "name": "scimilarity h5ad",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/scimilarity_export.py",
-      "console": "integratedTerminal",
-      "args": [
-        "h5ad",
-        "${workspaceFolder}/data/scimilarity/model_v1.1/cellsearch",
-        "${workspaceFolder}/data/scimilarity"
-      ]
-    },
-    {
       "name": "scimilarity model",
       "type": "debugpy",
       "request": "launch",
@@ -38,6 +14,21 @@
         "model",
         "${workspaceFolder}/data/scimilarity/model_v1.1",
         "${workspaceFolder}/web/public/models/scimilarity"
+      ]
+    },
+    {
+      "name": "scimilarity embeddings",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cellspace/scripts/scimilarity_export.py",
+      "console": "integratedTerminal",
+      "args": [
+        "embeddings",
+        "${workspaceFolder}/data/scimilarity/model_v1.1/cellsearch",
+        "${workspaceFolder}/data/scimilarity",
+        "--validate",
+        "--num-embeddings",
+        "10000"
       ]
     },
     {
@@ -51,7 +42,7 @@
         "${workspaceFolder}/data/scimilarity/embeddings.npy",
         "${workspaceFolder}/web/public/models/scimilarity/",
         "--num-embeddings",
-        "1000"
+        "100000"
       ]
     },
     {
