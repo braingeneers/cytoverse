@@ -220,54 +220,116 @@ python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
 - ✅ Performance metrics show expected search efficiency gains
 - ✅ Browser asset export ready for Milestone 5
 
-### 📋 Milestone 4: IVFPQ Training Pipeline
+### 📋 Milestone 4: Complete IVFPQ Implementation & Dataset Partitioning
 
-**Status**: ✅ **FOUNDATION READY** - Training pipeline implemented, needs dataset processing
+**Status**: 🔄 **IN PROGRESS** - IVFPQ class implementation and dataset export
 
-**Completed**:
+**Goal**: Implement the complete IVFPQ class that combines PQ and IVF modules, and create dataset partitioning with Arrow format export for browser consumption.
 
-- ✅ Complete IVFPQ training script (`src/cellspace/scripts/ivfpq_train.py`)
-- ✅ Integration of PQ and IVF modules
-- ✅ Browser asset export functionality
-- ✅ Performance testing and validation
-- ✅ Makefile targets for training workflows
+**Deliverables**:
 
-**Remaining Tasks**:
+- [ ] Complete `src/cellspace/ivfpq/ivfpq.py` - Combined IVFPQ class implementation
+- [ ] Dataset partitioning functionality: Export embeddings.npy into k partition files
+- [ ] Arrow/Parquet format export for browser-optimized loading
+- [ ] Centroid index file export in Arrow format with partition metadata
+- [ ] File naming convention that maps to centroid indices
+- [ ] Integration with existing training pipeline
+- [ ] Performance validation on partitioned datasets
 
-- [ ] Full SCimilarity dataset processing and training
-- [ ] Optimized configuration for 23.4M cell dataset
-- [ ] Parquet export format for browser consumption:
-  - Coarse centroids parquet file
-  - Partitioned parquet files with PQ codes and cell IDs
-- [ ] Production-ready configuration management
-- [ ] Memory-efficient training for large datasets
+**Key Features to Implement**:
 
-**Target deliverables**:
+- **IVFPQ Class**: Combine trained PQ and IVF models for unified interface
+- **Dataset Partitioning**: Use IVF assignments to split embeddings into k partitions
+- **PQ Encoding per Partition**: Apply PQ encoding to vectors within each partition
+- **Arrow Export**: Export each partition as Arrow/Parquet with metadata
+- **Centroid Index**: Export coarse centroids with partition statistics
+- **Memory Efficient**: Stream processing for large datasets (23.4M cells)
 
-- Full-scale IVFPQ model trained on SCimilarity dataset
-- Browser-ready parquet files for efficient loading
-- Optimized configuration for production deployment
+**File Outputs**:
 
-### 📋 Milestone 6: Integration and Optimization
+```
+output/
+├── centroids.arrow           # Coarse centroids + partition metadata
+├── partition_000.arrow       # PQ codes for partition 0
+├── partition_001.arrow       # PQ codes for partition 1
+├── ...
+└── partition_255.arrow       # PQ codes for partition k-1
+```
 
-**Status**: Planned
+### 📋 Milestone 5: Python ANN Search Implementation
 
-**Tasks**:
+**Status**: 📅 **PLANNED** - Python-based approximate nearest neighbor search
 
-- [ ] Full web app integration
-- [ ] UI controls for search parameters
-- [ ] Performance optimization
-- [ ] Memory usage optimization
+**Goal**: Implement complete ANN search functionality in Python using the trained IVFPQ models and partitioned datasets.
 
-### 📋 Milestone 7: Scale Testing
+**Deliverables**:
 
-**Status**: Planned
+- [ ] `IVFPQ.search()` method for ANN queries with configurable n_probe
+- [ ] Query processing: Raw vector → Partition selection → PQ distance computation
+- [ ] K-nearest neighbor search with result ranking and filtering
+- [ ] Performance optimization for large-scale search
+- [ ] Comprehensive test suite with synthetic and real queries
+- [ ] Integration with existing training and export pipeline
 
-**Tasks**:
+**Key Features to Implement**:
 
-- [ ] Full 23.4M cell dataset testing
-- [ ] Production-ready configuration
-- [ ] Performance validation
+- **Query Processing**: Accept raw (non-PQ) query vectors
+- **Partition Selection**: Use IVF index to select top n_probe partitions
+- **PQ Distance Computation**: Asymmetric distance calculation for efficiency
+- **Result Aggregation**: Merge and rank results across selected partitions
+- **Configurable Parameters**: n_probe, k (number of neighbors), distance metrics
+- **Performance Monitoring**: Search latency and accuracy metrics
+
+**Search Pipeline**:
+
+```python
+# Example usage
+ivfpq = IVFPQ.load("output/")
+query_vector = np.random.randn(128)  # Raw embedding
+neighbors = ivfpq.search(query_vector, k=10, n_probe=4)
+# Returns: [(vector_id, distance), ...]
+```
+
+### 📋 Milestone 6: Validation & SCimilarity Comparison
+
+**Status**: 📅 **PLANNED** - Validation against SCimilarity ANN search
+
+**Goal**: Develop comprehensive testing and validation framework comparing IVFPQ ANN search results with SCimilarity's built-in search functionality.
+
+**Deliverables**:
+
+- [ ] Enhanced `scimilarity_export.py` to export original TileDB indices
+- [ ] Test script for IVFPQ vs SCimilarity ANN search comparison
+- [ ] Performance benchmarking suite (accuracy, speed, memory usage)
+- [ ] Comprehensive pytest suite for ANN search validation
+- [ ] Documentation of search quality metrics and trade-offs
+- [ ] Production-ready configuration recommendations
+
+**Key Features to Implement**:
+
+- **Index Tracking**: Export original TileDB indices during stratification
+- **Comparative Testing**: Random query selection with ground truth neighbors
+- **Accuracy Metrics**: Recall@k, precision@k, mean reciprocal rank
+- **Performance Metrics**: Query latency, throughput, memory usage
+- **Statistical Analysis**: Confidence intervals and significance testing
+- **Edge Case Testing**: Corner cases, empty results, large k values
+
+**Validation Pipeline**:
+
+```python
+# Example test workflow
+original_embedding = load_random_original_embedding()
+scimilarity_neighbors = scimilarity_api.find_neighbors(original_embedding, k=10)
+ivfpq_neighbors = ivfpq.search(original_embedding, k=10, n_probe=4)
+accuracy = compute_recall_at_k(scimilarity_neighbors, ivfpq_neighbors, k=10)
+```
+
+**Testing Framework**:
+
+- [ ] `tests/test_ivfpq_search.py` - Core ANN search functionality tests
+- [ ] `tests/test_ivfpq_validation.py` - Comparison with SCimilarity
+- [ ] `src/cellspace/scripts/benchmark_search.py` - Performance benchmarking
+- [ ] `src/cellspace/scripts/validate_against_scimilarity.py` - Comparative analysis
 
 ## Technical Details
 
@@ -310,46 +372,44 @@ web/src/ivfpq/          # Browser implementations (TODO)
 
 ## Summary
 
-**Milestone 3 has been successfully completed!** 🎉
+**Milestones 1-3 have been successfully completed!** 🎉
 
-The IVFPQ implementation now includes a complete Inverted File Index (IVF) module that works seamlessly with the existing Product Quantization (PQ) module. Key accomplishments:
+The IVFPQ implementation now includes complete Product Quantization (PQ) and Inverted File Index (IVF) modules with comprehensive training pipelines, browser-side TypeScript implementations, and extensive testing frameworks.
 
-### ✅ What's Working
+### ✅ What's Working (Milestones 1-3)
 
-1. **Complete IVF Implementation**: Full-featured inverted file index with k-means clustering, partition assignment, and efficient search
-2. **Integration**: Seamless integration with existing PQ module architecture
-3. **Training Pipeline**: Comprehensive training scripts supporting PQ-only, IVF-only, and combined IVFPQ workflows
-4. **Testing**: Extensive test coverage with both synthetic and real embedding data
-5. **Browser Assets**: Export functionality for all models and metadata needed for browser-side search
-6. **Performance**: Efficient search with configurable n_probe parameter showing 2-12% dataset coverage for typical queries
+1. **Complete PQ Implementation**: Full-featured product quantization with PyTorch, ONNX export, and browser compatibility
+2. **Complete IVF Implementation**: Inverted file index with k-means clustering, partition assignment, and efficient search preparation
+3. **Browser Integration**: TypeScript implementations, ONNX.js compatibility, and production-ready asset export
+4. **Training Pipeline**: Comprehensive scripts supporting PQ, IVF, and combined training workflows
+5. **Testing**: Extensive test coverage with synthetic and real embedding data validation
 
-### 🎯 Performance Highlights
+### 🎯 Next Steps (Milestones 4-6)
 
-- **Compression**: 32x compression ratio maintained (128D → 16 codes)
-- **Search Efficiency**: With 64 clusters, 1-probe searches only ~2% of dataset, 4-probe searches ~7%
-- **Training Speed**: Fast convergence with k-means++ initialization
-- **Memory Usage**: Compact inverted index representation
-- **Cross-platform**: Works on synthetic data, real SCimilarity embeddings, and various dimensions
+**Milestone 4** focuses on implementing the actual IVFPQ class that combines PQ and IVF, along with dataset partitioning and Arrow format export for browser optimization.
 
-### 📁 Generated Assets
+**Milestone 5** implements the core ANN search functionality in Python, providing the complete approximate nearest neighbor search capability.
 
-The training pipeline now generates all necessary files for browser deployment:
+**Milestone 6** develops comprehensive validation and comparison frameworks against SCimilarity's built-in search, ensuring production-quality accuracy and performance.
 
-- **ONNX Models**: `pq_model.onnx` for PQ encoding
-- **Codebooks**: `codebooks.bin` for PQ decoding
-- **Centroids**: `coarse_centroids.npy` for IVF partition selection
-- **Metadata**: JSON files with model configuration and statistics
-- **Indices**: Serialized IVF index with inverted lists
+### � Technical Architecture Overview
 
-### 🚀 Ready for Next Steps
+The complete IVFPQ system will provide:
 
-With Milestone 3 complete, the foundation is ready for:
+- **32x Compression**: 128D embeddings → 16 bytes (PQ codes)
+- **Efficient Partitioning**: 256 partitions with configurable n_probe search
+- **Browser Compatibility**: Arrow format for fast loading, ONNX.js for inference
+- **Production Scale**: Designed for 23.4M cell datasets with memory-efficient streaming
+- **Quality Validation**: Comprehensive comparison with SCimilarity search quality
 
-- **Milestone 4**: Full-scale training on 23.4M cell dataset with parquet export
-- **Milestone 5**: Browser-side ANN search implementation
-- **Production deployment** with optimized configurations
+### 🚀 Production Readiness
 
-The IVFPQ system is now a complete, production-ready approximate nearest neighbor search solution for large-scale single-cell embedding datasets.
+Upon completion of Milestones 4-6, the IVFPQ system will be ready for:
+
+- **Large-scale deployment** on the full SCimilarity dataset
+- **Browser-based ANN search** with sub-second query responses
+- **Quality-assured results** validated against SCimilarity ground truth
+- **Configurable trade-offs** between search speed and accuracy
 
 ## References
 
