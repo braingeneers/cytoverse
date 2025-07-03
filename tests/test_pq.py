@@ -58,7 +58,7 @@ class TestProductQuantizer:
         vectors = torch.randn(n_vectors, d)
 
         pq = ProductQuantizer(d=d, m=m, k=k)
-        pq.train_pq(vectors, n_iterations=10, verbose=False)
+        pq.train_pq(vectors, n_iterations=10)
 
         assert pq.is_trained
         assert pq.codebooks.shape == (m, k, d // m)
@@ -75,7 +75,7 @@ class TestProductQuantizer:
         vectors = torch.randn(n_vectors, d)
 
         pq = ProductQuantizer(d=d, m=m, k=k)
-        pq.train_pq(vectors, n_iterations=20, verbose=False)
+        pq.train_pq(vectors, n_iterations=20)
 
         # Test encode-decode
         with torch.no_grad():
@@ -101,7 +101,7 @@ class TestProductQuantizer:
         vectors = torch.randn(100, 32)
 
         pq = ProductQuantizer(d=32, m=4, k=8)
-        pq.train_pq(vectors, n_iterations=10, verbose=False)
+        pq.train_pq(vectors, n_iterations=10)
 
         error = pq.compute_reconstruction_error(vectors)
         assert isinstance(error, float)
@@ -113,7 +113,7 @@ class TestProductQuantizer:
         vectors = torch.randn(100, 32)
 
         pq = ProductQuantizer(d=32, m=4, k=8)
-        pq.train_pq(vectors, n_iterations=10, verbose=False)
+        pq.train_pq(vectors, n_iterations=10)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = Path(tmpdir) / "test_pq.pkl"
@@ -156,59 +156,3 @@ class TestProductQuantizer:
 
             with pytest.raises(RuntimeError):
                 pq.save(save_path)
-
-    def test_export_onnx(self):
-        """Test ONNX export functionality."""
-        torch.manual_seed(42)
-        vectors = torch.randn(100, 32)
-
-        pq = ProductQuantizer(d=32, m=4, k=8)
-        pq.train_pq(vectors, n_iterations=10, verbose=False)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            onnx_path = Path(tmpdir) / "test_pq.onnx"
-
-            # Export to ONNX (suppress deprecation warnings)
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=DeprecationWarning)
-                pq.export_onnx(onnx_path, batch_size=1)
-            assert onnx_path.exists()
-
-            # Test dynamic batch size export
-            onnx_dynamic_path = Path(tmpdir) / "test_pq_dynamic.onnx"
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=DeprecationWarning)
-                pq.export_onnx(onnx_dynamic_path, batch_size=-1)
-            assert onnx_dynamic_path.exists()
-
-            # Validate ONNX model outputs match PyTorch
-            import onnxruntime as ort
-
-            # Test with small batch
-            test_vectors = vectors[:3].numpy()
-
-            # Run PyTorch model
-            with torch.no_grad():
-                torch_codes = pq(torch.from_numpy(test_vectors))
-
-            # Run ONNX model
-            ort_session = ort.InferenceSession(str(onnx_dynamic_path))
-            onnx_codes = ort_session.run(None, {"input": test_vectors})[0]
-
-            # Compare results
-            assert np.array_equal(
-                torch_codes.numpy(), onnx_codes
-            ), "ONNX and PyTorch outputs should match exactly"
-            assert onnx_dynamic_path.exists()
-
-    def test_export_onnx_untrained_fails(self):
-        """Test that exporting untrained model raises error."""
-        pq = ProductQuantizer(d=32, m=4, k=8)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            onnx_path = Path(tmpdir) / "test_pq.onnx"
-
-            with pytest.raises(RuntimeError):
-                pq.export_onnx(onnx_path)

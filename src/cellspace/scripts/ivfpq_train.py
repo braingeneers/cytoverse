@@ -7,11 +7,11 @@ This script extends the PQ training functionality to include IVF index training,
 enabling the complete IVFPQ pipeline for approximate nearest neighbor search.
 
 Features:
-- Train PQ models on embedding vectors
+- Train PQ models on vectors
 - Train IVF index for dataset partitioning
 - Export models and indices for browser consumption
 - Performance testing and validation
-- Support for real embedding datasets
+- Support for real vector datasets
 """
 
 import typer
@@ -40,45 +40,43 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    help="Train IVFPQ models on embedding vectors",
+    help="Train IVFPQ models on vectors",
     add_completion=False,
 )
 
 
-def _load_embeddings(
-    embeddings_path: Path, max_vectors: Optional[int] = None
+def _load_vectors(
+    vectors_path: Path, max_vectors: Optional[int] = None
 ) -> tuple[torch.Tensor, int]:
-    """Load embeddings from file and return as tensor with dimension."""
-    logger.info(f"Loading embeddings from {embeddings_path}")
+    """Load vectors from file and return as tensor with dimension."""
+    logger.info(f"Loading vectors from {vectors_path}")
 
-    embeddings = np.load(embeddings_path)
+    vectors = np.load(vectors_path)
     logger.info(
-        f"Loaded {embeddings.shape[0]} embeddings of dimension {embeddings.shape[1]} from .npy file"
+        f"Loaded {vectors.shape[0]} vectors of dimension {vectors.shape[1]} from .npy file"
     )
 
     # Limit number of vectors if specified
-    if max_vectors is not None and embeddings.shape[0] > max_vectors:
+    if max_vectors is not None and vectors.shape[0] > max_vectors:
         logger.info(f"Using random subset of {max_vectors} vectors for training")
-        indices = np.random.choice(embeddings.shape[0], max_vectors, replace=False)
-        embeddings = embeddings[indices]
+        indices = np.random.choice(vectors.shape[0], max_vectors, replace=False)
+        vectors = vectors[indices]
 
     # Convert to torch tensor
-    embeddings_tensor = torch.from_numpy(embeddings.astype(np.float32))
-    d = embeddings_tensor.shape[1]
+    vectors_tensor = torch.from_numpy(vectors.astype(np.float32))
+    d = vectors_tensor.shape[1]
 
-    return embeddings_tensor, d
+    return vectors_tensor, d
 
 
 @app.command()
 def pq_train(
-    embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings.npy", exists=True
-    ),
+    vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
     output_dir: Path = typer.Argument(
         ..., help="Output directory for trained model and codebooks"
     ),
     m: int = typer.Option(
-        64, help="Number of subquantizers (must divide embedding dimension)"
+        64, help="Number of subquantizers (must divide vector dimension)"
     ),
     k: int = typer.Option(
         256, help="Number of centroids per subquantizer (codebook size)"
@@ -91,9 +89,9 @@ def pq_train(
     ),
 ) -> None:
     """
-    Train a Product Quantization model on embedding vectors.
+    Train a Product Quantization model on vectors.
     """
-    embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
+    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors)
 
     logger.info(f"Training PQ with parameters: d={d}, m={m}, k={k}")
 
@@ -176,9 +174,7 @@ def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> N
 
 @app.command()
 def ivf_train(
-    embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings.npy", exists=True
-    ),
+    vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
     sample_ids: Path = typer.Argument(
         ..., help="Path to sample IDs file (.npy)", exists=True
     ),
@@ -192,10 +188,9 @@ def ivf_train(
     ),
 ) -> None:
     """
-    Train an Inverted File Index on embedding vectors.
+    Train an Inverted File Index on vectors.
     """
-    # embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
-    embeddings_tensor, d = _load_embeddings(embeddings_path)
+    embeddings_tensor, d = _load_vectors(vectors_path)
 
     # Load vector IDs if provided
     sample_ids_tensor = None
@@ -205,7 +200,7 @@ def ivf_train(
 
     if len(ids) != embeddings_tensor.shape[0]:
         raise ValueError(
-            f"Number of sample IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
+            f"Number of sample IDs ({len(ids)}) must match number of vectors ({embeddings_tensor.shape[0]})"
         )
 
     logger.info(f"Training IVF with parameters: d={d}, n_partitions={n_partitions}")
@@ -237,20 +232,20 @@ def ivf_train(
 
 @app.command()
 def train_ivfpq(
-    embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings file (.npy or .parquet)", exists=True
+    vectors_path: Path = typer.Argument(
+        ..., help="Path to vectors file (.npy or .parquet)", exists=True
     ),
     sample_ids: Path = typer.Argument(None, help="Path to sample IDs file (.npy)"),
     output_dir: Path = typer.Argument(..., help="Output directory for trained models"),
     # PQ parameters
     m: int = typer.Option(
-        64, help="Number of subquantizers (must divide embedding dimension)"
+        64, help="Number of subquantizers (must divide vector dimension)"
     ),
     k: int = typer.Option(
         256, help="Number of centroids per subquantizer (codebook size)"
     ),
     # IVF parameters
-    n_clusters: int = typer.Option(256, help="Number of coarse clusters for IVF index"),
+    n_clusters: int = typer.Option(256, help="Number of partitions for IVF index"),
     # Training parameters
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to use for training (None = all)"
@@ -264,11 +259,12 @@ def train_ivfpq(
     test_reconstruction: bool = typer.Option(
         True, help="Test reconstruction error and search performance"
     ),
+    export_onnx: bool = typer.Option(True, help="Export trained models to ONNX format"),
 ) -> None:
     """
-    Train complete IVFPQ models (both PQ and IVF) on embedding vectors.
+    Train complete IVFPQ models (both PQ and IVF) on vectors and export assets.
     """
-    embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
+    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors)
 
     # Load sample IDs if provided
     ids = np.load(sample_ids)
@@ -277,12 +273,12 @@ def train_ivfpq(
 
     if len(ids) != embeddings_tensor.shape[0]:
         raise ValueError(
-            f"Number of sample IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
+            f"Number of sample IDs ({len(ids)}) must match number of vectors ({embeddings_tensor.shape[0]})"
         )
 
     logger.info(f"Training IVFPQ with parameters:")
     logger.info(f"  PQ: d={d}, m={m}, k={k}")
-    logger.info(f"  IVF: n_clusters={n_clusters}")
+    logger.info(f"  IVF: n_partitions={n_clusters}")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -299,7 +295,7 @@ def train_ivfpq(
 
     # Train IVF index
     logger.info("=== Training Inverted File Index ===")
-    ivf = InvertedFileIndex(d=d, n_clusters=n_clusters)
+    ivf = InvertedFileIndex(d=d, n_partitions=n_clusters)
     ivf.train_ivf(
         embeddings_tensor, sample_ids_tensor, n_iterations=ivf_iterations, verbose=True
     )
@@ -317,8 +313,24 @@ def train_ivfpq(
         onnx_path = output_dir / "pq_model.onnx"
         pq.export_onnx(onnx_path, batch_size=-1)
 
-        # Export PQ browser assets
-        _export_pq(pq, output_dir)
+        # Export PQ browser assets (similar to pq_train function)
+        codebooks_path = output_dir / "codebooks.bin"
+        codebooks_np = pq.codebooks.detach().cpu().numpy()
+        codebooks_np.astype(np.float32).tofile(codebooks_path)
+
+        # Export metadata as JSON
+        metadata = {
+            "d": pq.d,
+            "m": pq.m,
+            "k": pq.k,
+            "d_sub": pq.d_sub,
+            "codebooks_shape": list(codebooks_np.shape),
+            "is_trained": pq.is_trained,
+        }
+
+        pq_metadata_path = output_dir / "pq_metadata.json"
+        with open(pq_metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
 
         # Export IVF assets
         metadata_path = output_dir / "ivf_metadata.json"
@@ -327,7 +339,7 @@ def train_ivfpq(
             json.dump(metadata, f, indent=2)
 
         centroids_path = output_dir / "coarse_centroids.npy"
-        np.save(centroids_path, ivf.coarse_centroids.detach().cpu().numpy())
+        np.save(centroids_path, ivf.centroids.detach().cpu().numpy())
 
         logger.info(f"Exported browser assets to {output_dir}")
 
@@ -343,8 +355,8 @@ def test_trained_models(
     model_dir: Path = typer.Argument(
         ..., help="Directory containing trained models", exists=True
     ),
-    embeddings_path: Optional[Path] = typer.Option(
-        None, help="Path to test embeddings (uses training data if None)"
+    vectors_path: Optional[Path] = typer.Option(
+        None, help="Path to test vectors (uses training data if None)"
     ),
     n_test_vectors: int = typer.Option(
         100, help="Number of vectors to use for testing"
@@ -365,24 +377,24 @@ def test_trained_models(
         return
 
     # Load test embeddings
-    if embeddings_path is None:
+    if vectors_path is None:
         # Look for embeddings in common locations
         possible_paths = [
             Path("data/scimilarity/embeddings.npy"),
             Path("data/sample.h5ad"),  # Will need to be processed
         ]
 
-        embeddings_path = None
+        vectors_path = None
         for path in possible_paths:
             if path.exists():
-                embeddings_path = path
+                vectors_path = path
                 break
 
-        if embeddings_path is None:
-            logger.error("No test embeddings found. Please specify --embeddings-path")
+        if vectors_path is None:
+            logger.error("No test vectors found. Please specify --vectors-path")
             return
 
-    embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors=None)
+    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors=None)
 
     # Subsample for testing
     if embeddings_tensor.shape[0] > n_test_vectors:
@@ -408,19 +420,19 @@ def test_trained_models(
 
 @app.command()
 def train_complete_ivfpq(
-    embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings file (.npy or .parquet)", exists=True
+    vectors_path: Path = typer.Argument(
+        ..., help="Path to vectors file (.npy or .parquet)", exists=True
     ),
     output_dir: Path = typer.Argument(..., help="Output directory for trained models"),
     # PQ parameters
     m: int = typer.Option(
-        16, help="Number of subquantizers (must divide embedding dimension)"
+        16, help="Number of subquantizers (must divide vector dimension)"
     ),
     k: int = typer.Option(
         256, help="Number of centroids per subquantizer (codebook size)"
     ),
     # IVF parameters
-    n_clusters: int = typer.Option(256, help="Number of coarse clusters for IVF index"),
+    n_clusters: int = typer.Option(256, help="Number of partitions for IVF index"),
     # Training parameters
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to use for training (None = all)"
@@ -446,7 +458,7 @@ def train_complete_ivfpq(
     and PQ encoding within each partition, providing the foundation for
     efficient approximate nearest neighbor search.
     """
-    embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
+    embeddings_tensor, d = _load_vectors(vectors_path, max_vectors)
 
     # Load vector IDs if provided
     vector_ids_tensor = None
@@ -457,13 +469,13 @@ def train_complete_ivfpq(
 
         if len(ids) != embeddings_tensor.shape[0]:
             raise ValueError(
-                f"Number of vector IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
+                f"Number of vector IDs ({len(ids)}) must match number of vectors ({embeddings_tensor.shape[0]})"
             )
 
     logger.info(f"Training complete IVFPQ model with parameters:")
     logger.info(f"  Dimension: {d}")
     logger.info(f"  PQ: m={m}, k={k}")
-    logger.info(f"  IVF: n_clusters={n_clusters}")
+    logger.info(f"  IVF: n_partitions={n_clusters}")
     logger.info(f"  Training vectors: {embeddings_tensor.shape[0]:,}")
 
     # Create output directory

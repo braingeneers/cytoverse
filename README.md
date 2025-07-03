@@ -2,6 +2,8 @@
 
 Search, display and label cells in foundation model embedding space
 
+NOTE: Under heavy development and refactoring, not ready for reproducible installs...
+
 [https://cells-test.gi.ucsc.edu/cellspace](https://cells-test.gi.ucsc.edu/cellspace)
 
 ![Alt text](screenshot.png?raw=true 'Cell Space Screenshot')

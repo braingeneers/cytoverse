@@ -20,7 +20,7 @@ import anndata as ad
 
 # Create Typer app
 app = typer.Typer(
-    help="Export SCimilarity model, embeddings and labels",
+    help="Export SCimilarity model, vectors and labels",
     add_completion=False,
 )
 
@@ -45,11 +45,11 @@ def model(
     # Create output directory if it doesn't exist
     output_path.mkdir(parents=True, exist_ok=True)
 
-    embedding_model_path = output_path / "model.onnx"
+    vector_model_path = output_path / "model.onnx"
     torch.onnx.export(
         ce.model,
         torch.zeros(1, ce.n_genes),
-        embedding_model_path,
+        vector_model_path,
         export_params=True,
         opset_version=14,  # Use version 14 for better transformer support, 17 latest
         do_constant_folding=True,
@@ -59,17 +59,17 @@ def model(
         verbose=False,  # Reduce verbosity
     )
 
-    print(f"ONNX model saved to {embedding_model_path}")
+    print(f"ONNX model saved to {vector_model_path}")
 
     print("Validating ONNX model...")
-    onnx_model = onnx.load(str(embedding_model_path))
+    onnx_model = onnx.load(str(vector_model_path))
     onnx.checker.check_model(onnx_model)
     print("  ✅ ONNX model validation passed")
 
     print("Checking concordance with scimilarity model...")
 
     # Create CPU ONNX runtime session
-    ort_session_cpu = ort.InferenceSession(str(embedding_model_path))
+    ort_session_cpu = ort.InferenceSession(str(vector_model_path))
 
     # Try to create GPU ONNX runtime session
     gpu_available = False
@@ -79,7 +79,7 @@ def model(
 
         if "CUDAExecutionProvider" in providers:
             ort_session_gpu = ort.InferenceSession(
-                str(embedding_model_path),
+                str(vector_model_path),
                 providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
             )
             gpu_available = True
@@ -180,7 +180,7 @@ def model(
 
 
 @app.command()
-def embeddings(
+def vectors(
     model_path: Path = typer.Argument(
         exists=True,
         file_okay=False,
@@ -196,10 +196,10 @@ def embeddings(
         ["prediction", "tissue", "study"],
         help="Labels to export (First used for stratification, others exported as well)",
     ),
-    num_embeddings: int = typer.Option(
+    num_vectors: int = typer.Option(
         None,
-        "--num-embeddings",
-        help="Number of embeddings to export (default: export all embeddings)",
+        "--num-vectors",
+        help="Number of vectors to export (default: export all vectors)",
     ),
     stratify: bool = typer.Option(
         False,
@@ -213,7 +213,7 @@ def embeddings(
     ),
 ) -> None:
     """
-    Export embeddings and optionally associated expression data from a SCimilarity model.
+    Export vectors and optionally associated expression data from a SCimilarity model.
 
     Export behavior:
     - If --num-cells is not specified: export all cells in TileDB order
@@ -237,19 +237,19 @@ def embeddings(
         print(f"Total cells in TileDB: {total_cells}")
 
         # Step 1: Generate the list of indices to export
-        if num_embeddings is None:
+        if num_vectors is None:
             # Export all cells in TileDB order
             print("Exporting ALL cells in TileDB order...")
             sampled_indices = list(range(total_cells))
         elif not stratify:
-            # Export random num_embeddings in TileDB order (no stratification)
-            print(f"Exporting random {num_embeddings} embeddings in TileDB order...")
+            # Export random num_vectors in TileDB order (no stratification)
+            print(f"Exporting random {num_vectors} vectors in TileDB order...")
             sampled_indices = np.random.choice(
-                total_cells, size=num_embeddings, replace=False
+                total_cells, size=num_vectors, replace=False
             )
         else:
             # Stratified sampling for subset
-            print(f"Stratified sampling {num_embeddings} embeddings...")
+            print(f"Stratified sampling {num_vectors} vectors...")
             print("Reading metadata for stratification...")
 
             # Read all rows for stratification (this is unavoidable for stratification)
@@ -261,7 +261,7 @@ def embeddings(
             # Use stratified sampling
             print("Stratifying on:", labels[0])
             sss = StratifiedShuffleSplit(
-                n_splits=1, train_size=num_embeddings, random_state=42
+                n_splits=1, train_size=num_vectors, random_state=42
             )
             strat_sample_indices, _ = next(sss.split(df_strat.index, strata_labels))
 
@@ -270,20 +270,20 @@ def embeddings(
 
     sampled_indices.sort()  # TileDB requires sorted indices
 
-    print(f"Outputting {len(sampled_indices)} embeddings to {output_path}...")
+    print(f"Outputting {len(sampled_indices)} vectors to {output_path}...")
     os.makedirs(output_path, exist_ok=True)
 
-    # Step 2: Load metadata and embeddings for sampled indices only
+    # Step 2: Load metadata and vectors for sampled indices only
     print("Loading metadata...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
         metadata_df = metadata_db.query(attrs=labels).df[sampled_indices]
     print(f"  Loaded metadata shape: {metadata_df.shape}")
 
-    print("Loading embeddings...")
-    embeddings = scimilarity.utils.embedding_from_tiledb(
-        sampled_indices, str(model_path / "cell_embedding")
+    print("Loading vectors...")
+    vectors = scimilarity.utils.vector_from_tiledb(
+        sampled_indices, str(model_path / "cell_vector")
     )
-    print(f"  Loaded embeddings shape: {embeddings.shape}")
+    print(f"  Loaded vectors shape: {vectors.shape}")
 
     for label in labels:
         metadata_df[label] = metadata_df[label].astype("category")
@@ -296,24 +296,24 @@ def embeddings(
         index=False,
     )
 
-    # Export embeddings as numpy array
-    embeddings_path = output_path / "embeddings.npy"
-    np.save(embeddings_path, embeddings)
+    # Export vectors as numpy array
+    vectors_path = output_path / "vectors.npy"
+    np.save(vectors_path, vectors)
 
     # Export sample ids as numpy array
-    sample_ids_path = output_path / "sample_ids.npy"
-    np.save(sample_ids_path, sampled_indices)
+    vector_ids_path = output_path / "vector_ids.npy"
+    np.save(vector_ids_path, sampled_indices)
 
     print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
-    print(f"Embeddings saved to {embeddings_path} (shape: {embeddings.shape})")
-    print(f"Sample IDs saved to {sample_ids_path} (shape: {len(sampled_indices)})")
+    print(f"Embeddings saved to {vectors_path} (shape: {vectors.shape})")
+    print(f"Vector IDs saved to {vector_ids_path} (shape: {len(sampled_indices)})")
     print(f"Sampled indices: {sampled_indices[:10]}... (total {len(sampled_indices)})")
 
     # Validation if requested
     if validate:
         print("\n🔍 Validating exported files...")
         _validate_exports(
-            model_path, labels_path, embeddings_path, labels, sampled_indices[0:10]
+            model_path, labels_path, vectors_path, labels, sampled_indices[0:10]
         )
 
     print(f"Exported {len(sampled_indices)} cells to {output_path}")
@@ -322,7 +322,7 @@ def embeddings(
 def _validate_exports(
     model_path: Path,
     labels_path: Path,
-    embeddings_path: Path,
+    vectors_path: Path,
     labels: list[str],
     original_indices: list[int],
 ) -> None:
@@ -331,15 +331,15 @@ def _validate_exports(
     # Read exported files
     print("  Reading from exported files...")
     labels_df_exported = pd.read_parquet(labels_path)[: len(original_indices)]
-    embeddings_exported = np.load(embeddings_path)[: len(original_indices)]
+    vectors_exported = np.load(vectors_path)[: len(original_indices)]
 
     # Read validation samples from original TileDB
     print("  Reading from original TileDB...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
         original_metadata = metadata_db.query(attrs=labels).df[original_indices]
 
-    original_embeddings = scimilarity.utils.embedding_from_tiledb(
-        original_indices, str(model_path / "cell_embedding")
+    original_vectors = scimilarity.utils.vector_from_tiledb(
+        original_indices, str(model_path / "cell_vector")
     )
 
     # Validate labels using DataFrame comparison
@@ -352,24 +352,24 @@ def _validate_exports(
         labels_match = False
         print(f"    ❌ Label mismatch")
 
-    # Validate embeddings
-    print("  Validating embeddings...")
-    embeddings_match = np.allclose(
-        embeddings_exported,
-        original_embeddings,
+    # Validate vectors
+    print("  Validating vectors...")
+    vectors_match = np.allclose(
+        vectors_exported,
+        original_vectors,
         rtol=1e-10,
         atol=1e-10,
     )
 
-    if embeddings_match:
-        print("    ✅ All embedding values match")
+    if vectors_match:
+        print("    ✅ All vector values match")
     else:
         max_diff = np.max(
-            np.abs(embeddings_exported[: len(original_indices)] - original_embeddings)
+            np.abs(vectors_exported[: len(original_indices)] - original_vectors)
         )
         print(f"    ❌ Embedding mismatch: max diff = {max_diff:.2e}")
 
-    if labels_match and embeddings_match:
+    if labels_match and vectors_match:
         print("  🎉 Validation passed! All exported data matches original TileDB.")
     else:
         print("  ⚠️ Validation found mismatches. Please check the export process.")
@@ -389,36 +389,36 @@ def _validate_exports(
 #         exists=True,
 #         file_okay=False,
 #         dir_okay=True,
-#         help="Directory path where labels.parquet and embeddings.parquet exist",
+#         help="Directory path where labels.parquet and vectors.parquet exist",
 #     ),
 #     num_cells: int = typer.Option(
 #         2, "--num-cells", help="Number of cells to export from CELLxGENE Census"
 #     ),
 # ) -> None:
 #     """
-#     Extract expression data from CELLxGENE Census for cells in exported embeddings.
+#     Extract expression data from CELLxGENE Census for cells in exported vectors.
 #     Requires: pip install cellxgene-census
 #     """
 #     print(f"Loading metadata from {output_path}...")
 
 #     # Check if required files exist
 #     labels_file = output_path / "labels.parquet"
-#     embeddings_file = output_path / "embeddings.parquet"
+#     vectors_file = output_path / "vectors.parquet"
 
 #     if not labels_file.exists():
 #         print(f"Error: {labels_file} not found. Run 'export' command first.")
 #         return
 
-#     if not embeddings_file.exists():
-#         print(f"Error: {embeddings_file} not found. Run 'export' command first.")
+#     if not vectors_file.exists():
+#         print(f"Error: {vectors_file} not found. Run 'export' command first.")
 #         return
 
 #     # Load the exported labels to get cell indices and metadata
 #     labels_df = pd.read_parquet(labels_file)
-#     embeddings_df = pd.read_parquet(embeddings_file)
+#     vectors_df = pd.read_parquet(vectors_file)
 
-#     # Get the first num_cells from the embeddings (which has cell_id as index)
-#     selected_cell_ids = embeddings_df.index[:num_cells].tolist()
+#     # Get the first num_cells from the vectors (which has cell_id as index)
+#     selected_cell_ids = vectors_df.index[:num_cells].tolist()
 
 #     print(f"Selected {len(selected_cell_ids)} cells to extract from Census...")
 #     print(f"Cell IDs: {selected_cell_ids}")
@@ -461,7 +461,7 @@ def _validate_exports(
 #                     if adata_study.n_obs > 0:
 #                         # Add study information to obs
 #                         adata_study.obs["study"] = study
-#                         # Add original cell index for mapping back to embeddings
+#                         # Add original cell index for mapping back to vectors
 #                         adata_study.obs["original_cell_id"] = group.index
 #                         all_adatas.append(adata_study)
 #                         print(

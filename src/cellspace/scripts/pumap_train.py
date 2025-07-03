@@ -20,40 +20,34 @@ import matplotlib.pyplot as plt
 
 # Create Typer app
 app = typer.Typer(
-    help="Train a parametric UMAP model from sample embeddings and export it to ONNX format, then map embeddings using the trained model.",
+    help="Train a parametric UMAP model from vectors and export it to ONNX format, then map vectors using the trained model.",
     add_completion=True,
 )
 
 
 @app.command()
 def train(
-    sample_embeddings_path: Path = typer.Argument(
-        ..., help="Path to embeddings.npy file"
-    ),
+    vectors_path: Path = typer.Argument(..., help="Path to vectors.npy file"),
     output_path: Path = typer.Argument(..., help="Path to output the trained model"),
-    num_embeddings: Optional[int] = typer.Option(
+    num_vectors: Optional[int] = typer.Option(
         None,
-        help="Limit the total number of embeddings used for training, use all if None",
+        help="Limit the total number of vectors used for training, use all if None",
     ),
 ) -> None:
     """
-    Train a parametric UMAP model from sample embeddings and export it to ONNX format.
+    Train a parametric UMAP model from vectors and export it to ONNX format.
     """
-    typer.echo(
-        f"Training parametric UMAP model from embeddings {sample_embeddings_path}"
-    )
+    typer.echo(f"Training parametric UMAP model from vectors {vectors_path}")
 
-    # Load the embeddings
-    embeddings = np.load(sample_embeddings_path)
+    # Load the vectors
+    vectors = np.load(vectors_path)
 
-    # Determine number of embeddings to use
-    num_embeddings = (
-        num_embeddings if num_embeddings is not None else embeddings.shape[0]
-    )
-    if num_embeddings is not None:
-        num_embeddings = min(embeddings.shape[0], num_embeddings)
+    # Determine number of vectors to use
+    num_vectors = num_vectors if num_vectors is not None else vectors.shape[0]
+    if num_vectors is not None:
+        num_vectors = min(vectors.shape[0], num_vectors)
 
-    embeddings = embeddings[:num_embeddings]
+    vectors = vectors[:num_vectors]
 
     # Create and fit the model
     model = umap_pytorch.PUMAP(
@@ -70,17 +64,17 @@ def train(
         epochs=10,
         num_workers=1,
         num_gpus=1,
-        match_nonparametric_umap=False,  # Train network to match embeddings from non parametric umap
+        match_nonparametric_umap=False,  # Train network to match vectors from non parametric umap
     )
 
-    model.fit(torch.from_numpy(embeddings))
+    model.fit(torch.from_numpy(vectors))
 
     # Export to ONNX
     model_output_path = output_path / "model.onnx"
     model_output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         model.model.encoder.encoder,
-        torch.zeros(1, embeddings.shape[1]),
+        torch.zeros(1, vectors.shape[1]),
         model_output_path,
         training=torch.onnx.TrainingMode.EVAL,
         input_names=["input"],
@@ -98,7 +92,7 @@ def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
 
     Args:
         output_path: Directory where to save the PNG file
-        mappings: Raw float32 mappings array of shape (num_embeddings, 2)
+        mappings: Raw float32 mappings array of shape (num_vectors, 2)
     """
     plt.figure(figsize=(10, 10))
     plt.scatter(mappings[:, 0], mappings[:, 1], alpha=0.6, s=1)
@@ -117,60 +111,56 @@ def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
 @app.command()
 def map(
     model_path: Path = typer.Argument(..., help="Path to model.onnx"),
-    sample_embeddings_path: Path = typer.Argument(
-        ..., help="Path to sample-embeddings.npy file"
+    vectors_path: Path = typer.Argument(
+        ..., help="Path to vectors.npy file"
     ),
     output_path: Path = typer.Argument(
         ..., help="Path to output directory for the mapped data"
     ),
     batch_size: int = typer.Option(
-        32, help="Number of samples to process in each batch"
+        32, help="Number of vectors to process in each batch"
     ),
     export_png: bool = typer.Option(
         False, "--export-png", help="Export a reference PNG file"
     ),
-    num_embeddings: Optional[int] = typer.Option(
+    num_vectors: Optional[int] = typer.Option(
         None, help="Limit the total number of inputs processed, process all if None"
     ),
 ) -> None:
     """
-    Map embeddings to a lower-dimensional space using a trained ONNX model.
+    Map vectors to a lower-dimensional space using a trained ONNX model.
     """
-    typer.echo(
-        f"Mapping samples from {sample_embeddings_path} using model {model_path}"
-    )
+    typer.echo(f"Mapping vectors from {vectors_path} using model {model_path}")
 
     # Load the cluster model
     onnx_session = ort.InferenceSession(str(model_path))
     input_name = onnx_session.get_inputs()[0].name
     output_name = onnx_session.get_outputs()[0].name
 
-    # Load the embeddings
-    embeddings = np.load(sample_embeddings_path)
+    # Load the vectors
+    vectors = np.load(vectors_path)
 
-    # Determine number of embeddings to process
-    num_embeddings = (
-        num_embeddings if num_embeddings is not None else embeddings.shape[0]
-    )
-    if num_embeddings is not None:
-        num_embeddings = min(embeddings.shape[0], num_embeddings)
+    # Determine number of vectors to process
+    num_vectors = num_vectors if num_vectors is not None else vectors.shape[0]
+    if num_vectors is not None:
+        num_vectors = min(vectors.shape[0], num_vectors)
 
-    typer.echo(f"Processing {num_embeddings} embeddings with batch size {batch_size}")
+    typer.echo(f"Processing {num_vectors} vectors with batch size {batch_size}")
 
     # Initialize list to store mappings
     all_mappings = []
 
     # Process in batches
-    with tqdm(total=num_embeddings) as pbar:
-        for batch_start in range(0, num_embeddings, batch_size):
-            batch_end = min(batch_start + batch_size, num_embeddings)
+    with tqdm(total=num_vectors) as pbar:
+        for batch_start in range(0, num_vectors, batch_size):
+            batch_end = min(batch_start + batch_size, num_vectors)
             batch_size_actual = batch_end - batch_start
 
-            # Get batch of embeddings
-            batch_embeddings = embeddings[batch_start:batch_end]
+            # Get batch of vectors
+            batch_vectors = vectors[batch_start:batch_end]
 
             # Run the model
-            model_input = {input_name: batch_embeddings.astype(np.float32)}
+            model_input = {input_name: batch_vectors.astype(np.float32)}
             batch_mappings = onnx_session.run([output_name], model_input)[0]
 
             # Store the mappings
@@ -179,7 +169,7 @@ def map(
             pbar.update(batch_size_actual)
 
     # Combine all batches
-    mappings = np.concatenate(all_mappings)  # Shape: (num_embeddings, 2)
+    mappings = np.concatenate(all_mappings)  # Shape: (num_vectors, 2)
 
     # Save raw mappings as a numpy file
     mappings_path = output_path / "mappings.npy"
@@ -221,7 +211,7 @@ def export(
         raise typer.Exit(1)
 
     typer.echo("Loading mappings...")
-    mappings = np.load(mappings_file)  # Shape: (num_embeddings, 2)
+    mappings = np.load(mappings_file)  # Shape: (num_vectors, 2)
 
     # Normalize coordinates to [-1, 1] range while preserving proportions and centering
     typer.echo("Normalizing coordinates to [-1, 1] range with centering...")

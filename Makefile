@@ -28,14 +28,14 @@ scimilarity: scimilarity-model scimilarity-embeddings
 # PUMAP
 pumap-train:
 	python src/cellspace/scripts/pumap_train.py train \
-        data/scimilarity/embeddings.npy \
+        data/scimilarity/vectors.npy \
         web/public/models/scimilarity/pumap \
-        --num-embeddings 100000
+        --num-vectors 100000
 
 pumap-map:
 	python src/cellspace/scripts/pumap_train.py map \
         web/public/models/scimilarity/pumap/model.onnx \
-        data/scimilarity/embeddings.npy \
+        data/scimilarity/vectors.npy \
         data/scimilarity/ \
 		--export-png \
 
@@ -49,7 +49,7 @@ pumap: pumap-train pumap-map pumap-export
 # PQ
 pq-train:
 	python src/cellspace/scripts/ivfpq_train.py pq-train \
-		data/scimilarity/embeddings.npy \
+		data/scimilarity/vectors.npy \
 		web/public/models/scimilarity/pq/ \
 		--m 16 \
 		--k 256 \
@@ -59,8 +59,8 @@ pq-train:
 # IVF
 ivf-train:
 	python src/cellspace/scripts/ivfpq_train.py ivf-train \
-		data/scimilarity/embeddings.npy \
-		data/scimilarity/sample_ids.npy \
+		data/scimilarity/vectors.npy \
+		data/scimilarity/vector_ids.npy \
 		web/public/models/scimilarity/ivf/ \
 		--n-partitions 64 \
 		--max-vectors 10000 \
@@ -68,7 +68,7 @@ ivf-train:
 
 # ivf-train-full:
 # 	python src/cellspace/scripts/ivfpq_train.py train-ivf \
-# 		data/scimilarity/embeddings.npy \
+# 		data/scimilarity/vectors.npy \
 # 		web/public/models/scimilarity/ivf/ \
 # 		--n-clusters 256 \
 # 		--n-iterations 50
@@ -76,7 +76,7 @@ ivf-train:
 # IVFPQ
 ivfpq-train:
 	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \
-		data/scimilarity/embeddings.npy \
+		data/scimilarity/vectors.npy \
 		web/public/models/scimilarity/ivfpq/ \
 		--m 16 \
 		--k 256 \
@@ -87,7 +87,7 @@ ivfpq-train:
 
 ivfpq-train-full:
 	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \
-		data/scimilarity/embeddings.npy \
+		data/scimilarity/vectors.npy \
 		web/public/models/scimilarity/ivfpq/ \
 		--m 64 \
 		--k 256 \
@@ -98,13 +98,13 @@ ivfpq-train-full:
 ivfpq-test:
 	python src/cellspace/scripts/ivfpq_train.py test-trained-models \
 		web/public/models/scimilarity/ivfpq/ \
-		--embeddings-path data/scimilarity/embeddings.npy \
+		--vectors-path data/scimilarity/vectors.npy \
 		--n-test-vectors 1000
 
 # Complete IVFPQ (Arrow format only)
 ivfpq-complete-train:
 	python src/cellspace/scripts/ivfpq_train.py train-complete-ivfpq \
-		data/scimilarity/embeddings.npy \
+		data/scimilarity/vectors.npy \
 		web/public/models/scimilarity/ivfpq/ \
 		--m 16 \
 		--k 256 \
@@ -115,7 +115,7 @@ ivfpq-complete-train:
 
 ivfpq-complete-train-full:
 	python src/cellspace/scripts/ivfpq_train.py train-complete-ivfpq \
-		data/scimilarity/embeddings.npy \
+		data/scimilarity/vectors.npy \
 		web/public/models/scimilarity/ivfpq/ \
 		--m 16 \
 		--k 256 \
