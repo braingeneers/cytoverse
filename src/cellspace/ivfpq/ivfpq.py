@@ -196,9 +196,6 @@ class IVFPQ:
         Returns:
             List of partition IDs sorted by relevance
         """
-        if not self.partition_data:
-            raise RuntimeError("IVFPQ must encode vectors before searching")
-
         # Ensure query_vector is 2D for IVF search_partitions method
         if query_vector.dim() == 1:
             query_vector = query_vector.unsqueeze(0)  # Add batch dimension
@@ -327,7 +324,7 @@ class IVFPQ:
         self._export_centroid_index(ivfpq_dir)
 
         # 4. Export complete metadata
-        metadata_path = ivfpq_dir / "ivfpq_metadata.json"
+        metadata_path = ivfpq_dir / "metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(self.export_metadata(), f, indent=2)
 
@@ -407,3 +404,127 @@ class IVFPQ:
                 writer.write_table(table)
 
         logger.info(f"Exported centroid index to {centroids_file}")
+
+    def search(
+        self,
+        query_vector: torch.Tensor,
+        k: int = 4,
+        n_probe: int = 4,
+        labels: Optional[List[str]] = None,
+        model_path: Optional[Path] = None,
+    ) -> Tuple[List[int], List[int], List[float], List[str]]:
+        """
+        Search for the k nearest neighbors to a query vector.
+
+        This method can work with either in-memory partition data or on-disk partitions.
+        If model_path is provided, it will load partitions from disk dynamically.
+
+        Args:
+            query_vector: Query vector of shape [d]
+            k: Number of nearest neighbors to return
+            n_probe: Number of partitions to search
+            labels: Optional list of labels corresponding to vector IDs
+            model_path: Optional path to load partitions from disk
+
+        Returns:
+            Tuple of (vector_ids, partition_ids, distances, labels_found)
+        """
+        if query_vector.dim() == 1:
+            query_vector = query_vector.unsqueeze(0)  # Add batch dimension
+
+        # Get the most promising partitions
+        selected_partitions = self.search_partitions(query_vector.squeeze(0), n_probe)
+
+        candidates = []  # List of (distance, vector_id, partition_id)
+
+        for partition_id in selected_partitions:
+            if model_path is not None:
+                # Load partition from disk
+                partition_data = self._load_partition_from_disk(
+                    partition_id, model_path
+                )
+            else:
+                # Use in-memory partition data
+                partition_data = self.get_partition_data(partition_id)
+
+            if partition_data["size"] == 0:
+                continue
+
+            # Convert PQ codes back to tensors
+            pq_codes = torch.tensor(partition_data["pq_codes"], dtype=torch.long)
+            vector_ids = partition_data["vector_ids"]
+
+            # Decode PQ codes to approximate vectors
+            reconstructed_vectors = self.pq.decode(pq_codes)
+
+            # Compute distances to query
+            query_expanded = query_vector.expand(reconstructed_vectors.shape[0], -1)
+            distances = torch.norm(reconstructed_vectors - query_expanded, dim=1)
+
+            # Add candidates from this partition
+            for i, (dist, vec_id) in enumerate(zip(distances, vector_ids)):
+                candidates.append((dist.item(), vec_id, partition_id))
+
+        # Sort by distance and take top k
+        candidates.sort(key=lambda x: x[0])
+        top_candidates = candidates[:k]
+
+        # Extract results
+        vector_ids = [c[1] for c in top_candidates]
+        partition_ids = [c[2] for c in top_candidates]
+        distances = [c[0] for c in top_candidates]
+
+        # Add labels if provided
+        labels_found = []
+        if labels is not None:
+            for vec_id in vector_ids:
+                if 0 <= vec_id < len(labels):
+                    labels_found.append(labels[vec_id])
+                else:
+                    labels_found.append("Unknown")
+        else:
+            labels_found = [""] * len(vector_ids)
+
+        return vector_ids, partition_ids, distances, labels_found
+
+    def _load_partition_from_disk(self, partition_id: int, model_path: Path) -> Dict:
+        """
+        Load a partition from disk using Arrow format.
+
+        Args:
+            partition_id: Partition ID to load
+            model_path: Path to the model directory
+
+        Returns:
+            Dictionary with vector_ids, pq_codes, and size
+        """
+        import pyarrow as pa
+
+        partitions_dir = model_path / "ivfpq" / "partitions"
+        partition_file = partitions_dir / f"partition_{partition_id:04d}.arrow"
+
+        if not partition_file.exists():
+            # Return empty partition
+            return {"vector_ids": [], "pq_codes": [], "size": 0}
+
+        # Load Arrow file
+        with pa.OSFile(str(partition_file), "rb") as source:
+            reader = pa.RecordBatchFileReader(source)
+            table = reader.read_all()
+
+        # Convert to Python data structures
+        vector_ids = table["vector_id"].to_pylist()
+
+        # Reconstruct PQ codes from individual columns
+        pq_codes = []
+        for i in range(len(vector_ids)):
+            codes = []
+            for j in range(self.m):
+                codes.append(table[f"code_{j}"][i].as_py())
+            pq_codes.append(codes)
+
+        return {
+            "vector_ids": vector_ids,
+            "pq_codes": pq_codes,
+            "size": len(vector_ids),
+        }
