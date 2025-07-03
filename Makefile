@@ -104,3 +104,25 @@ ivfpq-test:
 		web/public/models/scimilarity/ivfpq/ \
 		--embeddings-path data/scimilarity/embeddings.npy \
 		--n-test-vectors 1000
+
+# Complete IVFPQ
+ivfpq-complete-train:
+	python src/cellspace/scripts/ivfpq_train.py train-complete-ivfpq \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/ivfpq_complete/ \
+		--m 16 \
+		--k 256 \
+		--n-clusters 64 \
+		--max-vectors 10000 \
+		--pq-iterations 30 \
+		--ivf-iterations 30
+
+ivfpq-complete-train-full:
+	python src/cellspace/scripts/ivfpq_train.py train-complete-ivfpq \
+		data/scimilarity/embeddings.npy \
+		web/public/models/scimilarity/ivfpq_complete/ \
+		--m 16 \
+		--k 256 \
+		--n-clusters 256 \
+		--pq-iterations 50 \
+		--ivf-iterations 50

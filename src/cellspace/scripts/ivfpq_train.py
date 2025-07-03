@@ -33,6 +33,7 @@ sys.path.insert(0, str(project_root))
 
 from src.cellspace.ivfpq.pq import ProductQuantizer
 from src.cellspace.ivfpq.ivf import InvertedFileIndex
+from src.cellspace.ivfpq.ivfpq import IVFPQ
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -338,6 +339,145 @@ def test_trained_models(
         logger.info("=== Testing IVF Index ===")
         ivf = InvertedFileIndex.load(ivf_path)
         _test_ivf_search(ivf, test_embeddings, n_probe_values=[1, 2, 4, 8])
+
+
+@app.command()
+def train_complete_ivfpq(
+    embeddings_path: Path = typer.Argument(
+        ..., help="Path to embeddings file (.npy or .parquet)", exists=True
+    ),
+    output_dir: Path = typer.Argument(..., help="Output directory for trained models"),
+    # PQ parameters
+    m: int = typer.Option(
+        16, help="Number of subquantizers (must divide embedding dimension)"
+    ),
+    k: int = typer.Option(
+        256, help="Number of centroids per subquantizer (codebook size)"
+    ),
+    # IVF parameters
+    n_clusters: int = typer.Option(256, help="Number of coarse clusters for IVF index"),
+    # Training parameters
+    max_vectors: Optional[int] = typer.Option(
+        None, help="Maximum number of vectors to use for training (None = all)"
+    ),
+    ivf_iterations: int = typer.Option(
+        50, help="Number of k-means iterations for IVF training"
+    ),
+    pq_iterations: int = typer.Option(
+        50, help="Number of k-means iterations for PQ training"
+    ),
+    vector_ids: Optional[Path] = typer.Option(
+        None, help="Path to vector IDs file (.npy) - if None, uses indices 0...N-1"
+    ),
+    export_onnx: bool = typer.Option(True, help="Export trained models to ONNX format"),
+    test_performance: bool = typer.Option(
+        True, help="Test performance with sample queries"
+    ),
+) -> None:
+    """
+    Train a complete IVFPQ model combining IVF and PQ components.
+
+    This command creates a unified IVFPQ model that handles dataset partitioning
+    and PQ encoding within each partition, providing the foundation for
+    efficient approximate nearest neighbor search.
+    """
+    embeddings_tensor, d = _load_embeddings(embeddings_path, max_vectors)
+
+    # Load vector IDs if provided
+    vector_ids_tensor = None
+    if vector_ids is not None:
+        ids = np.load(vector_ids)
+        vector_ids_tensor = torch.from_numpy(ids)
+        logger.info(f"Loaded {len(ids)} vector IDs")
+
+        if len(ids) != embeddings_tensor.shape[0]:
+            raise ValueError(
+                f"Number of vector IDs ({len(ids)}) must match number of embeddings ({embeddings_tensor.shape[0]})"
+            )
+
+    logger.info(f"Training complete IVFPQ model with parameters:")
+    logger.info(f"  Dimension: {d}")
+    logger.info(f"  PQ: m={m}, k={k}")
+    logger.info(f"  IVF: n_clusters={n_clusters}")
+    logger.info(f"  Training vectors: {embeddings_tensor.shape[0]:,}")
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create and train complete IVFPQ model
+    ivfpq = IVFPQ(d=d, m=m, k=k, n_clusters=n_clusters)
+
+    ivfpq.train(
+        vectors=embeddings_tensor,
+        vector_ids=vector_ids_tensor,
+        ivf_iterations=ivf_iterations,
+        pq_iterations=pq_iterations,
+        verbose=True,
+    )
+
+    # Save the complete model
+    ivfpq.save(output_dir)
+    logger.info(f"Saved complete IVFPQ model to {output_dir}")
+
+    # Export browser assets
+    if export_onnx:
+        logger.info("=== Exporting Browser Assets ===")
+
+        # Export PQ ONNX model
+        onnx_path = output_dir / "pq_model.onnx"
+        ivfpq.pq.export_onnx(onnx_path, batch_size=-1)
+
+        # Export codebooks for browser decoding
+        _export_browser_assets(ivfpq.pq, output_dir)
+
+        # Export coarse centroids
+        centroids_path = output_dir / "coarse_centroids.npy"
+        np.save(centroids_path, ivfpq.ivf.coarse_centroids.detach().cpu().numpy())
+        logger.info(f"Saved coarse centroids to {centroids_path}")
+
+    # Test performance with sample queries
+    if test_performance:
+        logger.info("=== Testing Performance ===")
+        _test_ivfpq_performance(ivfpq, embeddings_tensor)
+
+
+def _test_ivfpq_performance(
+    ivfpq: IVFPQ, embeddings_tensor: torch.Tensor, n_queries: int = 10
+) -> None:
+    """Test IVFPQ performance with random queries."""
+    # Sample random query vectors
+    n_vectors = embeddings_tensor.shape[0]
+    query_indices = torch.randperm(n_vectors)[:n_queries]
+    query_vectors = embeddings_tensor[query_indices]
+
+    logger.info(f"Testing with {n_queries} random query vectors")
+
+    # Test partition selection with different n_probe values
+    for n_probe in [1, 2, 4, 8]:
+        total_candidates = 0
+
+        for i, query_vector in enumerate(query_vectors):
+            selected_partitions = ivfpq.search_partitions(query_vector, n_probe=n_probe)
+
+            # Count total candidate vectors
+            candidates_in_partitions = sum(
+                ivfpq.get_partition_data(pid)["size"] for pid in selected_partitions
+            )
+            total_candidates += candidates_in_partitions
+
+        avg_candidates = total_candidates / n_queries
+        search_fraction = avg_candidates / n_vectors
+
+        logger.info(
+            f"n_probe={n_probe}: {avg_candidates:.0f} avg candidates ({search_fraction:.1%} of dataset)"
+        )
+
+    # Show partition statistics
+    stats = ivfpq.get_partition_stats()
+    logger.info(
+        f"Dataset organized into {stats['non_empty_partitions']}/{stats['total_partitions']} partitions"
+    )
+    logger.info(f"Average partition size: {stats['avg_partition_size']:.0f} vectors")
 
 
 def _load_embeddings(
