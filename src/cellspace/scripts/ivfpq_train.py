@@ -114,6 +114,11 @@ def pq_train(
     # Test reconstruction error
     _test_pq_reconstruction(pq, embeddings_tensor)
 
+    # Save PQ model
+    pq_model_path = output_dir / "model.pkl"
+    pq.save(pq_model_path)
+    logger.info(f"Saved PQ model to {pq_model_path}")
+
     # Export ONNX model
     onnx_path = output_dir / "model.onnx"
     pq.eval()
@@ -217,6 +222,11 @@ def ivf_train(
 
     _test_ivf_search(ivf, vectors_tensor, n_probe_values=[1, 2, 4, 8])
 
+    # Save IVF index
+    ivf_model_path = output_dir / "model.pkl"
+    ivf.save(ivf_model_path)
+    logger.info(f"Saved IVF index to {ivf_model_path}")
+
     # Export metadata
     metadata_path = output_dir / "metadata.json"
     metadata = ivf.export_metadata()
@@ -229,362 +239,6 @@ def ivf_train(
     centroids_df = pd.DataFrame(ivf.centroids.detach().cpu().numpy())
     centroids_df.to_parquet(centroids_path)
     logger.info(f"Saved centroids to {centroids_path}")
-
-
-@app.command()
-def train_ivfpq(
-    vectors_path: Path = typer.Argument(
-        ..., help="Path to vectors file (.npy or .parquet)", exists=True
-    ),
-    sample_ids: Path = typer.Argument(None, help="Path to sample IDs file (.npy)"),
-    output_dir: Path = typer.Argument(..., help="Output directory for trained models"),
-    # PQ parameters
-    m: int = typer.Option(
-        64, help="Number of subquantizers (must divide vector dimension)"
-    ),
-    k: int = typer.Option(
-        256, help="Number of centroids per subquantizer (codebook size)"
-    ),
-    # IVF parameters
-    n_clusters: int = typer.Option(256, help="Number of partitions for IVF index"),
-    # Training parameters
-    max_vectors: Optional[int] = typer.Option(
-        None, help="Maximum number of vectors to use for training (None = all)"
-    ),
-    pq_iterations: int = typer.Option(
-        50, help="Number of k-means iterations for PQ training"
-    ),
-    ivf_iterations: int = typer.Option(
-        50, help="Number of k-means iterations for IVF training"
-    ),
-    test_reconstruction: bool = typer.Option(
-        True, help="Test reconstruction error and search performance"
-    ),
-    export_onnx: bool = typer.Option(True, help="Export trained models to ONNX format"),
-) -> None:
-    """
-    Train complete IVFPQ models (both PQ and IVF) on vectors and export assets.
-    """
-    embeddings, ids = _load_vectors(vectors_path, sample_ids, max_vectors)
-    embeddings_tensor = torch.from_numpy(embeddings)
-    sample_ids_tensor = torch.from_numpy(ids)
-    d = embeddings_tensor.shape[1]
-
-    logger.info(f"Training IVFPQ with parameters:")
-    logger.info(f"  PQ: d={d}, m={m}, k={k}")
-    logger.info(f"  IVF: n_partitions={n_clusters}")
-
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Train PQ model
-    logger.info("=== Training Product Quantization ===")
-    pq = ProductQuantizer(d=d, m=m, k=k)
-    pq.train(embeddings_tensor, n_iterations=pq_iterations, verbose=True)
-
-    # Save PQ model
-    pq_path = output_dir / "pq_model.pkl"
-    pq.save(pq_path)
-    logger.info(f"Saved PQ model to {pq_path}")
-
-    # Train IVF index
-    logger.info("=== Training Inverted File Index ===")
-    ivf = InvertedFileIndex(d=d, n_partitions=n_clusters)
-    ivf.train_ivf(
-        embeddings_tensor, sample_ids_tensor, n_iterations=ivf_iterations, verbose=True
-    )
-
-    # Save IVF index
-    ivf_path = output_dir / "ivf_index.pkl"
-    ivf.save(ivf_path)
-    logger.info(f"Saved IVF index to {ivf_path}")
-
-    # Export for browser use
-    if export_onnx:
-        logger.info("=== Exporting Browser Assets ===")
-
-        # Export PQ ONNX model
-        onnx_path = output_dir / "pq_model.onnx"
-        pq.export_onnx(onnx_path, batch_size=-1)
-
-        # Export PQ browser assets (similar to pq_train function)
-        codebooks_path = output_dir / "codebooks.bin"
-        codebooks_np = pq.codebooks.detach().cpu().numpy()
-        codebooks_np.astype(np.float32).tofile(codebooks_path)
-
-        # Export metadata as JSON
-        metadata = {
-            "d": pq.d,
-            "m": pq.m,
-            "k": pq.k,
-            "d_sub": pq.d_sub,
-            "codebooks_shape": list(codebooks_np.shape),
-            "is_trained": pq.is_trained,
-        }
-
-        pq_metadata_path = output_dir / "pq_metadata.json"
-        with open(pq_metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        # Export IVF assets
-        metadata_path = output_dir / "ivf_metadata.json"
-        metadata = ivf.export_metadata()
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        centroids_path = output_dir / "coarse_centroids.npy"
-        np.save(centroids_path, ivf.centroids.detach().cpu().numpy())
-
-        logger.info(f"Exported browser assets to {output_dir}")
-
-    # Performance testing
-    if test_reconstruction:
-        logger.info("=== Performance Testing ===")
-        _test_pq_reconstruction(pq, embeddings_tensor)
-        _test_ivf_search(ivf, embeddings_tensor, n_probe_values=[1, 2, 4, 8])
-
-
-@app.command()
-def test_trained_models(
-    model_dir: Path = typer.Argument(
-        ..., help="Directory containing trained models", exists=True
-    ),
-    vectors_path: Optional[Path] = typer.Option(
-        None, help="Path to test vectors (uses training data if None)"
-    ),
-    vector_ids_path: Optional[Path] = typer.Option(
-        None, help="Path to vector IDs (generates indices if None)"
-    ),
-    n_test_vectors: int = typer.Option(
-        100, help="Number of vectors to use for testing"
-    ),
-) -> None:
-    """
-    Test previously trained PQ and/or IVF models.
-    """
-    # Look for trained models
-    pq_path = model_dir / "pq_model.pkl"
-    ivf_path = model_dir / "ivf_index.pkl"
-
-    pq_exists = pq_path.exists()
-    ivf_exists = ivf_path.exists()
-
-    if not pq_exists and not ivf_exists:
-        logger.error(f"No trained models found in {model_dir}")
-        return
-
-    # Load test embeddings
-    if vectors_path is None:
-        # Look for embeddings in common locations
-        possible_paths = [
-            Path("data/scimilarity/embeddings.npy"),
-            Path("data/sample.h5ad"),  # Will need to be processed
-        ]
-
-        vectors_path = None
-        for path in possible_paths:
-            if path.exists():
-                vectors_path = path
-                break
-
-        if vectors_path is None:
-            logger.error("No test vectors found. Please specify --vectors-path")
-            return
-
-    # Handle vector_ids - if not provided, try to find or generate them
-    if vector_ids_path is None:
-        # Try to find vector_ids in common locations
-        possible_id_paths = [
-            Path("data/scimilarity/vector_ids.npy"),
-            model_dir / "vector_ids.npy",
-        ]
-
-        for path in possible_id_paths:
-            if path.exists():
-                vector_ids_path = path
-                break
-
-        if vector_ids_path is None:
-            # Generate temporary vector IDs file
-            logger.info("No vector IDs found, generating sequential indices")
-            temp_vectors = np.load(vectors_path)
-            temp_ids = np.arange(len(temp_vectors))
-            vector_ids_path = Path("/tmp/temp_vector_ids.npy")
-            np.save(vector_ids_path, temp_ids)
-
-    embeddings, vector_ids = _load_vectors(
-        vectors_path, vector_ids_path, max_vectors=None
-    )
-    embeddings_tensor = torch.from_numpy(embeddings)
-    d = embeddings_tensor.shape[1]
-
-    # Subsample for testing
-    if embeddings_tensor.shape[0] > n_test_vectors:
-        indices = torch.randperm(embeddings_tensor.shape[0])[:n_test_vectors]
-        test_embeddings = embeddings_tensor[indices]
-    else:
-        test_embeddings = embeddings_tensor
-
-    logger.info(f"Testing with {test_embeddings.shape[0]} vectors")
-
-    # Test PQ model
-    if pq_exists:
-        logger.info("=== Testing PQ Model ===")
-        pq = ProductQuantizer.load(pq_path)
-        _test_pq_reconstruction(pq, test_embeddings)
-
-    # Test IVF index
-    if ivf_exists:
-        logger.info("=== Testing IVF Index ===")
-        ivf = InvertedFileIndex.load(ivf_path)
-        _test_ivf_search(ivf, test_embeddings, n_probe_values=[1, 2, 4, 8])
-
-
-@app.command()
-def train_complete_ivfpq(
-    vectors_path: Path = typer.Argument(
-        ..., help="Path to vectors file (.npy or .parquet)", exists=True
-    ),
-    output_dir: Path = typer.Argument(..., help="Output directory for trained models"),
-    # PQ parameters
-    m: int = typer.Option(
-        16, help="Number of subquantizers (must divide vector dimension)"
-    ),
-    k: int = typer.Option(
-        256, help="Number of centroids per subquantizer (codebook size)"
-    ),
-    # IVF parameters
-    n_clusters: int = typer.Option(256, help="Number of partitions for IVF index"),
-    # Training parameters
-    max_vectors: Optional[int] = typer.Option(
-        None, help="Maximum number of vectors to use for training (None = all)"
-    ),
-    ivf_iterations: int = typer.Option(
-        50, help="Number of k-means iterations for IVF training"
-    ),
-    pq_iterations: int = typer.Option(
-        50, help="Number of k-means iterations for PQ training"
-    ),
-    vector_ids: Optional[Path] = typer.Option(
-        None, help="Path to vector IDs file (.npy) - if None, uses indices 0...N-1"
-    ),
-    export_onnx: bool = typer.Option(True, help="Export trained models to ONNX format"),
-    test_performance: bool = typer.Option(
-        True, help="Test performance with sample queries"
-    ),
-) -> None:
-    """
-    Train a complete IVFPQ model combining IVF and PQ components.
-
-    This command creates a unified IVFPQ model that handles dataset partitioning
-    and PQ encoding within each partition, providing the foundation for
-    efficient approximate nearest neighbor search.
-    """
-    # Handle vector_ids - if not provided, generate sequential indices
-    if vector_ids is None:
-        logger.info("No vector IDs provided, will generate sequential indices")
-        temp_vectors = np.load(vectors_path)
-        temp_ids = np.arange(len(temp_vectors))
-        vector_ids_path = Path("/tmp/temp_vector_ids.npy")
-        np.save(vector_ids_path, temp_ids)
-        vector_ids = vector_ids_path
-
-    embeddings, ids = _load_vectors(vectors_path, vector_ids, max_vectors)
-    embeddings_tensor = torch.from_numpy(embeddings)
-    vector_ids_tensor = torch.from_numpy(ids)
-    d = embeddings_tensor.shape[1]
-
-    logger.info(f"Training complete IVFPQ model with parameters:")
-    logger.info(f"  Dimension: {d}")
-    logger.info(f"  PQ: m={m}, k={k}")
-    logger.info(f"  IVF: n_partitions={n_clusters}")
-    logger.info(f"  Training vectors: {embeddings_tensor.shape[0]:,}")
-
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create and train complete IVFPQ model
-    ivfpq = IVFPQ(d=d, m=m, k=k, n_clusters=n_clusters)
-
-    ivfpq.train(
-        vectors=embeddings_tensor,
-        vector_ids=vector_ids_tensor,
-        ivf_iterations=ivf_iterations,
-        pq_iterations=pq_iterations,
-        verbose=True,
-    )
-
-    # Export browser assets (Arrow format) - this is now the primary export
-    logger.info("=== Exporting Browser Assets (Arrow Format) ===")
-    ivfpq.export_browser_assets(output_dir)
-
-    # Test performance with sample queries
-    if test_performance:
-        logger.info("=== Testing Performance ===")
-        _test_ivfpq_performance(ivfpq, embeddings_tensor)
-
-
-@app.command()
-def export_browser_assets(
-    model_dir: Path = typer.Argument(
-        ..., help="Directory containing trained IVFPQ model", exists=True
-    ),
-    output_dir: Path = typer.Argument(..., help="Output directory for browser assets"),
-) -> None:
-    """
-    Export trained IVFPQ model to Arrow format for browser consumption.
-
-    This creates optimized browser assets including:
-    - Individual partition files in Parquet format
-    - Centroid index with partition metadata
-    - ONNX models and codebooks for client-side inference
-    """
-    # Load the trained model
-    ivfpq = IVFPQ.load(model_dir)
-
-    # Export browser assets
-    ivfpq.export_browser_assets(output_dir)
-
-    logger.info(f"Browser assets exported successfully to {output_dir}")
-
-
-def _test_ivfpq_performance(
-    ivfpq: IVFPQ, embeddings_tensor: torch.Tensor, n_queries: int = 10
-) -> None:
-    """Test IVFPQ performance with random queries."""
-    # Sample random query vectors
-    n_vectors = embeddings_tensor.shape[0]
-    query_indices = torch.randperm(n_vectors)[:n_queries]
-    query_vectors = embeddings_tensor[query_indices]
-
-    logger.info(f"Testing with {n_queries} random query vectors")
-
-    # Test partition selection with different n_probe values
-    for n_probe in [1, 2, 4, 8]:
-        total_candidates = 0
-
-        for i, query_vector in enumerate(query_vectors):
-            selected_partitions = ivfpq.search_partitions(query_vector, n_probe=n_probe)
-
-            # Count total candidate vectors
-            candidates_in_partitions = sum(
-                ivfpq.get_partition_data(pid)["size"] for pid in selected_partitions
-            )
-            total_candidates += candidates_in_partitions
-
-        avg_candidates = total_candidates / n_queries
-        search_fraction = avg_candidates / n_vectors
-
-        logger.info(
-            f"n_probe={n_probe}: {avg_candidates:.0f} avg candidates ({search_fraction:.1%} of dataset)"
-        )
-
-    # Show partition statistics
-    stats = ivfpq.get_partition_stats()
-    logger.info(
-        f"Dataset organized into {stats['non_empty_partitions']}/{stats['n_partitions']} partitions"
-    )
-    logger.info(f"Average partition size: {stats['avg_partition_size']:.0f} vectors")
 
 
 def _test_ivf_search(
@@ -624,6 +278,113 @@ def _test_ivf_search(
         logger.info(
             f"  n_probe={n_probe}: avg {avg_vectors_per_query:.1f} vectors/query ({search_fraction:.2%} of dataset)"
         )
+
+
+@app.command()
+def ivfpq_export(
+    models_path: Path = typer.Argument(
+        ..., help="Path to directory containing pq/ and ivf/ model folders", exists=True
+    ),
+    vectors_path: Path = typer.Argument(
+        ..., help="Path to vectors.npy file", exists=True
+    ),
+    vector_ids_path: Path = typer.Argument(
+        ..., help="Path to vector_ids.npy file", exists=True
+    ),
+    max_vectors: Optional[int] = typer.Option(
+        None, help="Maximum number of vectors to use (None = all)"
+    ),
+    test_performance: bool = typer.Option(
+        True, help="Test performance with sample queries"
+    ),
+) -> None:
+    """
+    Export browser-ready IVFPQ assets from pre-trained PQ and IVF models.
+
+    This command:
+    1. Loads pre-trained PQ model from models_path/pq/
+    2. Loads pre-trained IVF model from models_path/ivf/
+    3. Creates IVFPQ partitions with PQ-encoded vectors
+    4. Exports to models_path/ivfpq/partitions/ and centroid index
+    5. Includes all metadata needed for TypeScript/Python search
+    """
+    # Validate model directories exist
+    pq_model_dir = models_path / "pq"
+    ivf_model_dir = models_path / "ivf"
+    
+    if not pq_model_dir.exists():
+        raise ValueError(f"PQ model directory not found: {pq_model_dir}")
+    if not ivf_model_dir.exists():
+        raise ValueError(f"IVF model directory not found: {ivf_model_dir}")
+
+    logger.info(f"Loading pre-trained models from {models_path}")
+    
+    # Load vectors and vector IDs
+    vectors, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
+    vectors_tensor = torch.from_numpy(vectors)
+    vector_ids_tensor = torch.from_numpy(vector_ids)
+
+    logger.info(f"Loaded {vectors_tensor.shape[0]:,} vectors of dimension {vectors_tensor.shape[1]}")
+
+    # Create IVFPQ instance (it will load the models automatically)
+    logger.info("Creating IVFPQ from pre-trained components")
+    ivfpq = IVFPQ(models_path)
+
+    # Encode vectors with the pre-trained models
+    logger.info("Encoding vectors with IVFPQ")
+    ivfpq.encode_vectors(vectors_tensor, vector_ids_tensor, verbose=True)
+
+    # Export browser assets
+    logger.info("=== Exporting Browser Assets ===")
+    ivfpq.export(models_path)
+
+    # Test performance with sample queries
+    if test_performance:
+        logger.info("=== Testing Performance ===")
+        _test_ivfpq_performance(ivfpq, vectors_tensor)
+
+    logger.info(f"IVFPQ browser assets exported successfully to {models_path / 'ivfpq'}")
+    logger.info(f"Partitions available at: {models_path / 'ivfpq' / 'partitions'}")
+    logger.info(f"Use this directory for browser-based search with the PQ and IVF models")
+
+
+def _test_ivfpq_performance(
+    ivfpq: IVFPQ, embeddings_tensor: torch.Tensor, n_queries: int = 10
+) -> None:
+    """Test IVFPQ performance with random queries."""
+    # Sample random query vectors
+    n_vectors = embeddings_tensor.shape[0]
+    query_indices = torch.randperm(n_vectors)[:n_queries]
+    query_vectors = embeddings_tensor[query_indices]
+
+    logger.info(f"Testing with {n_queries} random query vectors")
+
+    # Test partition selection with different n_probe values
+    for n_probe in [1, 2, 4, 8]:
+        total_candidates = 0
+
+        for i, query_vector in enumerate(query_vectors):
+            selected_partitions = ivfpq.search_partitions(query_vector, n_probe=n_probe)
+
+            # Count total candidate vectors
+            candidates_in_partitions = sum(
+                ivfpq.get_partition_data(pid)["size"] for pid in selected_partitions
+            )
+            total_candidates += candidates_in_partitions
+
+        avg_candidates = total_candidates / n_queries
+        search_fraction = avg_candidates / n_vectors
+
+        logger.info(
+            f"n_probe={n_probe}: {avg_candidates:.0f} avg candidates ({search_fraction:.1%} of dataset)"
+        )
+
+    # Show partition statistics
+    stats = ivfpq.get_partition_stats()
+    logger.info(
+        f"Dataset organized into {stats['non_empty_partitions']}/{stats['total_partitions']} partitions"
+    )
+    logger.info(f"Average partition size: {stats['avg_partition_size']:.0f} vectors")
 
 
 if __name__ == "__main__":

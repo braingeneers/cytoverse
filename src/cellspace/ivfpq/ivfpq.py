@@ -1,12 +1,12 @@
 """
 Combined IVFPQ (Inverted File Index Product Quantization) implementation.
 
-This module combines the IVF and PQ components to provide a complete IVFPQ system
+This module loads pre-trained IVF and PQ components to provide a complete IVFPQ system
 for approximate nearest neighbor search on large-scale embedding datasets.
 
 The IVFPQ approach:
-1. Uses IVF to partition the dataset into coarse clusters
-2. Applies PQ encoding to vectors within each partition
+1. Loads pre-trained IVF index to partition the dataset into partitions
+2. Loads pre-trained PQ model to encode vectors within each partition
 3. Enables efficient search by constraining queries to relevant partitions
 4. Supports export to Arrow/Parquet format for browser consumption
 
@@ -19,7 +19,6 @@ import torch.nn as nn
 import numpy as np
 from typing import Optional, Tuple, List, Dict, Union
 from pathlib import Path
-import pickle
 import logging
 import json
 import pyarrow as pa
@@ -35,62 +34,65 @@ class IVFPQ:
     """
     Combined IVFPQ implementation for approximate nearest neighbor search.
 
-    This class integrates IVF (Inverted File Index) and PQ (Product Quantization)
-    to provide efficient similarity search on large-scale embedding datasets.
+    This class loads pre-trained IVF (Inverted File Index) and PQ (Product Quantization)
+    models to provide efficient similarity search on large-scale embedding datasets.
 
     The IVFPQ process:
-    1. Train IVF index to partition dataset into coarse clusters
-    2. Train PQ model to compress vectors within each partition
+    1. Load pre-trained IVF index from model_path/ivf/model.pkl
+    2. Load pre-trained PQ model from model_path/pq/model.pkl
     3. Encode all vectors using IVF assignments and PQ codes
     4. Enable fast search by selecting relevant partitions first
 
     Args:
-        d: Input vector dimension
-        m: Number of PQ subquantizers
-        k: Number of centroids per PQ subquantizer
-        n_clusters: Number of IVF coarse clusters
+        model_path: Path to directory containing pre-trained models
     """
 
-    def __init__(self, d: int, m: int, k: int, n_clusters: int):
-        self.d = d
-        self.m = m
-        self.k = k
-        self.n_clusters = n_clusters
+    def __init__(self, model_path: Path):
+        model_path = Path(model_path)
 
-        # Initialize IVF and PQ components
-        self.ivf = InvertedFileIndex(d=d, n_clusters=n_clusters)
-        self.pq = ProductQuantizer(d=d, m=m, k=k)
+        # Load pre-trained IVF and PQ components
+        ivf_path = model_path / "ivf" / "model.pkl"
+        pq_path = model_path / "pq" / "model.pkl"
 
-        # Training state
-        self.is_trained = False
+        if not ivf_path.exists():
+            raise FileNotFoundError(f"IVF model not found at {ivf_path}")
+        if not pq_path.exists():
+            raise FileNotFoundError(f"PQ model not found at {pq_path}")
 
-        # Partition data (populated during training)
+        self.ivf = InvertedFileIndex.load(ivf_path)
+        self.pq = ProductQuantizer.load(pq_path)
+
+        # Extract dimensions from loaded models
+        self.d = self.ivf.d
+        self.m = self.pq.m
+        self.k = self.pq.k
+        self.n_partitions = self.ivf.n_partitions
+
+        # Partition data (populated during encode_vectors)
         self.partition_data = (
             {}
         )  # partition_id -> {"vector_ids": [...], "pq_codes": [...]}
 
-        logger.info(f"Initialized IVFPQ: d={d}, m={m}, k={k}, n_clusters={n_clusters}")
+        logger.info(
+            f"Loaded IVFPQ from {model_path}: d={self.d}, m={self.m}, k={self.k}, n_partitions={self.n_partitions}"
+        )
 
-    def train(
+    def encode_vectors(
         self,
         vectors: torch.Tensor,
         vector_ids: Optional[torch.Tensor] = None,
-        ivf_iterations: int = 50,
-        pq_iterations: int = 50,
         verbose: bool = True,
     ) -> None:
         """
-        Train the complete IVFPQ model.
+        Encode vectors using the pre-trained IVFPQ model.
 
         Args:
-            vectors: Training vectors of shape [N, d]
+            vectors: Input vectors of shape [N, d]
             vector_ids: Optional vector IDs of shape [N]. If None, uses indices 0...N-1
-            ivf_iterations: Number of k-means iterations for IVF training
-            pq_iterations: Number of k-means iterations for PQ training
-            verbose: Whether to print training progress
+            verbose: Whether to print encoding progress
         """
         if verbose:
-            logger.info("Starting IVFPQ training...")
+            logger.info("Encoding vectors with IVFPQ...")
 
         n_vectors = vectors.shape[0]
         device = vectors.device
@@ -98,31 +100,12 @@ class IVFPQ:
         if vector_ids is None:
             vector_ids = torch.arange(n_vectors, device=device)
 
-        # Step 1: Train IVF index
-        if verbose:
-            logger.info("Step 1/3: Training IVF index...")
-        self.ivf.train_ivf(
-            vectors=vectors,
-            vector_ids=vector_ids,
-            n_iterations=ivf_iterations,
-            verbose=verbose,
-        )
-
-        # Step 2: Train PQ model on all vectors
-        if verbose:
-            logger.info("Step 2/3: Training PQ model...")
-        self.pq.train_pq(vectors=vectors, n_iterations=pq_iterations, verbose=verbose)
-
-        # Step 3: Encode all vectors and organize by partition
-        if verbose:
-            logger.info("Step 3/3: Encoding vectors and organizing partitions...")
+        # Encode vectors and organize by partition
         self._encode_and_partition_vectors(vectors, vector_ids, verbose)
 
-        self.is_trained = True
-
         if verbose:
-            logger.info("IVFPQ training completed!")
-            self._print_training_summary()
+            logger.info("Vector encoding completed!")
+            self._print_encoding_summary()
 
     def _encode_and_partition_vectors(
         self, vectors: torch.Tensor, vector_ids: torch.Tensor, verbose: bool = True
@@ -144,7 +127,7 @@ class IVFPQ:
         # Organize by partition
         self.partition_data = {}
 
-        for partition_id in range(self.n_clusters):
+        for partition_id in range(self.n_partitions):
             # Find vectors assigned to this partition
             mask = assignments == partition_id
 
@@ -171,11 +154,11 @@ class IVFPQ:
             )
             total_vectors = sum(p["size"] for p in self.partition_data.values())
             logger.info(
-                f"Organized {total_vectors} vectors into {non_empty_partitions}/{self.n_clusters} partitions"
+                f"Organized {total_vectors} vectors into {non_empty_partitions}/{self.n_partitions} partitions"
             )
 
-    def _print_training_summary(self) -> None:
-        """Print summary statistics after training."""
+    def _print_encoding_summary(self) -> None:
+        """Print summary statistics after encoding."""
         total_vectors = sum(p["size"] for p in self.partition_data.values())
         non_empty_partitions = sum(
             1 for p in self.partition_data.values() if p["size"] > 0
@@ -193,9 +176,9 @@ class IVFPQ:
             original_size_bits / compressed_size_bits if compressed_size_bits > 0 else 0
         )
 
-        logger.info("=== IVFPQ Training Summary ===")
+        logger.info("=== IVFPQ Encoding Summary ===")
         logger.info(f"Total vectors: {total_vectors:,}")
-        logger.info(f"Active partitions: {non_empty_partitions}/{self.n_clusters}")
+        logger.info(f"Active partitions: {non_empty_partitions}/{self.n_partitions}")
         logger.info(f"Average partition size: {avg_partition_size:.1f}")
         logger.info(f"Compression ratio: {compression_ratio:.1f}x")
         logger.info(f"Memory per vector: {self.m} bytes (PQ codes)")
@@ -213,8 +196,8 @@ class IVFPQ:
         Returns:
             List of partition IDs sorted by relevance
         """
-        if not self.is_trained:
-            raise RuntimeError("IVFPQ must be trained before searching")
+        if not self.partition_data:
+            raise RuntimeError("IVFPQ must encode vectors before searching")
 
         # Ensure query_vector is 2D for IVF search_partitions method
         if query_vector.dim() == 1:
@@ -235,8 +218,10 @@ class IVFPQ:
         Returns:
             Dictionary with vector_ids, pq_codes, and size
         """
-        if not self.is_trained:
-            raise RuntimeError("IVFPQ must be trained before accessing partition data")
+        if not self.partition_data:
+            raise RuntimeError(
+                "IVFPQ must encode vectors before accessing partition data"
+            )
 
         if partition_id not in self.partition_data:
             raise ValueError(f"Invalid partition ID: {partition_id}")
@@ -250,7 +235,7 @@ class IVFPQ:
         Returns:
             List of all partition IDs
         """
-        return list(range(self.n_clusters))
+        return list(range(self.n_partitions))
 
     def get_partition_stats(self) -> Dict:
         """
@@ -259,15 +244,17 @@ class IVFPQ:
         Returns:
             Dictionary with partition statistics
         """
-        if not self.is_trained:
-            raise RuntimeError("IVFPQ must be trained before accessing partition stats")
+        if not self.partition_data:
+            raise RuntimeError(
+                "IVFPQ must encode vectors before accessing partition stats"
+            )
 
         partition_sizes = [p["size"] for p in self.partition_data.values()]
         non_empty_partitions = sum(1 for size in partition_sizes if size > 0)
         total_vectors = sum(partition_sizes)
 
         return {
-            "total_partitions": self.n_clusters,
+            "total_partitions": self.n_partitions,
             "non_empty_partitions": non_empty_partitions,
             "total_vectors": total_vectors,
             "partition_sizes": partition_sizes,
@@ -284,78 +271,6 @@ class IVFPQ:
             "max_partition_size": max(partition_sizes) if partition_sizes else 0,
         }
 
-    def save(self, output_dir: Path) -> None:
-        """
-        Save the complete IVFPQ model to disk.
-
-        Args:
-            output_dir: Directory to save the model files
-        """
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save individual components
-        self.ivf.save(output_dir / "ivf_index.pkl")
-        self.pq.save(output_dir / "pq_model.pkl")
-
-        # Save partition data
-        partition_data_path = output_dir / "partition_data.pkl"
-        with open(partition_data_path, "wb") as f:
-            pickle.dump(self.partition_data, f)
-
-        # Save metadata
-        metadata = {
-            "d": self.d,
-            "m": self.m,
-            "k": self.k,
-            "n_clusters": self.n_clusters,
-            "is_trained": self.is_trained,
-            "stats": self.get_partition_stats() if self.is_trained else None,
-        }
-
-        metadata_path = output_dir / "ivfpq_metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        logger.info(f"Saved IVFPQ model to {output_dir}")
-
-    @classmethod
-    def load(cls, model_dir: Path) -> "IVFPQ":
-        """
-        Load a trained IVFPQ model from disk.
-
-        Args:
-            model_dir: Directory containing the saved model files
-
-        Returns:
-            Loaded IVFPQ instance
-        """
-        # Load metadata
-        metadata_path = model_dir / "ivfpq_metadata.json"
-        with open(metadata_path, "r") as f:
-            metadata = json.load(f)
-
-        # Create instance
-        ivfpq = cls(
-            d=metadata["d"],
-            m=metadata["m"],
-            k=metadata["k"],
-            n_clusters=metadata["n_clusters"],
-        )
-
-        # Load components
-        ivfpq.ivf = InvertedFileIndex.load(model_dir / "ivf_index.pkl")
-        ivfpq.pq = ProductQuantizer.load(model_dir / "pq_model.pkl")
-
-        # Load partition data
-        partition_data_path = model_dir / "partition_data.pkl"
-        with open(partition_data_path, "rb") as f:
-            ivfpq.partition_data = pickle.load(f)
-
-        ivfpq.is_trained = metadata["is_trained"]
-
-        logger.info(f"Loaded IVFPQ model from {model_dir}")
-        return ivfpq
-
     def export_metadata(self) -> Dict:
         """
         Export complete metadata for browser consumption.
@@ -363,16 +278,15 @@ class IVFPQ:
         Returns:
             Dictionary with all metadata needed for browser-side search
         """
-        if not self.is_trained:
-            raise RuntimeError("IVFPQ must be trained before exporting metadata")
+        if not self.partition_data:
+            raise RuntimeError("IVFPQ must encode vectors before exporting metadata")
 
         return {
             "ivfpq": {
                 "d": self.d,
                 "m": self.m,
                 "k": self.k,
-                "n_clusters": self.n_clusters,
-                "is_trained": self.is_trained,
+                "n_partitions": self.n_partitions,
                 "stats": self.get_partition_stats(),
             },
             "ivf": self.ivf.export_metadata(),
@@ -385,39 +299,39 @@ class IVFPQ:
             },
         }
 
-    def export_browser_assets(self, output_dir: Path) -> None:
+    def export(self, output_dir: Path) -> None:
         """
         Export complete IVFPQ model for browser consumption using Arrow format.
 
         This creates:
-        1. Individual partition files (partition_*.arrow) with PQ codes and vector IDs
+        1. Individual partition files (partitions/partition_*.arrow) with PQ codes and vector IDs
         2. Centroid index file (centroids.arrow) with partition metadata
         3. Browser-compatible metadata files
 
         Args:
             output_dir: Directory to save browser assets
         """
-        if not self.is_trained:
-            raise RuntimeError("IVFPQ must be trained before exporting browser assets")
+        if not self.partition_data:
+            raise RuntimeError("IVFPQ must encode vectors before exporting")
 
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Exporting browser assets to {output_dir}")
+        # Create ivfpq subdirectory
+        ivfpq_dir = output_dir / "ivfpq"
+        ivfpq_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Exporting IVFPQ to {ivfpq_dir}")
 
         # 1. Export individual partition files
-        self._export_partition_files(output_dir)
+        self._export_partition_files(ivfpq_dir)
 
         # 2. Export centroid index with partition metadata
-        self._export_centroid_index(output_dir)
-
-        # 3. Export existing browser assets (PQ ONNX, codebooks, etc.)
-        self._export_pq_browser_assets(output_dir)
+        self._export_centroid_index(ivfpq_dir)
 
         # 4. Export complete metadata
-        metadata_path = output_dir / "ivfpq_metadata.json"
+        metadata_path = ivfpq_dir / "ivfpq_metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(self.export_metadata(), f, indent=2)
 
-        logger.info(f"Browser assets exported successfully to {output_dir}")
+        logger.info(f"IVFPQ export completed successfully to {ivfpq_dir}")
 
     def _export_partition_files(self, output_dir: Path) -> None:
         """Export each partition as a separate Arrow file."""
@@ -455,14 +369,14 @@ class IVFPQ:
     def _export_centroid_index(self, output_dir: Path) -> None:
         """Export centroid index with partition metadata."""
         # Prepare centroid data with metadata
-        centroids = self.ivf.coarse_centroids.detach().cpu().numpy()
+        centroids = self.ivf.centroids.detach().cpu().numpy()
 
         # Create partition metadata
         partition_ids = []
         partition_sizes = []
         partition_files = []
 
-        for partition_id in range(self.n_clusters):
+        for partition_id in range(self.n_partitions):
             partition_ids.append(partition_id)
 
             if partition_id in self.partition_data:
@@ -493,124 +407,3 @@ class IVFPQ:
                 writer.write_table(table)
 
         logger.info(f"Exported centroid index to {centroids_file}")
-
-    def _export_pq_browser_assets(self, output_dir: Path) -> None:
-        """Export PQ-specific browser assets."""
-        # Export PQ ONNX model
-        onnx_path = output_dir / "pq_model.onnx"
-        self.pq.export_onnx(onnx_path, batch_size=-1)
-
-        # Export codebooks as binary file (using existing method)
-        codebooks_path = output_dir / "codebooks.bin"
-        codebooks_np = self.pq.codebooks.detach().cpu().numpy()
-        codebooks_np.astype(np.float32).tofile(codebooks_path)
-
-        # Export PQ metadata
-        pq_metadata = {
-            "d": self.d,
-            "m": self.m,
-            "k": self.k,
-            "d_sub": self.pq.d_sub,
-            "codebooks_shape": list(codebooks_np.shape),
-            "is_trained": self.pq.is_trained,
-        }
-
-        pq_metadata_path = output_dir / "pq_metadata.json"
-        with open(pq_metadata_path, "w") as f:
-            json.dump(pq_metadata, f, indent=2)
-
-        logger.info(f"Exported PQ browser assets (ONNX, codebooks, metadata)")
-
-    @classmethod
-    def load_from_browser_assets(cls, assets_dir: Path) -> "IVFPQ":
-        """
-        Load IVFPQ model from browser assets (Arrow format).
-
-        This is primarily for testing the browser export format.
-        For production use, prefer the standard pickle format.
-
-        Args:
-            assets_dir: Directory containing browser assets
-
-        Returns:
-            Loaded IVFPQ instance
-        """
-        # Load metadata
-        metadata_path = assets_dir / "ivfpq_metadata.json"
-        with open(metadata_path, "r") as f:
-            metadata = json.load(f)
-
-        ivfpq_meta = metadata["ivfpq"]
-
-        # Create instance
-        ivfpq = cls(
-            d=ivfpq_meta["d"],
-            m=ivfpq_meta["m"],
-            k=ivfpq_meta["k"],
-            n_clusters=ivfpq_meta["n_clusters"],
-        )
-
-        # Load centroids from Arrow format
-        centroids_file = assets_dir / "centroids.arrow"
-        with pa.OSFile(str(centroids_file), "rb") as source:
-            with pa.RecordBatchFileReader(source) as reader:
-                centroids_table = reader.read_all()
-        centroids_df = centroids_table.to_pandas()
-
-        # Reconstruct centroid coordinates
-        centroids = np.array(centroids_df["centroid_coords"].tolist())
-
-        # Create IVF index (minimal reconstruction for testing)
-        ivfpq.ivf = InvertedFileIndex(d=ivfpq.d, n_clusters=ivfpq.n_clusters)
-        ivfpq.ivf.coarse_centroids = torch.nn.Parameter(
-            torch.from_numpy(centroids).float()
-        )
-        ivfpq.ivf.is_trained = True
-
-        # Load PQ model from pickle (browser assets don't include full PQ state)
-        # This is a limitation - for full reconstruction we'd need the pickle files
-        logger.warning("Loading from browser assets provides limited functionality")
-        logger.warning("For full model loading, use IVFPQ.load() with pickle files")
-
-        # Load partition data from Arrow files
-        ivfpq._load_partition_data_from_arrow(assets_dir)
-
-        ivfpq.is_trained = True
-        return ivfpq
-
-    def _load_partition_data_from_arrow(self, assets_dir: Path) -> None:
-        """Load partition data from Arrow files."""
-        partitions_dir = assets_dir / "partitions"
-        self.partition_data = {}
-
-        # Load centroid index to get partition info
-        centroids_file = assets_dir / "centroids.arrow"
-        with pa.OSFile(str(centroids_file), "rb") as source:
-            with pa.RecordBatchFileReader(source) as reader:
-                centroids_table = reader.read_all()
-        centroids_df = centroids_table.to_pandas()
-
-        for _, row in centroids_df.iterrows():
-            partition_id = row["centroid_id"]
-            partition_size = row["partition_size"]
-            partition_file = row["partition_file"]
-
-            if partition_size > 0 and partition_file is not None:
-                # Load partition data
-                partition_path = assets_dir / partition_file
-                if partition_path.exists():
-                    with pa.OSFile(str(partition_path), "rb") as source:
-                        with pa.RecordBatchFileReader(source) as reader:
-                            partition_table = reader.read_all()
-                    partition_df = partition_table.to_pandas()
-
-                    # Reconstruct PQ codes array from separate columns
-                    pq_codes = np.zeros((len(partition_df), self.m), dtype=np.uint8)
-                    for i in range(self.m):
-                        pq_codes[:, i] = partition_df[f"code_{i}"].values
-
-                    self.partition_data[partition_id] = {
-                        "vector_ids": partition_df["vector_id"].values.tolist(),
-                        "pq_codes": pq_codes.tolist(),
-                        "size": len(partition_df),
-                    }

@@ -50,6 +50,7 @@ pumap: pumap-train pumap-map pumap-export
 pq-train:
 	python src/cellspace/scripts/ivfpq_train.py pq-train \
 		data/scimilarity/vectors.npy \
+		data/scimilarity/vector_ids.npy \
 		web/public/models/scimilarity/pq/ \
 		--m 16 \
 		--k 256 \
@@ -67,65 +68,10 @@ ivf-train:
 		--n-iterations 30
 
 # IVFPQ
-ivfpq-train:
-	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \
+ivfpq-export:
+	python src/cellspace/scripts/ivfpq_train.py ivfpq-export \
+		web/public/models/scimilarity \
 		data/scimilarity/vectors.npy \
-		web/public/models/scimilarity/ivfpq/ \
-		--m 16 \
-		--k 256 \
-		--n-clusters 64 \
+		data/scimilarity/vector_ids.npy \
 		--max-vectors 10000 \
-		--pq-iterations 30 \
-		--ivf-iterations 30
-
-ivfpq-train-full:
-	python src/cellspace/scripts/ivfpq_train.py train-ivfpq \
-		data/scimilarity/vectors.npy \
-		web/public/models/scimilarity/ivfpq/ \
-		--m 64 \
-		--k 256 \
-		--n-clusters 256 \
-		--pq-iterations 50 \
-		--ivf-iterations 50
-
-ivfpq-test:
-	python src/cellspace/scripts/ivfpq_train.py test-trained-models \
-		web/public/models/scimilarity/ivfpq/ \
-		--vectors-path data/scimilarity/vectors.npy \
-		--n-test-vectors 1000
-
-# Complete IVFPQ (Arrow format only)
-ivfpq-complete-train:
-	python src/cellspace/scripts/ivfpq_train.py train-complete-ivfpq \
-		data/scimilarity/vectors.npy \
-		web/public/models/scimilarity/ivfpq/ \
-		--m 16 \
-		--k 256 \
-		--n-clusters 64 \
-		--max-vectors 10000 \
-		--pq-iterations 30 \
-		--ivf-iterations 30
-
-ivfpq-complete-train-full:
-	python src/cellspace/scripts/ivfpq_train.py train-complete-ivfpq \
-		data/scimilarity/vectors.npy \
-		web/public/models/scimilarity/ivfpq/ \
-		--m 16 \
-		--k 256 \
-		--n-clusters 256 \
-		--pq-iterations 50 \
-		--ivf-iterations 50
-
-# Export browser assets from trained models (legacy compatibility)
-# Export browser assets from trained models (legacy compatibility)
-ivfpq-export-browser:
-	@echo "Note: Browser assets are now exported directly during training"
-	@echo "Use 'make ivfpq-complete-train' to generate Arrow format assets"
-
-# Test Arrow export functionality
-test-arrow-export:
-	python tests/test_arrow_export.py
-
-# Validate browser assets
-validate-browser-assets:
-	python scripts/validate_browser_assets.py web/public/models/scimilarity/ivfpq/
+		--test-performance
