@@ -68,9 +68,6 @@ function App() {
   // Test data state - incremental mappings
   const [xTestData, setXTestData] = useState<number[]>([])
   const [yTestData, setYTestData] = useState<number[]>([])
-  const [scatterPlotRef, setScatterPlotRef] = useState<{
-    drawNewPoints: (x: number[], y: number[]) => void
-  } | null>(null)
 
   // Normalization parameters from metadata
   const [xCenter, setXCenter] = useState<number>(0)
@@ -155,7 +152,10 @@ function App() {
             for (const coordinate of evt.data.umap_coordinates) {
               if (coordinate && coordinate.length >= 2) {
                 // Normalize the coordinates using the same transformation as pumap.py
-                const [normalizedX, normalizedY] = normalizeCoordinates(coordinate[0], coordinate[1])
+                const [normalizedX, normalizedY] = normalizeCoordinates(
+                  coordinate[0],
+                  coordinate[1]
+                )
                 newXPoints.push(normalizedX)
                 newYPoints.push(normalizedY)
               }
@@ -163,11 +163,6 @@ function App() {
 
             setXTestData((prev) => [...prev, ...newXPoints])
             setYTestData((prev) => [...prev, ...newYPoints])
-
-            // Draw the new points on the scatter plot if ref is available
-            if (scatterPlotRef) {
-              scatterPlotRef.drawNewPoints(newXPoints, newYPoints)
-            }
 
             console.log('Added', newXPoints.length, 'new normalized test points')
           }
@@ -602,7 +597,6 @@ function App() {
               yTestData={yTestData}
               categoryData={categoryData}
               categoryLabels={categoryLabels}
-              onRef={setScatterPlotRef}
             />
           ) : (
             <Box display="flex" justifyContent="center" alignItems="center" height="100%">

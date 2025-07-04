@@ -69,7 +69,6 @@ interface ScatterPlotWebGLProps {
   yTestData: number[]
   categoryData: Vector
   categoryLabels: string[]
-  onRef?: (ref: { drawNewPoints: (x: number[], y: number[]) => void } | null) => void
 }
 
 const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
@@ -79,12 +78,12 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
   yTestData,
   categoryData,
   categoryLabels,
-  onRef,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scatterplotRef = useRef<ReturnType<typeof createScatterplot> | null>(null)
   const isInitializedRef = useRef<boolean>(false)
+  const isDrawingRef = useRef<boolean>(false)
 
   // Initial setup and training data rendering
   useEffect(() => {
@@ -170,16 +169,21 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     // Draw the initial training points
     const drawInitialData = async () => {
-      // REMIND: Still getting duplicate draw calls
-      await scatterplot.draw(initialColumnData)
-      isInitializedRef.current = true
-      console.log(
-        'Drew',
-        numPoints,
-        'training points with',
-        categoryColors.length,
-        'category colors'
-      )
+      if (isDrawingRef.current) return
+      isDrawingRef.current = true
+      try {
+        await scatterplot.draw(initialColumnData)
+        isInitializedRef.current = true
+        console.log(
+          'Drew',
+          numPoints,
+          'training points with',
+          categoryColors.length,
+          'category colors'
+        )
+      } finally {
+        isDrawingRef.current = false
+      }
     }
     drawInitialData()
 
@@ -282,49 +286,25 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     // Redraw all points (training + test)
     const redrawAllData = async () => {
-      await scatterplot.draw(columnData)
-      console.log(
-        'Redrew all points:',
-        allX.length,
-        'total (',
-        numPoints,
-        'training +',
-        xTestData.length,
-        'test)'
-      )
+      if (isDrawingRef.current) return
+      isDrawingRef.current = true
+      try {
+        await scatterplot.draw(columnData)
+        console.log(
+          'Redrew all points:',
+          allX.length,
+          'total (',
+          numPoints,
+          'training +',
+          xTestData.length,
+          'test)'
+        )
+      } finally {
+        isDrawingRef.current = false
+      }
     }
     redrawAllData()
   }, [xTestData, yTestData, xTrainData, yTrainData, categoryData, categoryLabels])
-
-  // Setup the ref object for parent component
-  useEffect(() => {
-    // Create a reference object with drawNewPoints method
-    const scatterplotRefObj = {
-      drawNewPoints: (newX: number[], newY: number[]) => {
-        // This function is mainly for triggering redraws
-        // The actual new data should already be added to xTestData/yTestData by the parent
-        // and the useEffect will handle the redraw automatically
-        console.log(
-          'drawNewPoints called with',
-          newX.length,
-          'new points at coordinates:',
-          newX[0],
-          newY[0]
-        )
-      },
-    }
-
-    // Set the reference for parent component
-    if (onRef) {
-      onRef(scatterplotRefObj)
-    }
-
-    return () => {
-      if (onRef) {
-        onRef(null)
-      }
-    }
-  }, [onRef])
 
   return (
     <div
