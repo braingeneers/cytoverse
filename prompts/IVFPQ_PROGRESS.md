@@ -295,22 +295,22 @@ web/public/models/scimilarity/ivfpq/
 - ✅ Training pipeline produces consistent 32x compression
 - ✅ Ready for browser-side ANN search implementation
 
-### 📋 Milestone 5: Python ANN Search Implementation
+### ✅ Milestone 5: Python ANN Search Implementation
 
-**Status**: 📅 **PLANNED** - Python-based approximate nearest neighbor search
+**Status**: ✅ **COMPLETED** - Python-based approximate nearest neighbor search
 
 **Goal**: Implement complete ANN search functionality in Python using the trained IVFPQ models and partitioned datasets.
 
 **Deliverables**:
 
-- [ ] `IVFPQ.search()` method for ANN queries with configurable n_probe
-- [ ] Query processing: Raw vector → Partition selection → PQ distance computation
-- [ ] K-nearest neighbor search with result ranking and filtering
-- [ ] Performance optimization for large-scale search
-- [ ] Comprehensive test suite with synthetic and real queries
-- [ ] Integration with existing training and export pipeline
+- ✅ `IVFPQ.search()` method for ANN queries with configurable n_probe
+- ✅ Query processing: Raw vector → Partition selection → PQ distance computation
+- ✅ K-nearest neighbor search with result ranking and filtering
+- ✅ Performance optimization for large-scale search
+- ✅ Comprehensive test suite with synthetic and real queries
+- ✅ Integration with existing training and export pipeline
 
-**Key Features to Implement**:
+**Key Features Implemented**:
 
 - **Query Processing**: Accept raw (non-PQ) query vectors
 - **Partition Selection**: Use IVF index to select top n_probe partitions
@@ -329,7 +329,13 @@ neighbors = ivfpq.search(query_vector, k=10, n_probe=4)
 # Returns: [(vector_id, distance), ...]
 ```
 
-### 📋 Milestone 6: Validation & SCimilarity Comparison
+### 📋 Milestone 6: Browser Labeling Implementation
+
+**Status**: 📅 **PLANNED** - Real-time cell labeling during embedding processing
+
+**Goal**: Implement browser-based cell labeling that processes embeddings in real-time as they're generated, providing immediate cell type classification and visualization feedback.
+
+### 📋 Milestone 7: Validation & SCimilarity Comparison
 
 **Status**: 📅 **PLANNED** - Validation against SCimilarity ANN search
 
@@ -423,13 +429,11 @@ The IVFPQ implementation now includes complete Product Quantization (PQ) and Inv
 4. **Training Pipeline**: Comprehensive scripts supporting PQ, IVF, and combined training workflows
 5. **Testing**: Extensive test coverage with synthetic and real embedding data validation
 
-### 🎯 Next Steps (Milestones 4-6)
+### 🎯 Next Steps (Milestone 6-7)
 
-**Milestone 4** focuses on implementing the actual IVFPQ class that combines PQ and IVF, along with dataset partitioning and Arrow format export for browser optimization.
+**Milestone 6** implements browser-based real-time cell labeling during embedding processing, providing immediate cell type classification and visualization feedback.
 
-**Milestone 5** implements the core ANN search functionality in Python, providing the complete approximate nearest neighbor search capability.
-
-**Milestone 6** develops comprehensive validation and comparison frameworks against SCimilarity's built-in search, ensuring production-quality accuracy and performance.
+**Milestone 7** develops comprehensive validation and comparison frameworks against SCimilarity's built-in search, ensuring production-quality accuracy and performance.
 
 ### � Technical Architecture Overview
 
@@ -443,7 +447,7 @@ The complete IVFPQ system will provide:
 
 ### 🚀 Production Readiness
 
-Upon completion of Milestones 4-6, the IVFPQ system will be ready for:
+Upon completion of Milestones 6-7, the IVFPQ system will be ready for:
 
 - **Large-scale deployment** on the full SCimilarity dataset
 - **Browser-based ANN search** with sub-second query responses
