@@ -144,21 +144,18 @@ function App() {
           setStatusMessage(evt.data.message)
           setProgress(Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
           break
-        case 'embeddings':
-          console.log('Received embedding:', evt.data.embeddings.slice(0, 4), '...')
-          break
-        case 'mappings':
-          console.log('Received mappings batch:', evt.data.mappings.length, 'points')
-          // Add new mappings to test data - mappings contains [[x1, y1], [x2, y2], ...]
-          if (evt.data.mappings && evt.data.mappings.length > 0) {
+        case 'embedding':
+          console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
+          // Add new embeddings to test data - umap_coordinates contains [[x1, y1], [x2, y2], ...]
+          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
             const newXPoints: number[] = []
             const newYPoints: number[] = []
 
             // Extract X and Y coordinates from the array of tuples and normalize them
-            for (const mapping of evt.data.mappings) {
-              if (mapping && mapping.length >= 2) {
+            for (const coordinate of evt.data.umap_coordinates) {
+              if (coordinate && coordinate.length >= 2) {
                 // Normalize the coordinates using the same transformation as pumap.py
-                const [normalizedX, normalizedY] = normalizeCoordinates(mapping[0], mapping[1])
+                const [normalizedX, normalizedY] = normalizeCoordinates(coordinate[0], coordinate[1])
                 newXPoints.push(normalizedX)
                 newYPoints.push(normalizedY)
               }

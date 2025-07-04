@@ -13,6 +13,7 @@
 import h5wasm from 'h5wasm'
 
 import { InferenceSession, Tensor, env } from 'onnxruntime-web'
+import { loadPQModel, ProductQuantizer } from './ivfpq/pq'
 
 // Define TypeScript interfaces for the worker's data structures
 interface ModelInfo {
@@ -20,6 +21,7 @@ interface ModelInfo {
   genes: string[]
   embeddingSession: InferenceSession
   mappingSession: InferenceSession
+  pqModel: ProductQuantizer
 }
 
 interface Buffer {
@@ -198,7 +200,11 @@ async function instantiateModel(
   )
   console.log('Mapper Output names', mappingSession.outputNames)
 
-  return { modelID, genes, embeddingSession, mappingSession }
+  // Load the PQ model for encoding embeddings
+  const pqModel = await loadPQModel(`${modelsURL}/${modelID}/pq`)
+  console.log('PQ Model loaded successfully')
+
+  return { modelID, genes, embeddingSession, mappingSession, pqModel }
 }
 
 /*
@@ -461,10 +467,9 @@ async function start(
 
       // Wait for inference to complete on the current buffer
       const results = await inferencePromise
-      self.postMessage({
-        type: 'embeddings',
-        embeddings: results.output.data,
-      })
+
+      // Encode embeddings using PQ model
+      const pqCodes = await model.pqModel.encode(results.output.data as Float32Array)
 
       // Map the embeddings to 2D coordinates
       const mappingPromise = model.mappingSession.run({
@@ -483,9 +488,19 @@ async function start(
         ])
       }
 
+      // Calculate test vector IDs for this batch using actual cell names from h5ad file
+      const testVectorIds: string[] = []
+      for (let i = 0; i < buffers[activeBuffer].size; i++) {
+        const cellIndex = batchStart + i
+        testVectorIds.push(cellNames[cellIndex])
+      }
+
+      // Send embedding data: (test_vector_id, pq_embedding, umap_coordinates)
       self.postMessage({
-        type: 'mappings',
-        mappings: coordinates,
+        type: 'embedding',
+        test_vector_id: testVectorIds,
+        pq_embedding: pqCodes,
+        umap_coordinates: coordinates,
       })
 
       self.postMessage({

@@ -17,7 +17,7 @@ export class ProductQuantizer {
   public d: number // Input vector dimension
   public m: number // Number of subquantizers
   public k: number // Number of centroids per subquantizer
-  private d_sub: number // Dimension of each subspace (d/m)
+  public d_sub: number // Dimension of each subspace (d/m)
 
   private codebooks: Float32Array | null = null // Codebooks: [m, k, d_sub]
   private session: ort.InferenceSession | null = null
@@ -331,13 +331,10 @@ export async function loadPQModel(basePath: string): Promise<ProductQuantizer> {
   pq.loadCodebooks(codebooks)
 
   // Load ONNX encoder
-  await pq.loadEncoder(`${basePath}/pq_encoder.onnx`)
+  await pq.loadEncoder(`${basePath}/model.onnx`)
 
-  console.log(`Loaded PQ model v${metadata.version}:`)
-  console.log(`  Dimension: ${metadata.d}`)
-  console.log(`  Subquantizers: ${metadata.m}`)
-  console.log(`  Centroids: ${metadata.k}`)
-  console.log(`  Compression: ${metadata.compression_ratio.toFixed(1)}x`)
+  console.log(`Loaded PQ model from ${basePath}:`)
+  console.log(`  d=${pq.d}, m=${pq.m}, k=${pq.k}, d_sub=${pq.d_sub}`)
 
   return pq
 }
