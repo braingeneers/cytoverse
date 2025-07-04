@@ -258,28 +258,6 @@ function App() {
       setCategoryData(categoryColumn)
       setCategoryLabels(labels)
 
-      // console.log('Loaded scatter plot data:', {
-      //   numPoints,
-      //   numCategories: labels.length,
-      //   category: selectedCategory,
-      //   xRange: [
-      //     Math.min(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
-      //     Math.max(...Array.from({ length: xColumn.length }, (_, i) => xColumn.get(i) || 0)),
-      //   ],
-      //   yRange: [
-      //     Math.min(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
-      //     Math.max(...Array.from({ length: yColumn.length }, (_, i) => yColumn.get(i) || 0)),
-      //   ],
-      //   categoryRange: [
-      //     Math.min(
-      //       ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
-      //     ),
-      //     Math.max(
-      //       ...Array.from({ length: categoryColumn.length }, (_, i) => categoryColumn.get(i) || 0)
-      //     ),
-      //   ],
-      //   sampleLabels: labels.slice(0, 10), // Show first 10 for debugging
-      // })
     } catch (error) {
       console.error('Error loading scatter plot data:', error)
     } finally {
@@ -319,10 +297,6 @@ function App() {
     setStatusMessage('Stopping processing...')
     setIsRunning(false)
     setProgress(0)
-
-    // // Clear test data
-    // setXTestData([])
-    // setYTestData([])
 
     if (embedderWorker) {
       embedderWorker.terminate()
