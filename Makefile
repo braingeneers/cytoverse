@@ -75,3 +75,5 @@ ivfpq-export:
 		data/scimilarity/vector_ids.npy \
 		--max-vectors 10000 \
 		--test-performance
+
+ivfpq: ivf-train pq-train ivfpq-export

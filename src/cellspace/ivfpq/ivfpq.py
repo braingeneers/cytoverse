@@ -338,15 +338,15 @@ class IVFPQ:
         for partition_id, partition_data in self.partition_data.items():
             if partition_data["size"] > 0:  # Only export non-empty partitions
                 # Convert lists back to numpy arrays for processing
-                vector_ids = np.array(partition_data["vector_ids"])
-                pq_codes = np.array(partition_data["pq_codes"])
+                vector_ids = np.array(partition_data["vector_ids"], dtype=np.int32)
+                pq_codes = np.array(partition_data["pq_codes"], dtype=np.uint8)
 
                 # Store PQ codes as individual columns (code_0, code_1, ..., code_m-1)
-                table_data = {"vector_id": vector_ids}
+                table_data = {"vector_id": pa.array(vector_ids, type=pa.int32())}
 
                 # Add each PQ code as a separate column
                 for i in range(self.m):
-                    table_data[f"code_{i}"] = pq_codes[:, i]
+                    table_data[f"code_{i}"] = pa.array(pq_codes[:, i], type=pa.uint8())
 
                 # Create Arrow table with partition data
                 table = pa.table(table_data)
@@ -390,9 +390,9 @@ class IVFPQ:
 
         table = pa.table(
             {
-                "centroid_id": partition_ids,
+                "centroid_id": pa.array(partition_ids, type=pa.int32()),
                 "centroid_coords": centroid_lists,
-                "partition_size": partition_sizes,
+                "partition_size": pa.array(partition_sizes, type=pa.int32()),
                 "partition_file": partition_files,
             }
         )

@@ -26,6 +26,11 @@
         "embeddings",
         "${workspaceFolder}/data/scimilarity/model_v1.1/cellsearch",
         "${workspaceFolder}/data/scimilarity",
+        "--labels",
+        "tissue",
+        "--labels",
+        "prediction",
+        "--stratify",
         "--validate",
         "--num-embeddings",
         "10000"

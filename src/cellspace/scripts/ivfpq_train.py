@@ -236,8 +236,21 @@ def ivf_train(
 
     # Export centroids for browser use
     centroids_path = output_dir / "centroids.arrow"
-    centroids_df = pd.DataFrame(ivf.centroids.detach().cpu().numpy())
-    centroids_df.to_parquet(centroids_path)
+    centroids_data = ivf.centroids.detach().cpu().numpy()
+
+    # Create Arrow table with proper int32 types for IDs
+    import pyarrow as pa
+
+    table = pa.table(
+        {
+            "centroid_id": pa.array(range(centroids_data.shape[0]), type=pa.int32()),
+            "centroid_coords": pa.array([row.tolist() for row in centroids_data]),
+        }
+    )
+
+    with pa.OSFile(str(centroids_path), "wb") as sink:
+        with pa.RecordBatchFileWriter(sink, table.schema) as writer:
+            writer.write_table(table)
     logger.info(f"Saved centroids to {centroids_path}")
 
 
@@ -311,20 +324,22 @@ def ivfpq_export(
     # Validate model directories exist
     pq_model_dir = models_path / "pq"
     ivf_model_dir = models_path / "ivf"
-    
+
     if not pq_model_dir.exists():
         raise ValueError(f"PQ model directory not found: {pq_model_dir}")
     if not ivf_model_dir.exists():
         raise ValueError(f"IVF model directory not found: {ivf_model_dir}")
 
     logger.info(f"Loading pre-trained models from {models_path}")
-    
+
     # Load vectors and vector IDs
     vectors, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
     vector_ids_tensor = torch.from_numpy(vector_ids)
 
-    logger.info(f"Loaded {vectors_tensor.shape[0]:,} vectors of dimension {vectors_tensor.shape[1]}")
+    logger.info(
+        f"Loaded {vectors_tensor.shape[0]:,} vectors of dimension {vectors_tensor.shape[1]}"
+    )
 
     # Create IVFPQ instance (it will load the models automatically)
     logger.info("Creating IVFPQ from pre-trained components")
@@ -343,9 +358,13 @@ def ivfpq_export(
         logger.info("=== Testing Performance ===")
         _test_ivfpq_performance(ivfpq, vectors_tensor)
 
-    logger.info(f"IVFPQ browser assets exported successfully to {models_path / 'ivfpq'}")
+    logger.info(
+        f"IVFPQ browser assets exported successfully to {models_path / 'ivfpq'}"
+    )
     logger.info(f"Partitions available at: {models_path / 'ivfpq' / 'partitions'}")
-    logger.info(f"Use this directory for browser-based search with the PQ and IVF models")
+    logger.info(
+        f"Use this directory for browser-based search with the PQ and IVF models"
+    )
 
 
 def _test_ivfpq_performance(

@@ -17,6 +17,7 @@ import {
   RadioGroup,
   FormControlLabel,
   Radio,
+  Checkbox,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import GitHubIcon from '@mui/icons-material/GitHub'
@@ -27,6 +28,7 @@ import { MuiFileInput } from 'mui-file-input'
 import { tableFromIPC, Vector } from 'apache-arrow'
 
 import EmbeddingWorker from './embedder?worker'
+import LabelerWorker from './labeler?worker'
 import ScatterPlotWebGL from './ScatterPlotWebGL'
 
 const drawerWidth = 320
@@ -52,9 +54,11 @@ function App() {
   const [progress, setProgress] = useState(0)
 
   const [embedderWorker, setEmbedderWorker] = useState<Worker | null>(null)
+  const [labelerWorker, setLabelerWorker] = useState<Worker | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [hasWebGPU, setHasWebGPU] = useState(false)
   const [useWebGPU, setUseWebGPU] = useState(false)
+  const [labelingEnabled, setLabelingEnabled] = useState(true) // Default to enabled
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
   // Scatter plot data state - training data (static)
@@ -131,6 +135,61 @@ function App() {
 
   function createWorkers() {
     const embedder = new EmbeddingWorker()
+    let labeler: Worker | null = null
+
+    // Create labeler worker if labeling is enabled
+    if (labelingEnabled) {
+      labeler = new LabelerWorker()
+      setLabelerWorker(labeler)
+
+      // Initialize labeler
+      labeler.postMessage({
+        type: 'start',
+        modelsURL: `${sitePath}/models`,
+        modelID: 'scimilarity',
+      })
+
+      // Handle labeler messages
+      labeler.onmessage = (evt) => {
+        switch (evt.data.type) {
+          case 'status':
+            console.log('Labeler status:', evt.data.message)
+            break
+          case 'labeled':
+            console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
+            // Add new embeddings to test data - umap_coordinates contains [[x1, y1], [x2, y2], ...]
+            if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
+              const newXPoints: number[] = []
+              const newYPoints: number[] = []
+
+              // Extract X and Y coordinates from the array of tuples and normalize them
+              for (const coordinate of evt.data.umap_coordinates) {
+                if (coordinate && coordinate.length >= 2) {
+                  // Normalize the coordinates using the same transformation as pumap.py
+                  const [normalizedX, normalizedY] = normalizeCoordinates(
+                    coordinate[0],
+                    coordinate[1]
+                  )
+                  newXPoints.push(normalizedX)
+                  newYPoints.push(normalizedY)
+                }
+              }
+
+              setXTestData((prev) => [...prev, ...newXPoints])
+              setYTestData((prev) => [...prev, ...newYPoints])
+
+              console.log('Added', newXPoints.length, 'new labeled test points')
+            }
+            break
+          case 'error':
+            console.error('Labeler error:', evt.data.error)
+            setStatusMessage(`Labeling error: ${evt.data.error}`)
+            break
+          default:
+            break
+        }
+      }
+    }
 
     embedder.onmessage = (evt) => {
       switch (evt.data.type) {
@@ -143,28 +202,39 @@ function App() {
           break
         case 'embedding':
           console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
-          // Add new embeddings to test data - umap_coordinates contains [[x1, y1], [x2, y2], ...]
-          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
-            const newXPoints: number[] = []
-            const newYPoints: number[] = []
 
-            // Extract X and Y coordinates from the array of tuples and normalize them
-            for (const coordinate of evt.data.umap_coordinates) {
-              if (coordinate && coordinate.length >= 2) {
-                // Normalize the coordinates using the same transformation as pumap.py
-                const [normalizedX, normalizedY] = normalizeCoordinates(
-                  coordinate[0],
-                  coordinate[1]
-                )
-                newXPoints.push(normalizedX)
-                newYPoints.push(normalizedY)
+          if (labelingEnabled && labeler) {
+            // Route through labeler for cell type prediction
+            labeler.postMessage({
+              type: 'embedding',
+              test_vector_id: evt.data.test_vector_id,
+              pq_embedding: evt.data.pq_embedding,
+              umap_coordinates: evt.data.umap_coordinates,
+            })
+          } else {
+            // Direct visualization without labeling
+            if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
+              const newXPoints: number[] = []
+              const newYPoints: number[] = []
+
+              // Extract X and Y coordinates from the array of tuples and normalize them
+              for (const coordinate of evt.data.umap_coordinates) {
+                if (coordinate && coordinate.length >= 2) {
+                  // Normalize the coordinates using the same transformation as pumap.py
+                  const [normalizedX, normalizedY] = normalizeCoordinates(
+                    coordinate[0],
+                    coordinate[1]
+                  )
+                  newXPoints.push(normalizedX)
+                  newYPoints.push(normalizedY)
+                }
               }
+
+              setXTestData((prev) => [...prev, ...newXPoints])
+              setYTestData((prev) => [...prev, ...newYPoints])
+
+              console.log('Added', newXPoints.length, 'new normalized test points')
             }
-
-            setXTestData((prev) => [...prev, ...newXPoints])
-            setYTestData((prev) => [...prev, ...newYPoints])
-
-            console.log('Added', newXPoints.length, 'new normalized test points')
           }
           break
         case 'finished':
@@ -257,7 +327,6 @@ function App() {
       setYTrainData(yColumn)
       setCategoryData(categoryColumn)
       setCategoryLabels(labels)
-
     } catch (error) {
       console.error('Error loading scatter plot data:', error)
     } finally {
@@ -302,6 +371,10 @@ function App() {
       embedderWorker.terminate()
       setEmbedderWorker(null)
     }
+    if (labelerWorker) {
+      labelerWorker.terminate()
+      setLabelerWorker(null)
+    }
     setStatusMessage('Processing stopped')
   }
 
@@ -320,13 +393,19 @@ function App() {
   useEffect(() => {
     return () => {
       if (embedderWorker) {
-        console.log('Terminating worker...')
+        console.log('Terminating embedder worker...')
         embedderWorker.terminate()
         setEmbedderWorker(null)
-        console.log('Worker terminated')
+        console.log('Embedder worker terminated')
+      }
+      if (labelerWorker) {
+        console.log('Terminating labeler worker...')
+        labelerWorker.terminate()
+        setLabelerWorker(null)
+        console.log('Labeler worker terminated')
       }
     }
-  }, [embedderWorker])
+  }, [embedderWorker, labelerWorker])
 
   return (
     <ThemeProvider theme={theme}>
@@ -471,6 +550,20 @@ function App() {
                   disabled={!hasWebGPU}
                 />
               </RadioGroup>
+            </FormControl>
+
+            {/* Labeling Toggle */}
+            <FormControl component="fieldset" sx={{ mb: 2 }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={labelingEnabled}
+                    onChange={(e) => setLabelingEnabled(e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label="Enable real-time cell labeling"
+              />
             </FormControl>
 
             <Button
