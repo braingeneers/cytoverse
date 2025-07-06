@@ -68,7 +68,7 @@ export class InvertedFileIndex {
       for (let i = 0; i < nPartitions; i++) {
         const centroid = centroidCoordsColumn.get(i)
         for (let j = 0; j < d; j++) {
-          centroids[offset++] = centroid[j]
+          centroids[offset++] = centroid.get(j)
         }
       }
 
