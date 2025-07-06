@@ -73,9 +73,7 @@ class TestRealEmbeddings:
             pq = ProductQuantizer(d=d, m=m, k=64)
 
         # Train the model
-        pq.train_pq(
-            embeddings_tensor, n_iterations=10, verbose=False
-        )  # Fewer iterations for speed
+        pq.train_pq(embeddings_tensor, n_iterations=10)  # Fewer iterations for speed
 
         assert pq.is_trained
 
@@ -133,7 +131,7 @@ class TestRealEmbeddings:
             pq = ProductQuantizer(d=d, m=m, k=32)
 
         # Quick training
-        pq.train_pq(embeddings_tensor[:500], n_iterations=5, verbose=False)
+        pq.train_pq(embeddings_tensor[:500], n_iterations=5)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             onnx_path = Path(tmpdir) / "real_embeddings_pq.onnx"
@@ -178,7 +176,7 @@ class TestRealEmbeddings:
             pq = ProductQuantizer(d=d, m=m, k=16)
 
         # Quick training
-        pq.train_pq(embeddings_tensor[:300], n_iterations=5, verbose=False)
+        pq.train_pq(embeddings_tensor[:300], n_iterations=5)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = Path(tmpdir) / "real_embeddings_pq.pkl"
@@ -225,7 +223,7 @@ class TestRealEmbeddings:
                 pq = ProductQuantizer(d=d, m=m, k=16)
 
             # Train quickly
-            pq.train_pq(vectors, n_iterations=3, verbose=False)
+            pq.train_pq(vectors, n_iterations=3)
 
             # Test encode/decode
             with torch.no_grad():
@@ -260,7 +258,7 @@ class TestRealEmbeddings:
             pq = ProductQuantizer(d=d, m=m, k=64)
 
         # More thorough training
-        pq.train_pq(test_vectors, n_iterations=20, verbose=False)
+        pq.train_pq(test_vectors, n_iterations=20)
 
         # Test on all vectors
         with torch.no_grad():
