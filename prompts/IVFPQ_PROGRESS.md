@@ -329,13 +329,25 @@ neighbors = ivfpq.search(query_vector, k=10, n_probe=4)
 # Returns: [(vector_id, distance), ...]
 ```
 
-### 📋 Milestone 6: Browser Labeling Implementation
+### ✅ Milestone 6: Browser Labeling Implementation
 
-**Status**: 📅 **PLANNED** - Real-time cell labeling during embedding processing
+**Status**: ✅ **COMPLETE** - Real-time cell labeling during embedding processing
 
 **Goal**: Implement browser-based cell labeling that processes embeddings in real-time as they're generated, providing immediate cell type classification and visualization feedback.
 
-### 📋 Milestone 7: Validation & SCimilarity Comparison
+### 📋 Milestone 7: Simple Labeling Feedback
+
+**Status**: 📅 **PLANNED** - Display tally of labels as they are generated in the left sidebar
+
+**Goal**: Implement simple labeling feedback that displays real-time tallies of predicted cell type labels in the left sidebar as embeddings are processed and labeled.
+
+### 📋 Milestone 8: Full SCimilarity Dataset Export and Performance Assessment
+
+**Status**: 📅 **PLANNED** - Export full SCimilarity dataset and assess performance
+
+**Goal**: Export the complete SCimilarity dataset and conduct comprehensive performance assessment of the IVFPQ system at production scale.
+
+### 📋 Milestone 9: Validation & SCimilarity Comparison
 
 **Status**: 📅 **PLANNED** - Validation against SCimilarity ANN search
 
@@ -431,7 +443,7 @@ The IVFPQ implementation now includes complete Product Quantization (PQ) and Inv
 
 ### 🎯 Next Steps (Milestone 6-7)
 
-**Milestone 6** implements browser-based real-time cell labeling during embedding processing, providing immediate cell type classification and visualization feedback.
+**Milestone 6** implements browser-based real-time cell labeling during embedding processing, providing immediate cell type classification and enabling visualization feedback.
 
 **Milestone 7** develops comprehensive validation and comparison frameworks against SCimilarity's built-in search, ensuring production-quality accuracy and performance.
 
