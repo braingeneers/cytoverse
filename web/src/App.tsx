@@ -73,6 +73,10 @@ function App() {
   const [xTestData, setXTestData] = useState<number[]>([])
   const [yTestData, setYTestData] = useState<number[]>([])
 
+  // Labeling feedback state - counts of predicted labels
+  const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
+  const [totalLabeled, setTotalLabeled] = useState<number>(0)
+
   // Normalization parameters from metadata
   const [xCenter, setXCenter] = useState<number>(0)
   const [yCenter, setYCenter] = useState<number>(0)
@@ -179,6 +183,35 @@ function App() {
               setYTestData((prev) => [...prev, ...newYPoints])
 
               console.log('Added', newXPoints.length, 'new labeled test points')
+            }
+
+            // Process labeling results for feedback tallies
+            if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
+              const newLabelCounts: { [label: string]: number } = {}
+              let validLabels = 0
+
+              for (const trainVectorId of evt.data.train_vector_id) {
+                if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+                  // Get category index from training data
+                  const categoryIndex = categoryData.get(trainVectorId)
+                  if (categoryIndex != null && categoryIndex < categoryLabels.length) {
+                    const labelName = categoryLabels[categoryIndex]
+                    newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
+                    validLabels++
+                  }
+                }
+              }
+
+              // Update label counts
+              setLabelCounts((prev) => {
+                const updated = { ...prev }
+                for (const [label, count] of Object.entries(newLabelCounts)) {
+                  updated[label] = (updated[label] || 0) + count
+                }
+                return updated
+              })
+
+              setTotalLabeled((prev) => prev + validLabels)
             }
             break
           case 'error':
@@ -346,9 +379,11 @@ function App() {
     setProgress(0)
     setIsRunning(true)
 
-    // Clear any existing test data
+    // Clear any existing test data and label counts
     setXTestData([])
     setYTestData([])
+    setLabelCounts({})
+    setTotalLabeled(0)
 
     const embedder = createWorkers()
     setEmbedderWorker(embedder)
@@ -615,22 +650,106 @@ function App() {
                 </Typography>
               )}
             </Box>
-          </Box>
 
-          {/* Status and Progress */}
-          <Typography>{statusMessage}</Typography>
-          {isRunning && (
-            <Box my={2}>
-              <LinearProgress variant="determinate" value={progress} />
-              <Typography>{progress}%</Typography>
+            {/* Status and Progress */}
+            <Box sx={{ mt: 2 }}>
+              <Typography>{statusMessage}</Typography>
+              {isRunning && (
+                <Box my={2}>
+                  <LinearProgress variant="determinate" value={progress} />
+                  <Typography>{progress}%</Typography>
+                </Box>
+              )}
+
+              {!window.crossOriginIsolated && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  Unable to use multiple cpu cores - notify the site owner
+                </Alert>
+              )}
             </Box>
-          )}
 
-          {!window.crossOriginIsolated && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              Unable to use multiple cpu cores - notify the site owner
-            </Alert>
-          )}
+            {/* Predicted Labels */}
+            {labelingEnabled && (
+              <Box
+                sx={{
+                  mt: 2,
+                  p: 2,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="h6" sx={{ mb: 2 }}>
+                  Predicted Labels
+                </Typography>
+                {totalLabeled > 0 ? (
+                  <Box>
+                    <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
+                      Total Labeled: {totalLabeled.toLocaleString()}
+                    </Typography>
+                    <Box
+                      sx={{
+                        maxHeight: 200,
+                        overflowY: 'auto',
+                        // Hide scrollbar while keeping functionality
+                        '&::-webkit-scrollbar': {
+                          display: 'none',
+                        },
+                        '-ms-overflow-style': 'none',
+                        'scrollbar-width': 'none',
+                      }}
+                    >
+                      {Object.entries(labelCounts)
+                        .sort(([, a], [, b]) => b - a) // Sort by count descending
+                        .map(([label, count]) => (
+                          <Box
+                            key={label}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              py: 0.5,
+                              borderBottom: '1px solid',
+                              borderColor: 'divider',
+                            }}
+                          >
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: 1,
+                                mr: 1,
+                              }}
+                            >
+                              {label}
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 'bold',
+                                minWidth: 'fit-content',
+                              }}
+                            >
+                              {count.toLocaleString()}
+                            </Typography>
+                          </Box>
+                        ))}
+                    </Box>
+                  </Box>
+                ) : isRunning ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Waiting for predictions...
+                  </Typography>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    No predictions yet
+                  </Typography>
+                )}
+              </Box>
+            )}
+          </Box>
         </Drawer>
 
         {/* Main Content */}
