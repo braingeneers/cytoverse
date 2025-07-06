@@ -169,21 +169,15 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     // Draw the initial training points
     const drawInitialData = async () => {
-      if (isDrawingRef.current) return
-      isDrawingRef.current = true
-      try {
-        await scatterplot.draw(initialColumnData)
-        isInitializedRef.current = true
-        console.log(
-          'Drew',
-          numPoints,
-          'training points with',
-          categoryColors.length,
-          'category colors'
-        )
-      } finally {
-        isDrawingRef.current = false
-      }
+      await scatterplot.draw(initialColumnData)
+      isInitializedRef.current = true
+      console.log(
+        'Drew',
+        numPoints,
+        'training points with',
+        categoryColors.length,
+        'category colors'
+      )
     }
     drawInitialData()
 
