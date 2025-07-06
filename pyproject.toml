@@ -1,5 +1,5 @@
 [project]
-name = "cellspace"
+name = "cytoverse"
 version = "0.1.0"
 description = "Search, display and label cells in foundation model embedding space"
 readme = "README.md"

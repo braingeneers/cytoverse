@@ -8,7 +8,7 @@
       "name": "scimilarity model",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/scimilarity_export.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export.py",
       "console": "integratedTerminal",
       "args": [
         "model",
@@ -20,7 +20,7 @@
       "name": "scimilarity embeddings",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/scimilarity_export.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export.py",
       "console": "integratedTerminal",
       "args": [
         "embeddings",
@@ -40,7 +40,7 @@
       "name": "umap train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/umap.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/umap.py",
       "console": "integratedTerminal",
       "args": [
         "train",
@@ -54,7 +54,7 @@
       "name": "umap map",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/umap.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/umap.py",
       "console": "integratedTerminal",
       "args": [
         "map",
@@ -70,7 +70,7 @@
       "name": "umap export",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/umap.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/umap.py",
       "console": "integratedTerminal",
       "args": [
         "export",
@@ -82,7 +82,7 @@
       "name": "pq train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cellspace/scripts/ivfpq_train.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
       "console": "integratedTerminal",
       "args": [
         "train-pq",

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document tracks the implementation of IVFPQ (Inverted File Index Product Quantization) for the Cell Space project. IVFPQ enables approximate nearest neighbor search on large-scale single-cell embedding datasets with significant memory and computational savings.
+This document tracks the implementation of IVFPQ (Inverted File Index Product Quantization) for the Cyto Verse project. IVFPQ enables approximate nearest neighbor search on large-scale single-cell embedding datasets with significant memory and computational savings.
 
 ## Original Prompt
 
@@ -26,9 +26,9 @@ The IVFPQ system consists of:
 
 **Deliverables**:
 
-- ✅ `src/cellspace/ivfpq/pq.py` - Core PQ implementation in PyTorch
+- ✅ `src/cytoverse/ivfpq/pq.py` - Core PQ implementation in PyTorch
 - ✅ `tests/test_pq.py` - Core unit tests
-- ✅ `src/cellspace/scripts/pq_train.py` - Training and testing scripts
+- ✅ `src/cytoverse/scripts/pq_train.py` - Training and testing scripts
 - ✅ `test_real_embeddings.py` - Real data validation
 - ✅ ONNX export functionality
 - ✅ Integration with existing project structure
@@ -152,9 +152,9 @@ cd web && npm run dev
 
 **Deliverables**:
 
-- ✅ `src/cellspace/ivfpq/ivf.py` - Complete IVF implementation with PyTorch
+- ✅ `src/cytoverse/ivfpq/ivf.py` - Complete IVF implementation with PyTorch
 - ✅ `tests/test_ivf.py` - Comprehensive test suite for IVF functionality
-- ✅ `src/cellspace/scripts/ivfpq_train.py` - Enhanced training script supporting IVF and IVFPQ
+- ✅ `src/cytoverse/scripts/ivfpq_train.py` - Enhanced training script supporting IVF and IVFPQ
 - ✅ Makefile targets for IVF training and testing
 - ✅ Integration with existing PQ module architecture
 
@@ -190,9 +190,9 @@ make ivfpq-train
 make ivfpq-test
 
 # Individual commands:
-python src/cellspace/scripts/ivfpq_train.py train-ivf data/embeddings.npy output/ --n-clusters 64
-python src/cellspace/scripts/ivfpq_train.py train-ivfpq data/embeddings.npy output/ --m 16 --k 256 --n-clusters 64
-python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
+python src/cytoverse/scripts/ivfpq_train.py train-ivf data/embeddings.npy output/ --n-clusters 64
+python src/cytoverse/scripts/ivfpq_train.py train-ivfpq data/embeddings.npy output/ --m 16 --k 256 --n-clusters 64
+python src/cytoverse/scripts/ivfpq_train.py test-trained-models output/
 ```
 
 **Testing**:
@@ -228,7 +228,7 @@ python src/cellspace/scripts/ivfpq_train.py test-trained-models output/
 
 **Deliverables**:
 
-- ✅ Complete `src/cellspace/ivfpq/ivfpq.py` - Combined IVFPQ class implementation
+- ✅ Complete `src/cytoverse/ivfpq/ivfpq.py` - Combined IVFPQ class implementation
 - ✅ Dataset partitioning functionality: Export embeddings.npy into k partition files
 - ✅ Arrow/Parquet format export for browser-optimized loading
 - ✅ Centroid index file export in Arrow format with partition metadata
@@ -428,8 +428,8 @@ accuracy = compute_recall_at_k(scimilarity_neighbors, ivfpq_neighbors, k=10)
 
 - [ ] `tests/test_ivfpq_search.py` - Core ANN search functionality tests
 - [ ] `tests/test_ivfpq_validation.py` - Comparison with SCimilarity
-- [ ] `src/cellspace/scripts/benchmark_search.py` - Performance benchmarking
-- [ ] `src/cellspace/scripts/validate_against_scimilarity.py` - Comparative analysis
+- [ ] `src/cytoverse/scripts/benchmark_search.py` - Performance benchmarking
+- [ ] `src/cytoverse/scripts/validate_against_scimilarity.py` - Comparative analysis
 
 ## Technical Details
 
@@ -453,13 +453,13 @@ This configuration provides:
 ### File Structure
 
 ```
-src/cellspace/ivfpq/
+src/cytoverse/ivfpq/
 ├── __init__.py          # Module exports
 ├── pq.py               # Product Quantization implementation
 ├── ivf.py              # Inverted File Index (TODO)
 └── ivfpq.py            # Combined IVFPQ (TODO)
 
-src/cellspace/scripts/
+src/cytoverse/scripts/
 └── pq_train.py         # Training and testing scripts
 
 tests/

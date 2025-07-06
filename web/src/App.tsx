@@ -545,9 +545,9 @@ function App() {
         >
           <Toolbar>
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
-              CellSpace
+              CytoVerse
             </Typography>
-            <Link href="https://github.com/braingeneers/cellspace" target="_blank" underline="none">
+            <Link href="https://github.com/braingeneers/cytoverse" target="_blank" underline="none">
               <GitHubIcon />
             </Link>
             <IconButton onClick={handleDrawerToggle}>

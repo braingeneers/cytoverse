@@ -8,7 +8,7 @@ import numpy as np
 import tempfile
 from pathlib import Path
 
-from src.cellspace.ivfpq.pq import ProductQuantizer
+from src.cytoverse.ivfpq.pq import ProductQuantizer
 
 
 class TestProductQuantizer:

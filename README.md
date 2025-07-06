@@ -1,16 +1,16 @@
-# Cell Space
+# CytoVerse <img src="web/public/cytoverse.svg" width="32" height="32" alt="Description">
 
 Search, display and label cells in foundation model embedding space
 
 NOTE: Under heavy development and refactoring, not ready for reproducible installs...
 
-[https://cells-test.gi.ucsc.edu/cellspace](https://cells-test.gi.ucsc.edu/cellspace)
+[https://cells-test.gi.ucsc.edu/cytoverse](https://cells-test.gi.ucsc.edu/cytoverse)
 
-![Alt text](screenshot.png?raw=true 'Cell Space Screenshot')
+![Alt text](screenshot.png?raw=true 'CytoVerse Screenshot')
 
 ## Overview
 
-Cell Space presents a fully browser-based single-cell RNA-seq analysis platform that enables real-time cell type annotation through foundation model embeddings. The system leverages SCimilarity for client-side cell embedding, parametric UMAP for 2D visualization against comprehensive training datasets, and Inverted File with Product Quantization (IVFPQ) for approximate nearest neighbor search to generate cell type labels. Built on WebAssembly and ONNX for performance, the platform scales to millions of training samples while supporting unlimited streaming analysis of h5ad files via h5wasm. This architecture enables distributed collaborative discovery, allowing consortium researchers to identify overlapping or complementary assays through shared embedding space exploration—a critical capability for the emerging perturbseq-driven discovery paradigm.
+CytoVerse presents a fully browser-based single-cell RNA-seq analysis platform that enables real-time cell type annotation through foundation model embeddings. The system leverages SCimilarity for client-side cell embedding, parametric UMAP for 2D visualization against comprehensive training datasets, and Inverted File with Product Quantization (IVFPQ) for approximate nearest neighbor search to generate cell type labels. Built on WebAssembly and ONNX for performance, the platform scales to millions of training samples while supporting unlimited streaming analysis of h5ad files via h5wasm. This architecture enables distributed collaborative discovery, allowing consortium researchers to identify overlapping or complementary assays through shared embedding space exploration—a critical capability for the emerging perturbseq-driven discovery paradigm.
 
 ## Status
 

@@ -1,5 +1,5 @@
 {
-  "name": "cellspace",
+  "name": "cytoverse",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "serve-dist-python": "python3 -m http.server 4173 -d dist/",
-    "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cellspace/"
+    "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/"
   },
   "dependencies": {
     "@mui/icons-material": "^7.1.2",

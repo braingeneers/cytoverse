@@ -334,7 +334,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cellspace"
+name = "cytoverse"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

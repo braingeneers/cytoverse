@@ -20,7 +20,7 @@ if __name__ == "__main__":
     project_root = Path(__file__).parent.parent
     sys.path.insert(0, str(project_root))
 
-from src.cellspace.ivfpq.pq import ProductQuantizer
+from src.cytoverse.ivfpq.pq import ProductQuantizer
 
 # Configure logging for pytest
 logger = logging.getLogger(__name__)

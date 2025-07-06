@@ -23,7 +23,7 @@
 
 ### 🔧 **Implementation Updates**
 
-#### 1. **IVFPQ Class** (`src/cellspace/ivfpq/ivfpq.py`)
+#### 1. **IVFPQ Class** (`src/cytoverse/ivfpq/ivfpq.py`)
 
 - `export_browser_assets()`: Updated to use Arrow format
 - `_export_partition_files()`: Changed from Parquet to Arrow export
@@ -31,7 +31,7 @@
 - `load_from_browser_assets()`: Updated to read Arrow files
 - `_load_partition_data_from_arrow()`: Updated for Arrow format
 
-#### 2. **Training Script** (`src/cellspace/scripts/ivfpq_train.py`)
+#### 2. **Training Script** (`src/cytoverse/scripts/ivfpq_train.py`)
 
 - Removed pickle export step
 - Export browser assets as primary format

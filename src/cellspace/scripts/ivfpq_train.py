@@ -31,9 +31,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.cellspace.ivfpq.pq import ProductQuantizer
-from src.cellspace.ivfpq.ivf import InvertedFileIndex
-from src.cellspace.ivfpq.ivfpq import IVFPQ
+from src.cytoverse.ivfpq.pq import ProductQuantizer
+from src.cytoverse.ivfpq.ivf import InvertedFileIndex
+from src.cytoverse.ivfpq.ivfpq import IVFPQ
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
