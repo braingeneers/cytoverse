@@ -9,12 +9,12 @@ reset:
 
 # SCimilarity
 scimilarity-model:
-	python src/cytoverse/scripts/scimilarity_export.py model \
+	python src/cytoverse/scripts/scimilarity_export_model.py \
 	data/scimilarity/model_v1.1 \
 	web/public/models/scimilarity/embedding
 
 scimilarity-embeddings:
-	python src/cytoverse/scripts/scimilarity_export.py embeddings \
+	python src/cytoverse/scripts/scimilarity_export_embeddings.py \
 	data/scimilarity/model_v1.1/cellsearch \
 	data/scimilarity/ \
 	--labels prediction \

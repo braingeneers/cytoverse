@@ -5,6 +5,8 @@ import typer
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from typing import List
 
@@ -143,9 +145,10 @@ def embeddings(
     vectors_path = output_path / "vectors.npy"
     np.save(vectors_path, embeddings)
 
-    # Export sample ids as numpy array
-    vector_ids_path = output_path / "vector_ids.npy"
-    np.save(vector_ids_path, sampled_indices)
+    # Export sample ids as arrow file
+    vector_ids_path = output_path / "vector_ids.arrow"
+    vector_ids_table = pa.table({"vector_id": sampled_indices})
+    pq.write_table(vector_ids_table, vector_ids_path)
 
     print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
     print(f"Vectors (Embeddings) saved to {vectors_path} (shape: {embeddings.shape})")
@@ -156,7 +159,12 @@ def embeddings(
     if validate:
         print("\n🔍 Validating exported files...")
         _validate_exports(
-            model_path, labels_path, vectors_path, labels, sampled_indices[0:10]
+            model_path,
+            labels_path,
+            vectors_path,
+            vector_ids_path,
+            labels,
+            sampled_indices[0:10],
         )
 
     print(f"Exported {len(sampled_indices)} cells to {output_path}")
@@ -166,6 +174,7 @@ def _validate_exports(
     model_path: Path,
     labels_path: Path,
     embeddings_path: Path,
+    vector_ids_path: Path,
     labels: list[str],
     original_indices: list[int],
 ) -> None:
@@ -175,6 +184,11 @@ def _validate_exports(
     print("  Reading from exported files...")
     labels_df_exported = pd.read_parquet(labels_path)[: len(original_indices)]
     embeddings_exported = np.load(embeddings_path)[: len(original_indices)]
+    vector_ids_exported = (
+        pq.read_table(vector_ids_path)
+        .to_pandas()["vector_id"]
+        .values[: len(original_indices)]
+    )
 
     # Read validation samples from original TileDB
     print("  Reading from original TileDB...")
@@ -212,7 +226,16 @@ def _validate_exports(
         )
         print(f"    ❌ Embedding mismatch: max diff = {max_diff:.2e}")
 
-    if labels_match and embeddings_match:
+    # Validate vector IDs
+    print("  Validating vector IDs...")
+    vector_ids_match = np.array_equal(vector_ids_exported, original_indices)
+
+    if vector_ids_match:
+        print("    ✅ All vector ID values match")
+    else:
+        print(f"    ❌ Vector ID mismatch")
+
+    if labels_match and embeddings_match and vector_ids_match:
         print("  🎉 Validation passed! All exported data matches original TileDB.")
     else:
         print("  ⚠️ Validation found mismatches. Please check the export process.")
