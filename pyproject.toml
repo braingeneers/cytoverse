@@ -18,6 +18,7 @@ dependencies = [
     "zarr<3.0",
     "pytorch-lightning>=2.5.2",
     "pyarrow>=20.0.0",
+    "sclblonnx>=0.3.0",
 ]
 
 [dependency-groups]

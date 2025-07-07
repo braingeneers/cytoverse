@@ -1,6 +1,8 @@
 test:
 	python -m pytest tests/ -v
 
+all: scimilarity pumap ivfpq
+
 reset:
 	rm -rf web/public/models/scimilarity
 	rm data/scimilarity/*
@@ -15,12 +17,12 @@ scimilarity-embeddings:
 	python src/cytoverse/scripts/scimilarity_export.py embeddings \
 	data/scimilarity/model_v1.1/cellsearch \
 	data/scimilarity/ \
-	--labels tissue \
 	--labels prediction \
-	--labels study \
+	--labels tissue \
+	--labels author_label \
 	--validate \
 	--stratify \
-	--num-embeddings 5000000
+	--num-embeddings 1000000
 	parquet-tools inspect data/scimilarity/labels.parquet
 
 scimilarity: scimilarity-model scimilarity-embeddings

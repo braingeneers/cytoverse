@@ -13,7 +13,7 @@
       "args": [
         "model",
         "${workspaceFolder}/data/scimilarity/model_v1.1",
-        "${workspaceFolder}/web/public/models/scimilarity"
+        "${workspaceFolder}/web/public/models/scimilarity/embedding"
       ]
     },
     {

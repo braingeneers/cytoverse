@@ -67,7 +67,7 @@ function App() {
   const [categoryData, setCategoryData] = useState<Vector | null>(null)
   const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>('tissue') // TODO: Add category selector UI
+  const [selectedCategory, setSelectedCategory] = useState<string>('prediction') // TODO: Add category selector UI
 
   // Test data state - incremental mappings
   const [xTestData, setXTestData] = useState<number[]>([])
@@ -304,7 +304,7 @@ function App() {
     setIsLoadingData(true)
     try {
       const modelID = 'scimilarity'
-      setSelectedCategory('tissue') // Default category, can be changed later
+      setSelectedCategory('prediction') // Default category, can be changed later
 
       // Load metadata to get categories information
       const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)

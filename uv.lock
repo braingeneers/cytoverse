@@ -334,67 +334,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cytoverse"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "anndata" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "pyarrow" },
-    { name = "pytorch-lightning" },
-    { name = "scimilarity" },
-    { name = "torch" },
-    { name = "torchaudio" },
-    { name = "torchvision" },
-    { name = "typer" },
-    { name = "umap-pytorch" },
-    { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "zarr", version = "2.18.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "black" },
-    { name = "flake8" },
-    { name = "ipython", version = "8.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "ipython", version = "9.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jupyter" },
-    { name = "jupyter-console" },
-    { name = "netron" },
-    { name = "parquet-tools" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anndata", specifier = ">=0.11.4" },
-    { name = "onnx", specifier = ">=1.18.0" },
-    { name = "onnxruntime", specifier = ">=1.15.0" },
-    { name = "pyarrow", specifier = ">=20.0.0" },
-    { name = "pytorch-lightning", specifier = ">=2.5.2" },
-    { name = "scimilarity", directory = "../scimilarity" },
-    { name = "torch", specifier = ">=2.7.1" },
-    { name = "torchaudio", specifier = ">=2.7.1" },
-    { name = "torchvision", specifier = ">=0.22.1" },
-    { name = "typer", specifier = ">=0.16.0" },
-    { name = "umap-pytorch", editable = "../umap_pytorch" },
-    { name = "zarr", specifier = "<3.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black", specifier = ">=25.1.0" },
-    { name = "flake8", specifier = ">=7.2.0" },
-    { name = "ipython", specifier = ">=8.37.0" },
-    { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "jupyter-console", specifier = ">=6.6.3" },
-    { name = "netron", specifier = ">=8.3.9" },
-    { name = "parquet-tools", specifier = ">=0.2.16" },
-    { name = "pytest", specifier = ">=8.0.0" },
-]
-
-[[package]]
 name = "certifi"
 version = "2025.6.15"
 source = { registry = "https://pypi.org/simple" }
@@ -571,6 +510,69 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a9/95/a3dbbb5028f35eafb79008e7522a75244477d2838f38cbb722248dabc2a8/cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c", size = 7615, upload-time = "2023-10-07T05:32:18.335Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30", size = 8321, upload-time = "2023-10-07T05:32:16.783Z" },
+]
+
+[[package]]
+name = "cytoverse"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "anndata" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "pyarrow" },
+    { name = "pytorch-lightning" },
+    { name = "scimilarity" },
+    { name = "sclblonnx" },
+    { name = "torch" },
+    { name = "torchaudio" },
+    { name = "torchvision" },
+    { name = "typer" },
+    { name = "umap-pytorch" },
+    { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "zarr", version = "2.18.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
+    { name = "flake8" },
+    { name = "ipython", version = "8.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "ipython", version = "9.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jupyter" },
+    { name = "jupyter-console" },
+    { name = "netron" },
+    { name = "parquet-tools" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anndata", specifier = ">=0.11.4" },
+    { name = "onnx", specifier = ">=1.18.0" },
+    { name = "onnxruntime", specifier = ">=1.15.0" },
+    { name = "pyarrow", specifier = ">=20.0.0" },
+    { name = "pytorch-lightning", specifier = ">=2.5.2" },
+    { name = "scimilarity", directory = "../scimilarity" },
+    { name = "sclblonnx", specifier = ">=0.3.0" },
+    { name = "torch", specifier = ">=2.7.1" },
+    { name = "torchaudio", specifier = ">=2.7.1" },
+    { name = "torchvision", specifier = ">=0.22.1" },
+    { name = "typer", specifier = ">=0.16.0" },
+    { name = "umap-pytorch", editable = "../umap_pytorch" },
+    { name = "zarr", specifier = "<3.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black", specifier = ">=25.1.0" },
+    { name = "flake8", specifier = ">=7.2.0" },
+    { name = "ipython", specifier = ">=8.37.0" },
+    { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "jupyter-console", specifier = ">=6.6.3" },
+    { name = "netron", specifier = ">=8.3.9" },
+    { name = "parquet-tools", specifier = ">=0.2.16" },
+    { name = "pytest", specifier = ">=8.0.0" },
 ]
 
 [[package]]
@@ -2015,6 +2017,25 @@ wheels = [
 ]
 
 [[package]]
+name = "onnxoptimizer"
+version = "0.3.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "onnx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/bd/e8671229c2f1f99eb02961cac51e55ca64dbbe0d62791b6743cc8b9950b1/onnxoptimizer-0.3.13.tar.gz", hash = "sha256:e08b726e0d4577e51e529f36bc324bf11b7cff12852cf3eee081f05c8b8c6f33", size = 18466575, upload-time = "2023-04-19T14:51:52.511Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/3c/8a8320e295f80ae268233e72a9ae81fd35f6f7a6d00fcc02d3b1186a19aa/onnxoptimizer-0.3.13-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:019968dc02b37ab87588b67331f15719a9fcfc5de54de866dd7b02eaad68bdd5", size = 1014952, upload-time = "2023-04-19T14:51:22.891Z" },
+    { url = "https://files.pythonhosted.org/packages/17/4d/613b5ce51cccb0bf55502810400ed0966e61bd571f81d68e2d095d69635e/onnxoptimizer-0.3.13-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:542b43b13c3b1b7b72aae2579a2d75ef68dcf0513231bb1cb2b5f3c8af838d87", size = 578199, upload-time = "2023-04-19T14:51:24.314Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/0c/1769400bafbc3797fe725fa29d66256a7944101d65590ebdaf867d3b81f3/onnxoptimizer-0.3.13-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:98716324135ac5505529423dbba5479273e6f46a0f895ac611a29ed8a6f79690", size = 678124, upload-time = "2023-04-19T14:51:25.562Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/c8/3a33f3dceb754f5a83751703b524ba788642545318bb2083c49402dcede1/onnxoptimizer-0.3.13-cp310-cp310-win_amd64.whl", hash = "sha256:f34db9dc55a682d3e5e60f5e6ff62101410620d2b70bef41f6158481a9a0b5ec", size = 381710, upload-time = "2023-04-19T14:51:26.54Z" },
+    { url = "https://files.pythonhosted.org/packages/70/8f/4a9bb2ba490b7e8f9e8f5ad7a2e6f9c43bd5590f7affed4e2e9874fd2a0e/onnxoptimizer-0.3.13-cp311-cp311-macosx_10_15_universal2.whl", hash = "sha256:dcd1c529cb3d285f1bc75480ebe198a43f6bcc84ad010386f6e2d7bcd3052501", size = 1014993, upload-time = "2023-04-19T14:51:27.821Z" },
+    { url = "https://files.pythonhosted.org/packages/38/82/dd92b6515a4965bb9136775a3cae84224a258285f8d84f2f2bbfd2fdaa15/onnxoptimizer-0.3.13-cp311-cp311-macosx_10_15_x86_64.whl", hash = "sha256:a65b2ff1d480f966f906fdc3731cd6a844762e0aae1876eeafb7586048d6be96", size = 578239, upload-time = "2023-04-19T14:51:29.114Z" },
+    { url = "https://files.pythonhosted.org/packages/28/1b/6dbb0e6f62c00b3c14f027316d0e4173f4ed82068ae64b40770d60a2156f/onnxoptimizer-0.3.13-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2f985cfef0fa2b7cf9ae64a36ca8dacb3e1861e31fa41fb85645cdbd73ccab6a", size = 678146, upload-time = "2023-04-19T14:51:30.168Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/0a/edd2900c20702fbd7ccce59337720ad936d55da196e248804d91128b9b5f/onnxoptimizer-0.3.13-cp311-cp311-win_amd64.whl", hash = "sha256:82e606024a6dce999a8586d1f4b6af2ec454f7c5fd69807672a79067017a4812", size = 381769, upload-time = "2023-04-19T14:51:31.56Z" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.22.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2035,6 +2056,24 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3e/8b/22989f6b59bc4ad1324f07a945c80b9ab825f0a581ad7a6064b93716d9b7/onnxruntime-1.22.0-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fef17d665a917866d1f68f09edc98223b9a27e6cb167dec69da4c66484ad12fd", size = 14446302, upload-time = "2025-05-09T20:25:44.299Z" },
     { url = "https://files.pythonhosted.org/packages/7a/d5/aa83d084d05bc8f6cf8b74b499c77431ffd6b7075c761ec48ec0c161a47f/onnxruntime-1.22.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b978aa63a9a22095479c38371a9b359d4c15173cbb164eaad5f2cd27d666aa65", size = 16393496, upload-time = "2025-05-09T20:26:11.588Z" },
     { url = "https://files.pythonhosted.org/packages/89/a5/1c6c10322201566015183b52ef011dfa932f5dd1b278de8d75c3b948411d/onnxruntime-1.22.0-cp311-cp311-win_amd64.whl", hash = "sha256:03d3ef7fb11adf154149d6e767e21057e0e577b947dd3f66190b212528e1db31", size = 12691517, upload-time = "2025-05-12T21:26:13.354Z" },
+]
+
+[[package]]
+name = "onnxsim"
+version = "0.4.36"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "onnx" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/9e/f34238413ebeda9a3a8802feeaa5013934455466b9ab390b48ad9c7e184f/onnxsim-0.4.36.tar.gz", hash = "sha256:6e0ee9d6d4a83042bdef7319fbe58352d9fda5f253386be2b267c7c27f0638ee", size = 20993703, upload-time = "2024-03-04T08:25:00.086Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/55/0a0a248636cccccb7d4ed9189446e00017f411d0e13d1dd4af419ee4d529/onnxsim-0.4.36-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:7498e7b9584c4b354b455564dfba66d460ce2c205b71dae169cfa9b6704e03fd", size = 3471278, upload-time = "2024-03-04T08:24:26.988Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/6e/80c77b5c6ec079994295e6e685097fa42732a1e7c5a22fe9c5c4ca1aac74/onnxsim-0.4.36-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ce87837f8975beebdcc98cc01d6d13e84b10900eb2c14035ce1066c3d670d96d", size = 2255237, upload-time = "2024-03-04T08:24:29.047Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/c5/6c93b354684b3fc4b520a23be3e4db5870b35dde9e9e2a1f41018ba369e8/onnxsim-0.4.36-cp310-cp310-win_amd64.whl", hash = "sha256:f92bec8c6c0d4f8463e10021277711d2faac900e4eb890238001b3eadb5c03bc", size = 1288644, upload-time = "2024-03-04T08:24:31.275Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/a3/f6cad8499f375a3acc8a7837721f82860244656cf62984cf80ebe187cc68/onnxsim-0.4.36-cp311-cp311-macosx_10_15_universal2.whl", hash = "sha256:150b9a3a409af2f3161af3fecda2113e0e6e296fb015b5205a9ddf645765acad", size = 3471242, upload-time = "2024-03-04T08:24:33.289Z" },
+    { url = "https://files.pythonhosted.org/packages/db/94/22aab761b3d416bce02020d9ca98dc692427c2717b0325952e30ce41f83b/onnxsim-0.4.36-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fa7596e6b806ed19077f7652788a50ee576c172b4d16d421f0593aef1a6fa4c4", size = 2255003, upload-time = "2024-03-04T08:24:35.024Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/5c/aa277f45b0d8253027d1ce3269952e116b476985e5fb497e00ebd917ce29/onnxsim-0.4.36-cp311-cp311-win_amd64.whl", hash = "sha256:91fb32def04f2f89d5f76527c852332366957752e5e61ac25be0b2d7bb410f89", size = 1288684, upload-time = "2024-03-04T08:24:37.064Z" },
 ]
 
 [[package]]
@@ -2876,6 +2915,24 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d3/30/e9eb0ad3d0858df35d6c703cba0a7e16a18a56a9e6b211d861fc6f261c5f/scipy-1.16.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:6c4abb4c11fc0b857474241b812ce69ffa6464b4bd8f4ecb786cf240367a36a7", size = 35608257, upload-time = "2025-06-22T16:18:49.09Z" },
     { url = "https://files.pythonhosted.org/packages/c8/ff/950ee3e0d612b375110d8cda211c1f787764b4c75e418a4b71f4a5b1e07f/scipy-1.16.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:b370f8f6ac6ef99815b0d5c9f02e7ade77b33007d74802efc8316c8db98fd11e", size = 38040541, upload-time = "2025-06-22T16:18:55.077Z" },
     { url = "https://files.pythonhosted.org/packages/8b/c9/750d34788288d64ffbc94fdb4562f40f609d3f5ef27ab4f3a4ad00c9033e/scipy-1.16.0-cp311-cp311-win_amd64.whl", hash = "sha256:a16ba90847249bedce8aa404a83fb8334b825ec4a8e742ce6012a7a5e639f95c", size = 38570814, upload-time = "2025-06-22T16:19:00.912Z" },
+]
+
+[[package]]
+name = "sclblonnx"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxoptimizer" },
+    { name = "onnxruntime" },
+    { name = "onnxsim" },
+    { name = "packaging" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ad/41/50a13c7eac4d2a88e7e71cfda8fc51207a44ac1b84059a13d4ad2061f18d/sclblonnx-0.3.0.tar.gz", hash = "sha256:bcd274ffbb2d93c6f9a1f2d8a7928dbaa3435192309a4748f2cf2ca7f1618a61", size = 20298, upload-time = "2024-10-25T09:51:48.724Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/7a/c8f0ebabd2d39081f521190f0cfd6043fd0afd0cf388751422bee40544b4/sclblonnx-0.3.0-py3-none-any.whl", hash = "sha256:bac40a0121a52a946999c3d01357eba3fc0f7b68ac1254cf0c89bed5a807a3a4", size = 21253, upload-time = "2024-10-25T09:51:47.262Z" },
 ]
 
 [[package]]
