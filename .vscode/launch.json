@@ -5,13 +5,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "scimilarity model",
+      "name": "scimilarity export model",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export_model.py",
       "console": "integratedTerminal",
       "args": [
-        "model",
         "${workspaceFolder}/data/scimilarity/model_v1.1",
         "${workspaceFolder}/web/public/models/scimilarity/embedding"
       ]

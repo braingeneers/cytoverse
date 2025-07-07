@@ -42,6 +42,16 @@ def train(
     # Load the vectors
     vectors = np.load(vectors_path)
 
+    # Select random subset of vectors if num_vectors is specified
+    if num_vectors is not None:
+        print(
+            f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors"
+        )
+        random_state = np.random.RandomState(42)  # For reproducibility
+        vectors = vectors[
+            random_state.choice(vectors.shape[0], num_vectors, replace=False)
+        ]
+
     # Determine number of vectors to use
     num_vectors = num_vectors if num_vectors is not None else vectors.shape[0]
     if num_vectors is not None:
@@ -54,15 +64,15 @@ def train(
         encoder=None,  # nn.Module, None for default
         decoder=None,  # nn.Module, True for default, None for encoder only
         n_neighbors=10,
-        min_dist=0.1,
+        min_dist=0.5,
         metric="euclidean",
         n_components=2,
         beta=1.0,  # How much to weigh reconstruction loss for decoder
         reconstruction_loss=torch.nn.functional.binary_cross_entropy_with_logits,  # pass in custom reconstruction loss functions
-        random_state=None,
+        random_state=random_state,  # For reproducibility
         lr=1e-3,
         epochs=10,
-        num_workers=1,
+        num_workers=4,
         num_gpus=1,
         match_nonparametric_umap=False,  # Train network to match vectors from non parametric umap
     )
@@ -111,9 +121,7 @@ def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
 @app.command()
 def map(
     model_path: Path = typer.Argument(..., help="Path to model.onnx"),
-    vectors_path: Path = typer.Argument(
-        ..., help="Path to vectors.npy file"
-    ),
+    vectors_path: Path = typer.Argument(..., help="Path to vectors.npy file"),
     output_path: Path = typer.Argument(
         ..., help="Path to output directory for the mapped data"
     ),
@@ -140,10 +148,17 @@ def map(
     # Load the vectors
     vectors = np.load(vectors_path)
 
-    # Determine number of vectors to process
-    num_vectors = num_vectors if num_vectors is not None else vectors.shape[0]
+    # Select random subset of vectors if num_vectors is specified
     if num_vectors is not None:
-        num_vectors = min(vectors.shape[0], num_vectors)
+        print(
+            f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors"
+        )
+        random_state = np.random.RandomState(42)  # For reproducibility
+        vectors = vectors[
+            random_state.choice(vectors.shape[0], num_vectors, replace=False)
+        ]
+    else:
+        num_vectors = vectors.shape[0]
 
     typer.echo(f"Processing {num_vectors} vectors with batch size {batch_size}")
 

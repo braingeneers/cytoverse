@@ -74,9 +74,6 @@ class PreprocessingWrapper(torch.nn.Module):
         """
         super(PreprocessingWrapper, self).__init__()
         self.target_sum = torch.tensor(float(target_sum), dtype=torch.float32)
-        self.epsilon = torch.tensor(
-            1e-5, dtype=torch.float32
-        )  # To avoid division by zero
 
     def forward(self, x):
         """
@@ -95,12 +92,17 @@ class PreprocessingWrapper(torch.nn.Module):
         # Ensure input is float32
         x = x.to(torch.float32)
 
+        # Handle NaN values by zeroing them (matches scimilarity behavior)
+        x = torch.nan_to_num(x, nan=0.0)
+
         # Step 1: Normalize total counts per sample to target_sum
         # Compute row sums
         row_sums = torch.sum(x, dim=1, keepdim=True)
 
-        # Replace zero sums with epsilon to avoid division by zero
-        row_sums = torch.where(row_sums == 0, self.epsilon, row_sums)
+        # Replace zero sums with 1 to avoid division by zero (matches scimilarity behavior)
+        row_sums = torch.where(
+            row_sums == 0, torch.tensor(1.0, dtype=torch.float32), row_sums
+        )
 
         # Compute scaling factors
         scaling_factors = self.target_sum / row_sums
@@ -187,6 +189,8 @@ def model(
         torch.zeros(1, ce.n_genes),
         preprocessing_path,
         export_params=True,
+        opset_version=14,
+        do_constant_folding=True,
         input_names=["input"],
         output_names=["preprocessed"],
         dynamic_axes={"input": {0: "batch_size"}, "preprocessed": {0: "batch_size"}},
@@ -203,6 +207,8 @@ def model(
         torch.zeros(1, ce.n_genes),
         embedding_path,
         export_params=True,
+        opset_version=14,
+        do_constant_folding=True,
         input_names=["preprocessed"],
         output_names=["embedding"],
         dynamic_axes={
@@ -218,11 +224,15 @@ def model(
     combined_model = NormalizationWrapper(ce.model, target_sum=1e4)
     combined_path = output_path / "model.onnx"
 
+    # Set combined model to evaluation mode before export
+    combined_model.eval()
     torch.onnx.export(
         combined_model,
         torch.zeros(1, ce.n_genes),
         combined_path,
         export_params=True,
+        opset_version=14,
+        do_constant_folding=True,
         input_names=["input"],
         output_names=["output"],
         dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
@@ -244,32 +254,35 @@ def model(
     # Step 5: Individual component validation
     print("\n5. Validating individual components...")
 
-    # Load test data
+    # Load test data and use align_dataset for consistent input
     adata = sc.read_h5ad("data/GSE136831_subsample.h5ad")
     adata = adata[0:10, :].copy()
+    adata = align_dataset(adata, ce.gene_order)
 
-    # Create inflation map for final validation
-    inflation_map = create_inflation_map(adata, ce.gene_order)
+    # Check for and handle NaN values (matches scimilarity behavior)
+    if hasattr(adata.X, "toarray"):
+        X_array = adata.X.toarray()
+    else:
+        X_array = adata.X
 
-    # Prepare raw input data with inflation mapping
-    raw_batch = np.zeros((10, ce.n_genes), dtype=np.float32)
-    for sample_idx, model_idx in inflation_map.items():
-        raw_batch[:, model_idx] = (
-            adata.X[:, sample_idx].toarray()
-            if hasattr(adata.X, "toarray")
-            else adata.X[:, sample_idx]
-        )
+    if np.isnan(X_array).any():
+        print("    ⚠️ NaN values detected in test data, zeroing them...")
+        X_array = np.nan_to_num(X_array, nan=0.0)
+        adata.X = X_array
+
+    # Get raw aligned data (before normalization) for preprocessing test
+    raw_aligned_batch = X_array.astype(np.float32)
 
     # Test preprocessing step
     print("  Testing preprocessing step...")
     preprocessing_pytorch = PreprocessingWrapper(target_sum=1e4)
     with torch.no_grad():
         preprocessed_pytorch = preprocessing_pytorch(
-            torch.from_numpy(raw_batch)
+            torch.from_numpy(raw_aligned_batch)
         ).numpy()
 
     ort_session_prep = ort.InferenceSession(preprocessing_path)
-    preprocessed_onnx = ort_session_prep.run(None, {"input": raw_batch})[0]
+    preprocessed_onnx = ort_session_prep.run(None, {"input": raw_aligned_batch})[0]
 
     max_diff_prep = np.max(np.abs(preprocessed_pytorch - preprocessed_onnx))
     print(f"    Preprocessing max diff: {max_diff_prep:.2e}")
@@ -280,13 +293,27 @@ def model(
 
     # Test embedding step (using preprocessed output)
     print("  Testing embedding step...")
+
+    # Use the same preprocessing that SCimilarity uses for fair comparison
+    adata_for_embedding = sc.read_h5ad("data/GSE136831_subsample.h5ad")
+    adata_for_embedding = adata_for_embedding[0:10, :].copy()
+    adata_for_embedding = align_dataset(adata_for_embedding, ce.gene_order)
+    adata_for_embedding = lognorm_counts(adata_for_embedding)
+    scimilarity_preprocessed = (
+        adata_for_embedding.X.toarray().astype(np.float32)
+        if hasattr(adata_for_embedding.X, "toarray")
+        else adata_for_embedding.X.astype(np.float32)
+    )
+
+    # Set model to evaluation mode (like working version)
+    ce.model.eval()
     with torch.no_grad():
-        embedding_pytorch = ce.model(torch.from_numpy(preprocessed_pytorch)).numpy()
+        embedding_pytorch = ce.model(torch.from_numpy(scimilarity_preprocessed)).numpy()
 
     ort_session_emb = ort.InferenceSession(embedding_path)
-    embedding_onnx = ort_session_emb.run(None, {"preprocessed": preprocessed_pytorch})[
-        0
-    ]
+    embedding_onnx = ort_session_emb.run(
+        None, {"preprocessed": scimilarity_preprocessed}
+    )[0]
 
     max_diff_emb = np.max(np.abs(embedding_pytorch - embedding_onnx))
     print(f"    Embedding max diff: {max_diff_emb:.2e}")
@@ -298,30 +325,43 @@ def model(
     # Step 6: Final combined validation
     print("\n6. Validating combined model...")
 
-    # Test against SCimilarity pipeline
-    adata_aligned = sc.read_h5ad("data/GSE136831_subsample.h5ad")
-    adata_aligned = adata_aligned[0:10, :].copy()
-    adata_aligned = align_dataset(adata_aligned, ce.gene_order)
-    adata_aligned = lognorm_counts(adata_aligned)
-    scimilarity_output = ce.get_embeddings(adata_aligned.X)
-
-    # Test combined ONNX model
+    # Run the ONNX model
     ort_session_combined = ort.InferenceSession(combined_path)
-    combined_onnx = ort_session_combined.run(None, {"input": raw_batch})[0]
+    combined_onnx_output = ort_session_combined.run(None, {"input": raw_aligned_batch})[
+        0
+    ]
 
-    max_diff_combined = np.max(np.abs(scimilarity_output - combined_onnx))
-    mean_diff_combined = np.mean(np.abs(scimilarity_output - combined_onnx))
+    # Run the original SCimilarity get_embeddings function
+    # The get_embeddings function expects log-normalized data.
+    # Our ONNX model does this internally, but for a fair comparison,
+    # we must manually preprocess for get_embeddings.
+    adata_for_embedding = sc.read_h5ad("data/GSE136831_subsample.h5ad")
+    adata_for_embedding = adata_for_embedding[0:10, :].copy()
+    adata_for_embedding = align_dataset(adata_for_embedding, ce.gene_order)
+    adata_for_embedding = lognorm_counts(adata_for_embedding)
+    scimilarity_preprocessed = (
+        adata_for_embedding.X.toarray().astype(np.float32)
+        if hasattr(adata_for_embedding.X, "toarray")
+        else adata_for_embedding.X.astype(np.float32)
+    )
+    scimilarity_output = ce.get_embeddings(scimilarity_preprocessed)
 
-    print(f"  SCimilarity vs Combined ONNX:")
-    print(f"    Max absolute difference: {max_diff_combined:.2e}")
-    print(f"    Mean absolute difference: {mean_diff_combined:.2e}")
+    # Compare the two outputs
+    max_diff = np.max(np.abs(combined_onnx_output - scimilarity_output))
+    mean_diff = np.mean(np.abs(combined_onnx_output - scimilarity_output))
 
-    if max_diff_combined < 1e-5:
-        print("    ✅ Combined model concordant with SCimilarity")
-    elif max_diff_combined < 1e-3:
-        print("    ⚠️ Combined model has small differences (< 1e-3)")
+    print(f"  ONNX vs SCimilarity get_embeddings:")
+    print(f"    Max absolute difference: {max_diff:.2e}")
+    print(f"    Mean absolute difference: {mean_diff:.2e}")
+
+    if max_diff < 1e-5:
+        print("    ✅ Combined ONNX concordant with SCimilarity")
+    elif max_diff < 1e-3:
+        print("    ⚠️ Combined ONNX has small differences with SCimilarity (< 1e-3)")
     else:
-        print(f"    ❌ Combined model differs significantly: {max_diff_combined:.2e}")
+        print(
+            f"    ❌ Combined ONNX differs significantly from SCimilarity: {max_diff:.2e}"
+        )
 
     # Export genes file
     print("\n7. Exporting genes...")
