@@ -16,23 +16,22 @@
       ]
     },
     {
-      "name": "scimilarity embeddings",
+      "name": "scimilarity export embeddings",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export_embeddings.py",
       "console": "integratedTerminal",
       "args": [
-        "embeddings",
         "${workspaceFolder}/data/scimilarity/model_v1.1/cellsearch",
         "${workspaceFolder}/data/scimilarity",
         "--labels",
-        "tissue",
-        "--labels",
         "prediction",
-        "--stratify",
+        "--labels",
+        "tissue",
         "--validate",
+        "--stratify",
         "--num-embeddings",
-        "10000"
+        "1000"
       ]
     },
     {

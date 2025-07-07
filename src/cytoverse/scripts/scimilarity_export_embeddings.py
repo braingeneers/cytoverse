@@ -36,8 +36,8 @@ def embeddings(
         help="Output directory path",
     ),
     labels: list[str] = typer.Option(
-        ["prediction", "tissue", "study"],
-        help="Labels to export (First used for stratification, others exported as well)",
+        ["prediction", "tissue"],
+        help="Labels to export (First used for stratification)",
     ),
     num_embeddings: int = typer.Option(
         None,
@@ -95,8 +95,8 @@ def embeddings(
             print(f"Stratified sampling {num_embeddings} embeddings...")
             print("Reading metadata for stratification...")
 
-            # Read all rows for stratification (this is unavoidable for stratification)
-            df_strat: pd.DataFrame = metadata_db.query(attrs=labels).df[:]
+            # Read all of the label we're stratifying on
+            df_strat: pd.DataFrame = metadata_db.query(attrs=labels[0:1]).df[:]
 
             # Stratify on the first label
             strata_labels: pd.Series = df_strat[labels[0]].astype("category")
@@ -121,16 +121,16 @@ def embeddings(
     # Step 2: Load metadata and embeddings for sampled indices only
     print("Loading metadata...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-        metadata_df = metadata_db.query(attrs=labels).df[sampled_indices]
+        metadata_df = metadata_db.query(attrs=["index", "study", "sample"] + labels).df[
+            sampled_indices
+        ]
     print(f"  Loaded metadata shape: {metadata_df.shape}")
 
-    print("Loading embeddings...")
-    embeddings = scimilarity.utils.embedding_from_tiledb(
-        sampled_indices, str(model_path / "cell_embedding")
-    )
-    print(f"  Loaded embeddings shape: {embeddings.shape}")
+    # Set the "index" column as the dataframe index with int32 dtype
+    metadata_df = metadata_df.set_index("index")
+    metadata_df.index = metadata_df.index.astype("int32")
 
-    for label in labels:
+    for label in labels + ["study"]:
         metadata_df[label] = metadata_df[label].astype("category")
 
     # Export metadata as Parquet file with compression
@@ -138,21 +138,21 @@ def embeddings(
     metadata_df.to_parquet(
         labels_path,
         compression="snappy",
-        index=False,
+        index=True,
     )
+
+    print("Loading embeddings...")
+    embeddings = scimilarity.utils.embedding_from_tiledb(
+        sampled_indices, str(model_path / "cell_embedding")
+    )
+    print(f"  Loaded embeddings shape: {embeddings.shape}")
 
     # Export embeddings as numpy array
     vectors_path = output_path / "vectors.npy"
     np.save(vectors_path, embeddings)
 
-    # Export sample ids as arrow file
-    vector_ids_path = output_path / "vector_ids.arrow"
-    vector_ids_table = pa.table({"vector_id": sampled_indices})
-    pq.write_table(vector_ids_table, vector_ids_path)
-
     print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
     print(f"Vectors (Embeddings) saved to {vectors_path} (shape: {embeddings.shape})")
-    print(f"Vector IDs saved to {vector_ids_path} (shape: {len(sampled_indices)})")
     print(f"Sampled indices: {sampled_indices[:10]}... (total {len(sampled_indices)})")
 
     # Validation if requested
@@ -162,7 +162,6 @@ def embeddings(
             model_path,
             labels_path,
             vectors_path,
-            vector_ids_path,
             labels,
             sampled_indices[0:10],
         )
@@ -174,7 +173,6 @@ def _validate_exports(
     model_path: Path,
     labels_path: Path,
     embeddings_path: Path,
-    vector_ids_path: Path,
     labels: list[str],
     original_indices: list[int],
 ) -> None:
@@ -184,16 +182,18 @@ def _validate_exports(
     print("  Reading from exported files...")
     labels_df_exported = pd.read_parquet(labels_path)[: len(original_indices)]
     embeddings_exported = np.load(embeddings_path)[: len(original_indices)]
-    vector_ids_exported = (
-        pq.read_table(vector_ids_path)
-        .to_pandas()["vector_id"]
-        .values[: len(original_indices)]
-    )
+    # Get vector IDs from the labels file index
+    vector_ids_exported = labels_df_exported.index.values[: len(original_indices)]
 
     # Read validation samples from original TileDB
     print("  Reading from original TileDB...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-        original_metadata = metadata_db.query(attrs=labels).df[original_indices]
+        original_metadata = metadata_db.query(
+            attrs=["index", "study", "sample"] + labels
+        ).df[original_indices]
+        # Set the "index" column as the dataframe index with int32 dtype
+        original_metadata = original_metadata.set_index("index")
+        original_metadata.index = original_metadata.index.astype("int32")
 
     original_embeddings = scimilarity.utils.embedding_from_tiledb(
         original_indices, str(model_path / "cell_embedding")
