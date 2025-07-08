@@ -85,7 +85,6 @@
       "args": [
         "pq-train",
         "${workspaceFolder}/data/scimilarity/vectors.npy",
-        "${workspaceFolder}/data/scimilarity/labels.parquet",
         "${workspaceFolder}/web/public/models/scimilarity/pq",
         "--m",
         "16",
@@ -106,7 +105,6 @@
       "args": [
         "ivf-train",
         "${workspaceFolder}/data/scimilarity/vectors.npy",
-        "${workspaceFolder}/data/scimilarity/labels.parquet",
         "${workspaceFolder}/web/public/models/scimilarity/ivf",
         "--n-partitions",
         "64",
@@ -126,7 +124,6 @@
         "ivfpq-export",
         "${workspaceFolder}/web/public/models/scimilarity",
         "${workspaceFolder}/data/scimilarity/vectors.npy",
-        "${workspaceFolder}/data/scimilarity/labels.parquet",
         "--max-vectors",
         "250000"
       ]

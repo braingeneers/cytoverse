@@ -45,40 +45,25 @@ app = typer.Typer(
 )
 
 
-def _load_vectors(
-    vectors_path: Path, labels_path: Path, max_vectors: Optional[int] = None
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Load vectors and vector IDs from files and return as numpy arrays."""
+def _load_vectors(vectors_path: Path, max_vectors: Optional[int] = None) -> np.ndarray:
+    """Load vectors and return as a numpy array."""
     logger.info(f"Loading vectors from {vectors_path}")
     vectors = np.load(vectors_path)
     logger.info(
         f"Loaded {vectors.shape[0]} vectors of dimension {vectors.shape[1]} from .npy file"
     )
 
-    logger.info(f"Loading vector IDs from {labels_path}")
-    labels_df = pd.read_parquet(labels_path)
-    vector_ids = labels_df.index.values
-    logger.info(f"Loaded {len(vector_ids)} vector IDs from parquet index")
-
-    if len(vector_ids) != vectors.shape[0]:
-        raise ValueError(
-            f"Number of vector IDs ({len(vector_ids)}) must match number of vectors ({vectors.shape[0]})"
-        )
-
     # Limit number of vectors if specified (take first max_vectors)
     if max_vectors is not None and vectors.shape[0] > max_vectors:
         logger.info(f"Using first {max_vectors} vectors for training")
         vectors = vectors[:max_vectors]
-        vector_ids = vector_ids[:max_vectors]
 
-    return vectors.astype(np.float32), vector_ids
+    return vectors
 
 
 @app.command()
 def pq_train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
-    labels_path: Path = typer.Argument(..., help="Path to labels.parquet", exists=True),
     output_dir: Path = typer.Argument(
         ..., help="Output directory for trained model and codebooks"
     ),
@@ -98,9 +83,9 @@ def pq_train(
     """
     Train a Product Quantization model on vectors.
     """
-    embeddings, vector_ids = _load_vectors(vectors_path, labels_path, max_vectors)
-    embeddings_tensor = torch.from_numpy(embeddings)
-    d = embeddings_tensor.shape[1]
+    vectors = _load_vectors(vectors_path, max_vectors)
+    vectors_tensor = torch.from_numpy(vectors)
+    d = vectors_tensor.shape[1]
 
     logger.info(f"Training PQ with parameters: d={d}, m={m}, k={k}")
 
@@ -109,10 +94,10 @@ def pq_train(
 
     # Create and train PQ model
     pq = ProductQuantizer(d=d, m=m, k=k)
-    pq.train_pq(embeddings_tensor, n_iterations=n_iterations)
+    pq.train_pq(vectors_tensor, n_iterations=n_iterations)
 
     # Test reconstruction error
-    _test_pq_reconstruction(pq, embeddings_tensor)
+    _test_pq_reconstruction(pq, vectors_tensor)
 
     # Save PQ model
     pq_model_path = output_dir / "model.pkl"
@@ -160,11 +145,11 @@ def pq_train(
     logger.info(f"  Metadata: {metadata_path}")
 
 
-def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> None:
+def _test_pq_reconstruction(pq: ProductQuantizer, vectors: torch.Tensor) -> None:
     """Test PQ reconstruction error."""
     # Use a subset for testing
-    n_test = min(1000, embeddings.shape[0])
-    test_vectors = embeddings[:n_test]
+    n_test = min(1000, vectors.shape[0])
+    test_vectors = vectors[:n_test]
 
     # Encode and decode
     codes = pq(test_vectors)
@@ -189,7 +174,6 @@ def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> N
 @app.command()
 def ivf_train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
-    labels_path: Path = typer.Argument(..., help="Path to labels.parquet", exists=True),
     output_dir: Path = typer.Argument(..., help="Output directory for trained index"),
     n_partitions: int = typer.Option(256, help="Number of partitions for IVF index"),
     max_vectors: Optional[int] = typer.Option(
@@ -202,9 +186,9 @@ def ivf_train(
     """
     Train an Inverted File Index on vectors.
     """
-    vectors, vector_ids = _load_vectors(vectors_path, labels_path, max_vectors)
+    vectors = _load_vectors(vectors_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
-    vector_ids_tensor = torch.from_numpy(vector_ids)
+    vector_ids_tensor = torch.arange(vectors.shape[0], dtype=torch.int32)
     d = vectors_tensor.shape[1]
 
     logger.info(f"Training IVF with parameters: d={d}, n_partitions={n_partitions}")
@@ -253,11 +237,11 @@ def ivf_train(
 
 
 def _test_ivf_search(
-    ivf: InvertedFileIndex, embeddings: torch.Tensor, n_probe_values: list[int]
+    ivf: InvertedFileIndex, vectors: torch.Tensor, n_probe_values: list[int]
 ) -> None:
     """Test IVF search performance."""
-    n_test = min(100, embeddings.shape[0])
-    test_queries = embeddings[:n_test]
+    n_test = min(100, vectors.shape[0])
+    test_queries = vectors[:n_test]
 
     logger.info(f"IVF Search Results:")
     logger.info(f"  Test queries: {n_test}")
@@ -299,9 +283,6 @@ def ivfpq_export(
     vectors_path: Path = typer.Argument(
         ..., help="Path to vectors.npy file", exists=True
     ),
-    labels_path: Path = typer.Argument(
-        ..., help="Path to labels.parquet file", exists=True
-    ),
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to use (None = all)"
     ),
@@ -331,9 +312,9 @@ def ivfpq_export(
     logger.info(f"Loading pre-trained models from {models_path}")
 
     # Load vectors and vector IDs
-    vectors, vector_ids = _load_vectors(vectors_path, labels_path, max_vectors)
+    vectors = _load_vectors(vectors_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
-    vector_ids_tensor = torch.from_numpy(vector_ids)
+    vector_ids_tensor = torch.arange(vectors.shape[0], dtype=torch.int32)
 
     logger.info(
         f"Loaded {vectors_tensor.shape[0]:,} vectors of dimension {vectors_tensor.shape[1]}"
@@ -366,13 +347,13 @@ def ivfpq_export(
 
 
 def _test_ivfpq_performance(
-    ivfpq: IVFPQ, embeddings_tensor: torch.Tensor, n_queries: int = 10
+    ivfpq: IVFPQ, vectors_tensor: torch.Tensor, n_queries: int = 10
 ) -> None:
     """Test IVFPQ performance with random queries."""
     # Sample random query vectors
-    n_vectors = embeddings_tensor.shape[0]
+    n_vectors = vectors_tensor.shape[0]
     query_indices = torch.randperm(n_vectors)[:n_queries]
-    query_vectors = embeddings_tensor[query_indices]
+    query_vectors = vectors_tensor[query_indices]
 
     logger.info(f"Testing with {n_queries} random query vectors")
 
