@@ -37,42 +37,43 @@
       "name": "umap train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/umap.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
-        "${workspaceFolder}/data/scimilarity/embeddings.npy",
-        "${workspaceFolder}/web/public/models/scimilarity/",
-        "--num-embeddings",
-        "100000"
+        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/scimilarity/labels.parquet",
+        "${workspaceFolder}/web/public/models/scimilarity/pumap",
+        "--num-vectors",
+        "10000"
       ]
     },
     {
       "name": "umap map",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/umap.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "map",
-        "${workspaceFolder}/web/public/models/scimilarity/umap.onnx",
-        "${workspaceFolder}/data/scimilarity/embeddings.npy",
+        "${workspaceFolder}/web/public/models/scimilarity/pumap/model.onnx",
+        "${workspaceFolder}/data/scimilarity/vectors.npy",
         "${workspaceFolder}/data/scimilarity/",
-        "--export-png",
-        "--num-embeddings",
-        "1000"
+        "--num-vectors",
+        "10000"
+        "--export-png"
       ]
     },
     {
       "name": "umap export",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/umap.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "export",
         "${workspaceFolder}/data/scimilarity/",
-        "${workspaceFolder}/web/public/models/scimilarity/"
+        "${workspaceFolder}/web/public/models/scimilarity/pumap"
       ]
     },
     {

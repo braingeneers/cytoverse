@@ -17,6 +17,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
 
 # Create Typer app
 app = typer.Typer(
@@ -28,10 +29,15 @@ app = typer.Typer(
 @app.command()
 def train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy file"),
+    labels_path: Path = typer.Argument(..., help="Path to labels.parquet file for stratified sampling"),
     output_path: Path = typer.Argument(..., help="Path to output the trained model"),
     num_vectors: Optional[int] = typer.Option(
         None,
         help="Limit the total number of vectors used for training, use all if None",
+    ),
+    stratify_label: str = typer.Option(
+        "prediction",
+        help="Label column name to stratify on",
     ),
 ) -> None:
     """
@@ -42,15 +48,52 @@ def train(
     # Load the vectors
     vectors = np.load(vectors_path)
 
-    # Select random subset of vectors if num_vectors is specified
+    # Initialize random state for reproducibility
+    random_state = np.random.RandomState(42)
+
+    # Track training vector indices for consistency across train/map/export
+    training_vector_ids = None
+
+    # Select subset of vectors if num_vectors is specified
     if num_vectors is not None:
-        print(
-            f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors"
-        )
-        random_state = np.random.RandomState(42)  # For reproducibility
-        vectors = vectors[
-            random_state.choice(vectors.shape[0], num_vectors, replace=False)
-        ]
+        if labels_path is not None:
+            # Stratified sampling based on labels
+            typer.echo(f"Loading labels from {labels_path}")
+            labels_df = pd.read_parquet(labels_path)
+            
+            if stratify_label not in labels_df.columns:
+                typer.echo(f"Error: Column '{stratify_label}' not found in labels file", err=True)
+                raise typer.Exit(1)
+            
+            if len(labels_df) != vectors.shape[0]:
+                typer.echo(f"Error: Number of labels ({len(labels_df)}) doesn't match number of vectors ({vectors.shape[0]})", err=True)
+                raise typer.Exit(1)
+            
+            print(f"Selecting {num_vectors} stratified vectors from {vectors.shape[0]} total vectors based on '{stratify_label}' column")
+            
+            # Create indices array for stratified splitting
+            indices = np.arange(vectors.shape[0])
+            stratify_values = labels_df[stratify_label].values
+            
+            # Use train_test_split for stratified sampling
+            selected_indices, _ = train_test_split(
+                indices,
+                test_size=1.0 - (num_vectors / vectors.shape[0]),
+                stratify=stratify_values,
+                random_state=42
+            )
+            
+            training_vector_ids = selected_indices
+            vectors = vectors[selected_indices]
+        else:
+            # Random sampling (original behavior)
+            print(f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors")
+            selected_indices = random_state.choice(vectors.shape[0], num_vectors, replace=False)
+            training_vector_ids = selected_indices
+            vectors = vectors[selected_indices]
+    else:
+        # Use all vectors
+        training_vector_ids = np.arange(vectors.shape[0])
 
     # Determine number of vectors to use
     num_vectors = num_vectors if num_vectors is not None else vectors.shape[0]
@@ -58,6 +101,7 @@ def train(
         num_vectors = min(vectors.shape[0], num_vectors)
 
     vectors = vectors[:num_vectors]
+    training_vector_ids = training_vector_ids[:num_vectors]
 
     # Create and fit the model
     model = umap_pytorch.PUMAP(
@@ -94,6 +138,11 @@ def train(
         dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
     )
     typer.echo(f"Saved clustering model to {model_output_path}")
+
+    # Save training vector IDs for consistent mapping and export
+    training_ids_path = vectors_path.parent / "pumap_training_vector_ids.npy"
+    np.save(training_ids_path, training_vector_ids)
+    typer.echo(f"Saved training vector IDs to {training_ids_path}")
 
 
 def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
@@ -148,15 +197,11 @@ def map(
     # Load the vectors
     vectors = np.load(vectors_path)
 
-    # Select random subset of vectors if num_vectors is specified
+    # Select first num_vectors if specified, otherwise use all vectors
     if num_vectors is not None:
-        print(
-            f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors"
-        )
-        random_state = np.random.RandomState(42)  # For reproducibility
-        vectors = vectors[
-            random_state.choice(vectors.shape[0], num_vectors, replace=False)
-        ]
+        num_vectors = min(num_vectors, vectors.shape[0])
+        vectors = vectors[:num_vectors]
+        typer.echo(f"Using first {num_vectors} vectors from {vectors_path}")
     else:
         num_vectors = vectors.shape[0]
 
@@ -209,8 +254,11 @@ def export(
     """
     Export mappings and labels to Arrow columnar format files.
 
+    NOTE: Only the first len(mappings.npy) x and y are exported, but
+    categories are exported for all rows in labels.parquet.
+
     Reads mappings.npy and labels.parquet from input_path and outputs:
-    - x.arrow and y.arrow: Coordinate columns in Arrow format
+    - x.arrow and y.arrow: Coordinate columns in Arrow format for each mapping
     - {column_name}.arrow: Category indices for each label column as int16
     - metadata.json: Contains categories mapping for label columns
     """
@@ -298,11 +346,6 @@ def export(
     categories_dict = {}
 
     for col in labels_df.columns:
-        # Skip the index column as it has too many categories and is not useful metadata
-        if col == "index":
-            typer.echo(f"  Skipping index column: {col}")
-            continue
-
         typer.echo(f"  Processing column: {col}")
 
         if labels_df[col].dtype.name == "category":

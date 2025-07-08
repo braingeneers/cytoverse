@@ -18,12 +18,19 @@ import {
   FormControlLabel,
   Radio,
   Checkbox,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
+import ShareIcon from '@mui/icons-material/Share'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { MuiFileInput } from 'mui-file-input'
 import { tableFromIPC, Vector } from 'apache-arrow'
 
@@ -76,6 +83,13 @@ function App() {
   // Labeling feedback state - counts of predicted labels
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
+
+  // Share modal state
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [shareEmail, setShareEmail] = useState('')
+
+  // Help modal state
+  const [helpModalOpen, setHelpModalOpen] = useState(false)
 
   // Normalization parameters from metadata
   const [xCenter, setXCenter] = useState<number>(0)
@@ -348,13 +362,6 @@ function App() {
         throw new Error('Missing required columns in Arrow files')
       }
 
-      const numPoints = xTable.numRows
-
-      // Validate all tables have the same number of rows
-      if (yTable.numRows !== numPoints || categoryTable.numRows !== numPoints) {
-        throw new Error('Mismatched number of rows between Arrow files')
-      }
-
       // Set the Vector objects directly - no need for data transformation
       setXTrainData(xColumn)
       setYTrainData(yColumn)
@@ -423,6 +430,13 @@ function App() {
     } else {
       start()
     }
+  }
+
+  const handleShareLabels = () => {
+    console.log('Sharing labels to:', shareEmail)
+    // TODO: Implement actual sharing logic
+    setShareModalOpen(false)
+    setShareEmail('')
   }
 
   useEffect(() => {
@@ -547,9 +561,39 @@ function App() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               CytoVerse
             </Typography>
-            <Link href="https://github.com/braingeneers/cytoverse" target="_blank" underline="none">
+            <IconButton
+              size="small"
+              onClick={() => setHelpModalOpen(true)}
+              sx={{
+                color: 'text.secondary',
+                mr: 1,
+                '&:focus': {
+                  outline: 'none',
+                },
+                '&:focus-visible': {
+                  outline: 'none',
+                },
+              }}
+            >
+              <HelpOutlineIcon />
+            </IconButton>
+            <IconButton
+              component={Link}
+              href="https://github.com/braingeneers/cytoverse"
+              target="_blank"
+              sx={{
+                color: 'inherit',
+                mr: 1,
+                '&:focus': {
+                  outline: 'none',
+                },
+                '&:focus-visible': {
+                  outline: 'none',
+                },
+              }}
+            >
               <GitHubIcon />
-            </Link>
+            </IconButton>
             <IconButton onClick={handleDrawerToggle}>
               <ChevronLeftIcon />
             </IconButton>
@@ -628,16 +672,19 @@ function App() {
 
             {/* Dataset Statistics */}
             <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              {xTrainData && yTrainData && categoryData ? (
+              {xTrainData && yTrainData && categoryLabels && categoryData ? (
                 <Box>
                   <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Cells:</strong> {xTrainData.length.toLocaleString()}
+                    <strong>Plotted Cells:</strong> {xTrainData.length.toLocaleString()}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     <strong>Category:</strong> {selectedCategory}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     <strong>Labels:</strong> {categoryLabels.length}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Reference Cells:</strong> {categoryData.length.toLocaleString()}
                   </Typography>
                 </Box>
               ) : isLoadingData ? (
@@ -679,9 +726,31 @@ function App() {
                   borderRadius: 1,
                 }}
               >
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                  Predicted Labels
-                </Typography>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    mb: 2,
+                  }}
+                >
+                  <Typography variant="h6">Predicted Labels</Typography>
+                  <IconButton
+                    size="small"
+                    onClick={() => setShareModalOpen(true)}
+                    sx={{
+                      color: 'primary.main',
+                      '&:focus': {
+                        outline: 'none',
+                      },
+                      '&:focus-visible': {
+                        outline: 'none',
+                      },
+                    }}
+                  >
+                    <ShareIcon />
+                  </IconButton>
+                </Box>
                 {totalLabeled > 0 ? (
                   <Box>
                     <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
@@ -791,6 +860,66 @@ function App() {
           )}
         </Box>
       </Box>
+
+      {/* Share Modal */}
+      <Dialog
+        open={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Share Predicted Labels</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <TextField
+              fullWidth
+              label="Email Address"
+              type="email"
+              value={shareEmail}
+              onChange={(e) => setShareEmail(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+            <Typography variant="body2" color="text.secondary">
+              Want to know if someone has embeddings close to yours? Enter your email and we'll
+              introduce you to them. We'll never upload or share your original data, only your
+              quantized embeddings.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShareModalOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleShareLabels} disabled={!shareEmail.trim()}>
+            Share
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Help Modal */}
+      <Dialog open={helpModalOpen} onClose={() => setHelpModalOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>About CytoVerse</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <Typography variant="body1" sx={{ mb: 2 }}>
+              CytoVerse presents a fully browser-based single-cell RNA-seq analysis platform that
+              enables real-time cell type annotation through foundation model embeddings. The system
+              leverages SCimilarity for client-side cell embedding, parametric UMAP for 2D
+              visualization against comprehensive training datasets, and Inverted File with Product
+              Quantization (IVFPQ) for approximate nearest neighbor search to generate cell type
+              labels. Built on WebAssembly and ONNX for performance, the platform scales to millions
+              of training samples while supporting unlimited streaming analysis of h5ad files via
+              h5wasm. This architecture enables distributed collaborative discovery, allowing
+              consortium researchers to identify overlapping or complementary assays through shared
+              embedding space exploration—a critical capability for the emerging perturbseq-driven
+              discovery paradigm.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHelpModalOpen(false)} variant="contained">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </ThemeProvider>
   )
 }

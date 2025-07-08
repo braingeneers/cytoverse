@@ -5,7 +5,6 @@ all: scimilarity pumap ivfpq
 
 reset:
 	rm -rf web/public/models/scimilarity
-	rm data/scimilarity/*
 
 # SCimilarity
 scimilarity-model:
@@ -31,6 +30,7 @@ scimilarity: scimilarity-model scimilarity-embeddings
 pumap-train:
 	python src/cytoverse/scripts/pumap_train.py train \
         data/scimilarity/vectors.npy \
+		data/scimilarity/labels.parquet \
         web/public/models/scimilarity/pumap \
         --num-vectors 250000
 
@@ -40,6 +40,7 @@ pumap-map:
         data/scimilarity/vectors.npy \
         data/scimilarity/ \
 		--export-png \
+        --num-vectors 1000000
 
 pumap-export:
 	python src/cytoverse/scripts/pumap_train.py export \
