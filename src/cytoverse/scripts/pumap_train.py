@@ -71,7 +71,7 @@ def train(
         reconstruction_loss=torch.nn.functional.binary_cross_entropy_with_logits,  # pass in custom reconstruction loss functions
         random_state=random_state,  # For reproducibility
         lr=1e-3,
-        epochs=10,
+        epochs=15,
         num_workers=4,
         num_gpus=1,
         match_nonparametric_umap=False,  # Train network to match vectors from non parametric umap

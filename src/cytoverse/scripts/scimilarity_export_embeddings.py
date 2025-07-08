@@ -121,7 +121,7 @@ def embeddings(
     # Step 2: Load metadata and embeddings for sampled indices only
     print("Loading metadata...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-        metadata_df = metadata_db.query(attrs=["index", "study", "sample"] + labels).df[
+        metadata_df = metadata_db.query(attrs=["index"] + labels).df[
             sampled_indices
         ]
     print(f"  Loaded metadata shape: {metadata_df.shape}")
@@ -130,7 +130,7 @@ def embeddings(
     metadata_df = metadata_df.set_index("index")
     metadata_df.index = metadata_df.index.astype("int32")
 
-    for label in labels + ["study"]:
+    for label in labels:
         metadata_df[label] = metadata_df[label].astype("category")
 
     # Export metadata as Parquet file with compression
@@ -189,7 +189,7 @@ def _validate_exports(
     print("  Reading from original TileDB...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
         original_metadata = metadata_db.query(
-            attrs=["index", "study", "sample"] + labels
+            attrs=["index"] + labels
         ).df[original_indices]
         # Set the "index" column as the dataframe index with int32 dtype
         original_metadata = original_metadata.set_index("index")

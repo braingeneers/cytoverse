@@ -20,6 +20,7 @@ scimilarity-embeddings:
 	--labels prediction \
 	--labels tissue \
 	--labels author_label \
+	--labels study \
 	--validate \
 	--stratify \
 	--num-embeddings 1000000
@@ -52,7 +53,7 @@ pumap: pumap-train pumap-map pumap-export
 pq-train:
 	python src/cytoverse/scripts/ivfpq_train.py pq-train \
 		data/scimilarity/vectors.npy \
-		data/scimilarity/vector_ids.npy \
+		data/scimilarity/labels.parquet \
 		web/public/models/scimilarity/pq/ \
 		--m 16 \
 		--k 256 \
@@ -63,7 +64,7 @@ pq-train:
 ivf-train:
 	python src/cytoverse/scripts/ivfpq_train.py ivf-train \
 		data/scimilarity/vectors.npy \
-		data/scimilarity/vector_ids.npy \
+		data/scimilarity/labels.parquet \
 		web/public/models/scimilarity/ivf/ \
 		--n-partitions 64 \
 		--max-vectors 10000 \
@@ -74,8 +75,7 @@ ivfpq-export:
 	python src/cytoverse/scripts/ivfpq_train.py ivfpq-export \
 		web/public/models/scimilarity \
 		data/scimilarity/vectors.npy \
-		data/scimilarity/vector_ids.npy \
-		--max-vectors 10000 \
+		data/scimilarity/labels.parquet \
 		--test-performance
 
-ivfpq: ivf-train pq-train ivfpq-export
+ivfpq: pq-train ivf-train ivfpq-export

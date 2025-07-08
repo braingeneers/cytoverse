@@ -46,18 +46,20 @@ app = typer.Typer(
 
 
 def _load_vectors(
-    vectors_path: Path, vector_ids_path: Path, max_vectors: Optional[int] = None
+    vectors_path: Path, labels_path: Path, max_vectors: Optional[int] = None
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Load vectors and vector IDs from files and return as numpy arrays."""
+    """
+    Load vectors and vector IDs from files and return as numpy arrays."""
     logger.info(f"Loading vectors from {vectors_path}")
     vectors = np.load(vectors_path)
     logger.info(
         f"Loaded {vectors.shape[0]} vectors of dimension {vectors.shape[1]} from .npy file"
     )
 
-    logger.info(f"Loading vector IDs from {vector_ids_path}")
-    vector_ids = np.load(vector_ids_path)
-    logger.info(f"Loaded {len(vector_ids)} vector IDs")
+    logger.info(f"Loading vector IDs from {labels_path}")
+    labels_df = pd.read_parquet(labels_path)
+    vector_ids = labels_df.index.values
+    logger.info(f"Loaded {len(vector_ids)} vector IDs from parquet index")
 
     if len(vector_ids) != vectors.shape[0]:
         raise ValueError(
@@ -76,9 +78,7 @@ def _load_vectors(
 @app.command()
 def pq_train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
-    vector_ids_path: Path = typer.Argument(
-        ..., help="Path to vector IDs.npy", exists=True
-    ),
+    labels_path: Path = typer.Argument(..., help="Path to labels.parquet", exists=True),
     output_dir: Path = typer.Argument(
         ..., help="Output directory for trained model and codebooks"
     ),
@@ -98,7 +98,7 @@ def pq_train(
     """
     Train a Product Quantization model on vectors.
     """
-    embeddings, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
+    embeddings, vector_ids = _load_vectors(vectors_path, labels_path, max_vectors)
     embeddings_tensor = torch.from_numpy(embeddings)
     d = embeddings_tensor.shape[1]
 
@@ -189,9 +189,7 @@ def _test_pq_reconstruction(pq: ProductQuantizer, embeddings: torch.Tensor) -> N
 @app.command()
 def ivf_train(
     vectors_path: Path = typer.Argument(..., help="Path to vectors.npy", exists=True),
-    vector_ids_path: Path = typer.Argument(
-        ..., help="Path to vector IDs file (.npy)", exists=True
-    ),
+    labels_path: Path = typer.Argument(..., help="Path to labels.parquet", exists=True),
     output_dir: Path = typer.Argument(..., help="Output directory for trained index"),
     n_partitions: int = typer.Option(256, help="Number of partitions for IVF index"),
     max_vectors: Optional[int] = typer.Option(
@@ -204,7 +202,7 @@ def ivf_train(
     """
     Train an Inverted File Index on vectors.
     """
-    vectors, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
+    vectors, vector_ids = _load_vectors(vectors_path, labels_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
     vector_ids_tensor = torch.from_numpy(vector_ids)
     d = vectors_tensor.shape[1]
@@ -301,8 +299,8 @@ def ivfpq_export(
     vectors_path: Path = typer.Argument(
         ..., help="Path to vectors.npy file", exists=True
     ),
-    vector_ids_path: Path = typer.Argument(
-        ..., help="Path to vector_ids.npy file", exists=True
+    labels_path: Path = typer.Argument(
+        ..., help="Path to labels.parquet file", exists=True
     ),
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to use (None = all)"
@@ -333,7 +331,7 @@ def ivfpq_export(
     logger.info(f"Loading pre-trained models from {models_path}")
 
     # Load vectors and vector IDs
-    vectors, vector_ids = _load_vectors(vectors_path, vector_ids_path, max_vectors)
+    vectors, vector_ids = _load_vectors(vectors_path, labels_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
     vector_ids_tensor = torch.from_numpy(vector_ids)
 

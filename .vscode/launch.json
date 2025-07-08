@@ -83,17 +83,52 @@
       "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
       "console": "integratedTerminal",
       "args": [
-        "train-pq",
-        "${workspaceFolder}/data/scimilarity/embeddings.npy",
+        "pq-train",
+        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/scimilarity/labels.parquet",
         "${workspaceFolder}/web/public/models/scimilarity/pq",
         "--m",
         "16",
         "--k",
         "256",
         "--max-vectors",
-        "1000",
+        "100000",
         "--n-iterations",
         "30"
+      ]
+    },
+    {
+      "name": "ivf train",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "ivf-train",
+        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/scimilarity/labels.parquet",
+        "${workspaceFolder}/web/public/models/scimilarity/ivf",
+        "--n-partitions",
+        "64",
+        "--max-vectors",
+        "100000",
+        "--n-iterations",
+        "30"
+      ]
+    },
+    {
+      "name": "ivfpq export",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "ivfpq-export",
+        "${workspaceFolder}/web/public/models/scimilarity",
+        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/scimilarity/labels.parquet",
+        "--max-vectors",
+        "250000"
       ]
     },
     {
