@@ -29,9 +29,8 @@
         "--labels",
         "tissue",
         "--validate",
-        "--stratify",
         "--num-embeddings",
-        "1000"
+        "1000000"
       ]
     },
     {

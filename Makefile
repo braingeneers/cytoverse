@@ -21,9 +21,8 @@ scimilarity-embeddings:
 	--labels tissue \
 	--labels author_label \
 	--labels study \
-	--validate \
-	--stratify \
-	--num-embeddings 1000000
+	--num-embeddings 10000000 \
+	--validate
 	parquet-tools inspect data/scimilarity/labels.parquet
 
 scimilarity: scimilarity-model scimilarity-embeddings
