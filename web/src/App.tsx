@@ -880,9 +880,9 @@ function App() {
               sx={{ mb: 2 }}
             />
             <Typography variant="body2" color="text.secondary">
-              Want to know if someone has embeddings close to yours? Enter your email and we'll
-              introduce you to them. We'll never upload or share your original data, only your
-              quantized embeddings.
+              Get introduced to others with similar embeddings? Enter your email and we'll connect
+              you. We'll never upload or share your raw data, only your embeddings. (feature not yet
+              live...)
             </Typography>
           </Box>
         </DialogContent>
@@ -900,17 +900,18 @@ function App() {
         <DialogContent>
           <Box sx={{ pt: 1 }}>
             <Typography variant="body1" sx={{ mb: 2 }}>
-              CytoVerse presents a fully browser-based single-cell RNA-seq analysis platform that
-              enables real-time cell type annotation through foundation model embeddings. The system
-              leverages SCimilarity for client-side cell embedding, parametric UMAP for 2D
-              visualization against comprehensive training datasets, and Inverted File with Product
-              Quantization (IVFPQ) for approximate nearest neighbor search to generate cell type
-              labels. Built on WebAssembly and ONNX for performance, the platform scales to millions
-              of training samples while supporting unlimited streaming analysis of h5ad files via
-              h5wasm. This architecture enables distributed collaborative discovery, allowing
-              consortium researchers to identify overlapping or complementary assays through shared
-              embedding space exploration—a critical capability for the emerging perturbseq-driven
-              discovery paradigm.
+              CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed for
+              cell annotation using foundation model embeddings. It runs entirely in the browser,
+              streaming h5ad files from local storage without uploading data or requiring server
+              computation. It uses SCimilarity for cell embeddings and parametric UMAP for 2D
+              visualization, leveraging large training datasets for accurate cell annotation. An
+              Inverted File with Product Quantization (IVFPQ) enables fast approximate nearest
+              neighbor searches across over 20 million samples. Built on WebAssembly and ONNX for
+              high-speed processing, it supports unlimited streaming analysis of h5ad files via
+              h5wasm. This enables distributed collaborative discovery, allowing researchers to
+              explore shared embedding spaces to identify overlapping or complementary assays,
+              particularly for perturbseq-driven research. The architecture ensures privacy,
+              scalability, and collaborative potential without server dependency.
             </Typography>
           </Box>
         </DialogContent>
