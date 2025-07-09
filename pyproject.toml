@@ -8,9 +8,6 @@ dependencies = [
     "typer>=0.16.0",
     "onnx>=1.18.0",
     "onnxruntime>=1.15.0",
-    "scimilarity",
-    # "scimilarity==0.4.0.post1.dev3+g52824e5"
-    "umap-pytorch",
     "torch>=2.7.1",
     "torchvision>=0.22.1",
     "torchaudio>=2.7.1",
@@ -19,6 +16,8 @@ dependencies = [
     "pytorch-lightning>=2.5.2",
     "pyarrow>=20.0.0",
     "sclblonnx>=0.3.0",
+    "scimilarity",
+    "umap-pytorch",
 ]
 
 [dependency-groups]
@@ -34,5 +33,5 @@ dev = [
 ]
 
 [tool.uv.sources]
-scimilarity = { path = "../scimilarity" }
-umap-pytorch = { path = "../umap_pytorch", editable = true }
+scimilarity = { git = "https://github.com/Genentech/scimilarity.git" }
+umap-pytorch = { git = "https://github.com/rcurrie/umap_pytorch.git" }

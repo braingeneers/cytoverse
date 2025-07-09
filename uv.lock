@@ -553,13 +553,13 @@ requires-dist = [
     { name = "onnxruntime", specifier = ">=1.15.0" },
     { name = "pyarrow", specifier = ">=20.0.0" },
     { name = "pytorch-lightning", specifier = ">=2.5.2" },
-    { name = "scimilarity", directory = "../scimilarity" },
+    { name = "scimilarity", git = "https://github.com/Genentech/scimilarity.git" },
     { name = "sclblonnx", specifier = ">=0.3.0" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torchaudio", specifier = ">=2.7.1" },
     { name = "torchvision", specifier = ">=0.22.1" },
     { name = "typer", specifier = ">=0.16.0" },
-    { name = "umap-pytorch", editable = "../umap_pytorch" },
+    { name = "umap-pytorch", git = "https://github.com/rcurrie/umap_pytorch.git" },
     { name = "zarr", specifier = "<3.0" },
 ]
 
@@ -2822,7 +2822,7 @@ wheels = [
 [[package]]
 name = "scimilarity"
 version = "0.4.1"
-source = { directory = "../scimilarity" }
+source = { git = "https://github.com/Genentech/scimilarity.git#888e80323ec9e17da556a92754fb06bc7f1fadfd" }
 dependencies = [
     { name = "captum" },
     { name = "circlify" },
@@ -2838,27 +2838,6 @@ dependencies = [
     { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "zarr", version = "2.18.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "captum", specifier = ">=0.5.0" },
-    { name = "circlify", specifier = ">=0.14.0" },
-    { name = "hnswlib", specifier = ">=0.8.0" },
-    { name = "importlib-metadata", marker = "python_full_version < '3.8'" },
-    { name = "obonet", specifier = ">=1.0.0" },
-    { name = "pyarrow", specifier = ">=15.0.0" },
-    { name = "pytest", marker = "extra == 'testing'" },
-    { name = "pytest-cov", marker = "extra == 'testing'" },
-    { name = "pytorch-lightning", specifier = ">=2.0.0" },
-    { name = "scanpy", specifier = ">=1.9.2" },
-    { name = "setuptools", marker = "extra == 'testing'" },
-    { name = "tiledb", specifier = ">=0.18.2" },
-    { name = "tiledb-vector-search", specifier = ">=0.11.0" },
-    { name = "torch", specifier = ">=1.10.1" },
-    { name = "tqdm" },
-    { name = "zarr", specifier = ">=2.6.1,<3.0.0" },
-]
-provides-extras = ["testing"]
 
 [[package]]
 name = "scipy"
@@ -3441,7 +3420,7 @@ wheels = [
 [[package]]
 name = "umap-pytorch"
 version = "0.0.6"
-source = { editable = "../umap_pytorch" }
+source = { git = "https://github.com/rcurrie/umap_pytorch.git#ce8708d8ac979e9c6d717be7f2fd9a4f099f9557" }
 dependencies = [
     { name = "dill" },
     { name = "einops" },
@@ -3450,18 +3429,6 @@ dependencies = [
     { name = "pytorch-lightning" },
     { name = "scikit-learn" },
     { name = "torch" },
-    { name = "umap-learn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "dill" },
-    { name = "einops", specifier = ">=0.3" },
-    { name = "llvmlite", specifier = ">=0.34.0" },
-    { name = "pynndescent" },
-    { name = "pytorch-lightning" },
-    { name = "scikit-learn" },
-    { name = "torch", specifier = ">=1.6" },
     { name = "umap-learn" },
 ]
 

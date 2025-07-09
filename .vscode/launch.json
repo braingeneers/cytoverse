@@ -28,9 +28,11 @@
         "prediction",
         "--labels",
         "tissue",
-        "--validate",
-        "--num-embeddings",
-        "1000000"
+        "--labels",
+        "author_label",
+        "--labels",
+        "study",
+        "--validate"
       ]
     },
     {
