@@ -868,7 +868,7 @@ function App() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Share Predicted Labels</DialogTitle>
+        <DialogTitle>Share Embeddings</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1 }}>
             <TextField
@@ -881,8 +881,7 @@ function App() {
             />
             <Typography variant="body2" color="text.secondary">
               Get introduced to others with similar embeddings? Enter your email and we'll connect
-              you. We'll never upload or share your raw data, only your embeddings. (feature not yet
-              live...)
+              you. We'll never upload or share your raw data, only your embeddings. (Coming soon...)
             </Typography>
           </Box>
         </DialogContent>
