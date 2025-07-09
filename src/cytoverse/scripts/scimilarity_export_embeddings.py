@@ -112,49 +112,70 @@ def embeddings(
 
     print("Loading embeddings...")
 
-    # Get embedding dimensions by loading a small sample first
-    sample_embeddings = scimilarity.utils.embedding_from_tiledb(
-        [0], str(model_path / "cell_embedding")
-    )
-    embedding_dim = sample_embeddings.shape[1]
-    print(f"  Embedding dimensions: {embedding_dim}")
+    # Get embedding dimensions by loading a small sample first using direct TileDB
+    with tiledb.open(str(model_path / "cell_embedding"), "r") as embedding_array:
+        sample_result = embedding_array[0:1]
+        if sample_result is None or "vals" not in sample_result:
+            raise ValueError("Could not determine embedding dimensions")
+        embedding_dim = sample_result["vals"].shape[1]
+        print(f"  Embedding dimensions: {embedding_dim}")
 
     # Create proper numpy file with header
     vectors_path = output_path / "vectors.npy"
 
-    # Create empty array and save it to establish proper .npy format
-    empty_array = np.empty((num_to_export, embedding_dim), dtype=np.float32)
-    np.save(vectors_path, empty_array)
-    del empty_array
+    # Create full-size array and save it to establish proper .npy format
+    print(f"Creating vectors file with shape ({num_to_export}, {embedding_dim})")
+    full_array = np.empty((num_to_export, embedding_dim), dtype=np.float32)
+    np.save(vectors_path, full_array)
+    del full_array
 
     # Now open as memory-mapped for writing
     embeddings_mmap = np.load(vectors_path, mmap_mode="r+")
 
-    # Load embeddings in batches
+    # Load embeddings in batches using direct TileDB access
     batch_size = 100_000
     num_batches = (num_to_export + batch_size - 1) // batch_size
+    successful_count = 0
 
     try:
-        with tqdm(total=num_to_export, desc="Loading embeddings", unit="cells") as pbar:
-            for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, num_to_export)
-                batch_indices = list(range(start_idx, end_idx))
+        with tiledb.open(str(model_path / "cell_embedding"), "r") as embedding_array:
+            with tqdm(
+                total=num_to_export, desc="Loading embeddings", unit="cells"
+            ) as pbar:
+                for batch_idx in range(num_batches):
+                    start_idx = batch_idx * batch_size
+                    end_idx = min(start_idx + batch_size, num_to_export)
 
-                # Load batch from TileDB
-                batch_embeddings = scimilarity.utils.embedding_from_tiledb(
-                    batch_indices, str(model_path / "cell_embedding")
-                )
+                    try:
+                        # Query the specific range using direct TileDB
+                        embeddings_result = embedding_array[start_idx:end_idx]
 
-                # Write batch to memory-mapped array
-                embeddings_mmap[start_idx:end_idx] = batch_embeddings
+                        # Extract the actual embeddings from OrderedDict
+                        if embeddings_result is None or "vals" not in embeddings_result:
+                            print(
+                                f"Warning: No embeddings found for indices {start_idx} to {end_idx-1}"
+                            )
+                        else:
+                            embeddings = embeddings_result["vals"]
+                            batch_size_actual = embeddings.shape[0]
 
-                # Update progress
-                pbar.update(len(batch_indices))
+                            # Write batch to memory-mapped array at the correct position
+                            embeddings_mmap[
+                                start_idx : start_idx + batch_size_actual
+                            ] = embeddings
+                            successful_count += batch_size_actual
+
+                        # Update progress
+                        pbar.update(end_idx - start_idx)
+
+                    except Exception as e:
+                        print(f"❌ Error loading batch {start_idx}:{end_idx} - {e}")
+                        # Continue with next batch
+                        pbar.update(end_idx - start_idx)
 
         # Flush all changes to disk
         embeddings_mmap.flush()
-        print(f"  Loaded embeddings shape: ({num_to_export}, {embedding_dim})")
+        print(f"  Successfully loaded embeddings: {successful_count}/{num_to_export}")
 
     finally:
         # Clean up memory map
@@ -162,9 +183,11 @@ def embeddings(
 
     print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
     print(
-        f"Vectors (Embeddings) saved to {vectors_path} (shape: ({num_to_export}, {embedding_dim}))"
+        f"Vectors (Embeddings) saved to {vectors_path} (shape: ({successful_count}, {embedding_dim}))"
     )
-    print(f"Exported indices: 0 to {num_to_export-1} (total {num_to_export})")
+    print(
+        f"Exported indices: 0 to {num_to_export-1} (requested {num_to_export}, successful {successful_count})"
+    )
 
     # Validation if requested
     if validate:

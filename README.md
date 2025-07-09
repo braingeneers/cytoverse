@@ -20,7 +20,7 @@ This architecture ensures privacy, scalability, and collaborative potential with
 
 ## Install
 
-Download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/scimilarity/model_v1.1.
+Download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into data/GSE136831_subsample.h5ad
 
 Install python dependencies and create a virtual env:
 
