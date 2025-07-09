@@ -75,7 +75,7 @@ def embeddings(
         if num_embeddings is None:
             # Export all cells
             print("Exporting ALL cells...")
-            num_to_export = total_cells - 1
+            num_to_export = total_cells
         else:
             # Export first num_embeddings cells (indices 0 to num_embeddings-1)
             print(f"Exporting first {num_embeddings} embeddings...")
@@ -87,7 +87,9 @@ def embeddings(
     # Step 2: Load metadata and embeddings for first num_to_export indices
     print("Loading metadata...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-        metadata_df = metadata_db.query(attrs=["index"] + labels).df[0:num_to_export]
+        metadata_df = metadata_db.query(attrs=["index"] + labels).df[
+            0 : num_to_export - 1
+        ]
     print(f"  Loaded metadata shape: {metadata_df.shape}")
 
     # Ensure we have exactly the number of rows we expect
