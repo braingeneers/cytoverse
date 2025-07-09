@@ -259,30 +259,19 @@ def model(
     adata = adata[0:10, :].copy()
     adata = align_dataset(adata, ce.gene_order)
 
-    # Check for and handle NaN values (matches scimilarity behavior)
-    if hasattr(adata.X, "toarray"):
-        X_array = adata.X.toarray()
-    else:
-        X_array = adata.X
-
-    if np.isnan(X_array).any():
-        print("    ⚠️ NaN values detected in test data, zeroing them...")
-        X_array = np.nan_to_num(X_array, nan=0.0)
-        adata.X = X_array
-
     # Get raw aligned data (before normalization) for preprocessing test
-    raw_aligned_batch = X_array.astype(np.float32)
+    raw_aligned_counts = adata.layers["counts"].toarray().astype(np.float32)
 
     # Test preprocessing step
     print("  Testing preprocessing step...")
     preprocessing_pytorch = PreprocessingWrapper(target_sum=1e4)
     with torch.no_grad():
         preprocessed_pytorch = preprocessing_pytorch(
-            torch.from_numpy(raw_aligned_batch)
+            torch.from_numpy(raw_aligned_counts)
         ).numpy()
 
     ort_session_prep = ort.InferenceSession(preprocessing_path)
-    preprocessed_onnx = ort_session_prep.run(None, {"input": raw_aligned_batch})[0]
+    preprocessed_onnx = ort_session_prep.run(None, {"input": raw_aligned_counts})[0]
 
     max_diff_prep = np.max(np.abs(preprocessed_pytorch - preprocessed_onnx))
     print(f"    Preprocessing max diff: {max_diff_prep:.2e}")
@@ -327,7 +316,7 @@ def model(
 
     # Run the ONNX model
     ort_session_combined = ort.InferenceSession(combined_path)
-    combined_onnx_output = ort_session_combined.run(None, {"input": raw_aligned_batch})[
+    combined_onnx_output = ort_session_combined.run(None, {"input": raw_aligned_counts})[
         0
     ]
 
