@@ -264,7 +264,7 @@ function fillBatchData(
       for (let j = 0; j < valueIndices.length; j++) {
         const sampleIndex = inflationIndices[valueIndices[j]]
         if (sampleIndex !== -1) {
-          inflatedBatchData[batchOffset + sampleIndex] = values[j]
+          inflatedBatchData[batchOffset + sampleIndex] = Number(values[j])
         }
       }
     } else {
@@ -358,7 +358,9 @@ async function start(
       sampleGenes = (annData.get('var') as H5DataSet).value.map((e: any) => e[0])
     } else if (annData.get('var').type == 'Group') {
       const varGroup = annData.get('var') as H5Group
-      if (varGroup.keys().includes('index')) {
+      if (varGroup.keys().includes('symbol')) {
+        sampleGenes = (varGroup.get('symbol') as H5DataSet).value
+      } else if (varGroup.keys().includes('index')) {
         sampleGenes = (varGroup.get('index') as H5DataSet).value
       } else if (varGroup.keys().includes('_index')) {
         sampleGenes = (varGroup.get('_index') as H5DataSet).value
@@ -374,24 +376,42 @@ async function start(
     // Limit the number of cells to process based on % slider
     cellNames = cellNames.slice(0, (cellRangePercent * cellNames.length) / 100)
 
-    // Setup all the data structures for reading the expression data incrementally
+    // Setup all the data structures for reading the raw counts data incrementally
     // including dealing with sparse and inflating the sample gene list into the
     // model's gene list.
     let isSparse = false
     let data: H5DataSet
     let indices: H5DataSet | null = null
     let indptr: H5DataSet | null = null
-    if (annData.get('X').type == 'Dataset') {
+
+    // Look for raw counts in layers - try common locations
+    let rawCountsData: H5DataSet | H5Group | null = null
+    const layersGroup = annData.get('layers') as H5Group
+
+    if (layersGroup && layersGroup.type === 'Group') {
+      // Try common raw counts locations
+      if (layersGroup.keys().includes('counts')) {
+        rawCountsData = layersGroup.get('counts')
+      } else if (layersGroup.keys().includes('raw_counts')) {
+        rawCountsData = layersGroup.get('raw_counts')
+      }
+    }
+
+    if (!rawCountsData) {
+      throw new Error('Could not find raw counts data in layers/counts or layers/raw_counts')
+    }
+
+    if (rawCountsData.type == 'Dataset') {
       isSparse = false
-      data = annData.get('X') as H5DataSet
-    } else if (annData.get('X').type == 'Group') {
+      data = rawCountsData as H5DataSet
+    } else if (rawCountsData.type == 'Group') {
       isSparse = true
-      const xGroup = annData.get('X') as H5Group
-      data = xGroup.get('data') as H5DataSet
-      indices = xGroup.get('indices') as H5DataSet
-      indptr = xGroup.get('indptr') as H5DataSet
+      const countsGroup = rawCountsData as H5Group
+      data = countsGroup.get('data') as H5DataSet
+      indices = countsGroup.get('indices') as H5DataSet
+      indptr = countsGroup.get('indptr') as H5DataSet
     } else {
-      throw new Error('Could not find expression data')
+      throw new Error('Could not find raw counts expression data')
     }
 
     // const coordinates: number[][] = []
