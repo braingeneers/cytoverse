@@ -146,7 +146,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       const reconstructed = pq.decode(vectorCodes)
 
       // Search for relevant partitions
-      const nProbe = 4 // Configurable parameter for search quality vs speed
+      const nProbe = 2 // Configurable parameter for search quality vs speed
       const selectedPartitions = ivf.searchPartitions(reconstructed, nProbe)
 
       // Search within selected partitions

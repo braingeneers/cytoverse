@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "serve-dist-python": "python3 -m http.server 4173 -d dist/",
-    "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/"
+    "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/",
+    "pull-model": "rsync -avh --delete rcurrie@hgwdev.gi.ucsc.edu:~/cytoverse/web/public/models/scimilarity/ public/models/scimilarity/"
   },
   "dependencies": {
     "@mui/icons-material": "^7.1.2",

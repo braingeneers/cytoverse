@@ -36,7 +36,7 @@ Export SCimilarity embeddings and labels, train a parametric umap model on a str
 make scimilarity pumap ivfpq
 ```
 
-Verify that web/public/models/scimilarity is populated (~700MB Total):
+Verify that web/public/models/scimilarity is populated (~900MB Total):
 
 ```
 web/public/models/scimilarity
@@ -56,8 +56,8 @@ web/public/models/scimilarity
 │       ├── partition_0000.arrow
 │       ├── partition_0001.arrow
 │       ├── ....
-│       ├── partition_0062.arrow
-│       └── partition_0063.arrow
+│       ├── partition_0254.arrow
+│       └── partition_0255.arrow
 ├── pq
 │   ├── codebooks.bin
 │   ├── metadata.json
@@ -72,6 +72,12 @@ web/public/models/scimilarity
     ├── tissue.arrow
     ├── x.arrow
     └── y.arrow
+```
+
+Run tests:
+
+```
+make test
 ```
 
 Install web app dependencies and run local dev server:

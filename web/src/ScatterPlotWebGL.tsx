@@ -2,7 +2,12 @@ import React, { useRef, useEffect } from 'react'
 import createScatterplot from 'regl-scatterplot'
 import { Vector } from 'apache-arrow'
 
-// Generate distinct colors for categories
+// Generate distinct colors for categories + one extra color for test points
+// This function generates a set of colors that are evenly spaced in the HSL color space,
+// avoiding bright red (hue 0) to ensure good visibility and distinction between categories.
+// It returns an array of hex color strings.
+// The number of categories is passed as an argument, and it generates colors starting from hue 30 (yellow) to hue 360 (red), ensuring that the colors are visually distinct and not too bright or saturated.
+// The colors are generated in HSL format and converted to hex format for use in the scatterplot.
 const generateCategoryColors = (numCategories: number): string[] => {
   const colors: string[] = []
 
@@ -59,6 +64,8 @@ const generateCategoryColors = (numCategories: number): string[] => {
     colors.push(`#${rHex}${gHex}${bHex}`)
   }
 
+  colors.push('#FF0000') // Add bright red for test points
+
   return colors
 }
 
@@ -91,10 +98,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       return
 
     // Generate colors for each category + one extra color for test points
-    const categoryColors = generateCategoryColors(categoryLabels.length + 1)
-
-    // Set the last color to be a distinct color for test points (e.g., bright red)
-    categoryColors[categoryColors.length - 1] = '#FF0000' // Bright red for test points
+    const categoryColors = generateCategoryColors(categoryLabels.length)
 
     // Create the scatterplot instance
     const scatterplot = createScatterplot({
@@ -262,9 +266,9 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     const allY = new Float32Array([...trainY, ...yTestData])
 
     // Create category data for test points (use a special category for test data)
-    const categoryColors = generateCategoryColors(categoryLabels.length + 1)
+    const categoryColors = generateCategoryColors(categoryLabels.length)
     const testCategories = new Array(xTestData.length).fill(categoryColors.length - 1)
-    const allCategories = [...categoryArrayData, ...testCategories]
+    const allCategories = [...categoryArrayData.slice(0, numPoints), ...testCategories]
 
     // Create size data: 0 for training data (first pointSize), 1 for test data (second pointSize)
     const trainSize = new Array(numPoints).fill(0)
