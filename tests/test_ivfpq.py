@@ -391,7 +391,7 @@ class TestIVFPQComplete:
     def test_ivfpq_vs_scimilarity_labels(self):
         """Test IVFPQ predictions vs SCimilarity CellQuery ground truth labels."""
         pytest.skip("Test disabled - SCimilarity CellQuery API needs investigation")
-        
+
         try:
             import anndata
             import pandas as pd
@@ -416,7 +416,7 @@ class TestIVFPQComplete:
 
         print("Loading SCimilarity model...")
         scimilarity_model = CellEmbedding(scimilarity_model_path)
-        
+
         # Load SCimilarity CellQuery for ground truth predictions
         print("Loading SCimilarity CellQuery...")
         scimilarity_query = CellQuery(scimilarity_model_path)
@@ -469,8 +469,8 @@ class TestIVFPQComplete:
         ivfpq_labels = []
 
         for i in range(computed_embeddings.shape[0]):
-            query_embedding = torch.from_numpy(computed_embeddings[i:i+1]).float()
-            
+            query_embedding = torch.from_numpy(computed_embeddings[i : i + 1]).float()
+
             # Search for nearest neighbor using IVFPQ
             vector_ids, _, _, _ = ivfpq.search(
                 query_embedding.squeeze(0),
@@ -478,7 +478,7 @@ class TestIVFPQComplete:
                 n_probe=4,  # Search multiple partitions
                 model_path=ivfpq_model_path,  # Use disk-based partitions
             )
-            
+
             if len(vector_ids) > 0 and vector_ids[0] in labels_df.index:
                 # Get the prediction label for the matched training vector
                 pred_label = labels_df.loc[vector_ids[0], "prediction"]
@@ -492,12 +492,16 @@ class TestIVFPQComplete:
         matches = 0
         valid_comparisons = 0
 
-        for i, (scimilarity_label, ivfpq_label) in enumerate(zip(scimilarity_labels, ivfpq_labels)):
+        for i, (scimilarity_label, ivfpq_label) in enumerate(
+            zip(scimilarity_labels, ivfpq_labels)
+        ):
             if scimilarity_label != "Unknown" and ivfpq_label != "Unknown":
                 valid_comparisons += 1
                 if scimilarity_label == ivfpq_label:
                     matches += 1
-                print(f"Cell {i}: SCimilarity='{scimilarity_label}' vs IVFPQ='{ivfpq_label}' {'✓' if scimilarity_label == ivfpq_label else '✗'}")
+                print(
+                    f"Cell {i}: SCimilarity='{scimilarity_label}' vs IVFPQ='{ivfpq_label}' {'✓' if scimilarity_label == ivfpq_label else '✗'}"
+                )
 
         if valid_comparisons > 0:
             match_percentage = (matches / valid_comparisons) * 100
@@ -510,7 +514,9 @@ class TestIVFPQComplete:
             assert valid_comparisons > 0, "Should have at least some valid comparisons"
             assert match_percentage >= 0, "Match percentage should be non-negative"
 
-            print(f"✅ IVFPQ vs SCimilarity comparison completed: {match_percentage:.1f}% accuracy")
+            print(
+                f"✅ IVFPQ vs SCimilarity comparison completed: {match_percentage:.1f}% accuracy"
+            )
         else:
             pytest.skip("No valid label comparisons could be made")
 
