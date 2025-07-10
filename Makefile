@@ -53,21 +53,19 @@ pumap: pumap-train pumap-map pumap-export
 pq-train:
 	python src/cytoverse/scripts/ivfpq_train.py pq-train \
 	data/scimilarity/vectors.npy \
-	data/scimilarity/labels.parquet \
 	web/public/models/scimilarity/pq/ \
 	--m 16 \
 	--k 256 \
-	--max-vectors 10000 \
+	--max-vectors 100000 \
 	--n-iterations 30
 	
 # IVF
 ivf-train:
 	python src/cytoverse/scripts/ivfpq_train.py ivf-train \
 	data/scimilarity/vectors.npy \
-	data/scimilarity/labels.parquet \
 	web/public/models/scimilarity/ivf/ \
-	--n-partitions 64 \
-	--max-vectors 10000 \
+	--n-partitions 256 \
+	--max-vectors 100000 \
 	--n-iterations 30
 
 # IVFPQ
@@ -75,7 +73,6 @@ ivfpq-export:
 	python src/cytoverse/scripts/ivfpq_train.py ivfpq-export \
 	web/public/models/scimilarity \
 	data/scimilarity/vectors.npy \
-	data/scimilarity/labels.parquet \
 	--test-performance
 
 ivfpq: pq-train ivf-train ivfpq-export
