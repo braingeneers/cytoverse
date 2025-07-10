@@ -7,6 +7,7 @@ import anndata
 import tiledb
 import pandas as pd
 import numpy as np
+import torch
 from pathlib import Path
 
 # Add SCimilarity imports for embedding computation
@@ -117,3 +118,97 @@ class TestEmbeddingData:
         assert (
             study_present
         ), f"Study '{h5ad_study_id}' should appear at least once in labels.parquet"
+
+    def test_find_train_sample_via_scimilarity(self, scimilarity_model, embeddings_db):
+        """Test computing embeddings and finding nearest neighbors using IVFPQ search."""
+        # Load 10 cells from GSE154109.h5ad
+        gse154109_path = Path("data/GSE154109.h5ad")
+        adata_query = anndata.read_h5ad(gse154109_path)
+        adata_query = adata_query[:10].copy()  # Take first 10 cells
+
+        print(f"Loaded {adata_query.n_obs} cells from GSE154109.h5ad")
+
+        # Add counts layer if it doesn't exist (required by lognorm_counts)
+        if "counts" not in adata_query.layers:
+            adata_query.layers["counts"] = adata_query.X.copy()
+
+        # Align dataset to model genes and compute embeddings
+        adata_aligned = align_dataset(adata_query, scimilarity_model.gene_order)
+        adata_normalized = lognorm_counts(adata_aligned)
+
+        # Get expression data for embedding computation
+        expression_data = (
+            adata_normalized.X.toarray().astype(np.float32)
+            if hasattr(adata_normalized.X, "toarray")
+            else adata_normalized.X.astype(np.float32)
+        )
+
+        # Compute embeddings using SCimilarity model
+        computed_embeddings = scimilarity_model.get_embeddings(expression_data)
+        print(f"Computed embeddings shape: {computed_embeddings.shape}")
+
+        # Load the IVFPQ model for nearest neighbor search
+        from src.cytoverse.ivfpq import IVFPQ
+
+        ivfpq_model_path = Path("web/public/models/scimilarity")
+
+        # Check if IVFPQ model exists
+        if not ivfpq_model_path.exists():
+            print("⚠️  IVFPQ model not found, skipping search validation")
+            # Still validate that we can compute embeddings
+            assert computed_embeddings.shape[0] == 10
+            assert computed_embeddings.shape[1] > 0  # Should have embedding dimensions
+            return
+
+        ivfpq = IVFPQ(ivfpq_model_path)
+
+        # Search for nearest neighbors for the first embedding
+        query_embedding = torch.from_numpy(computed_embeddings[0:1]).float()
+
+        # Perform nearest neighbor search using disk-based partitions
+        vector_ids, partition_ids, distances, labels = ivfpq.search(
+            query_embedding.squeeze(0),
+            k=1,  # Get the top nearest neighbor
+            n_probe=4,  # Search multiple partitions for better accuracy
+            model_path=ivfpq_model_path,  # Use disk-based partitions
+        )
+
+        print(
+            f"Found nearest neighbor: vector_id={vector_ids[0]}, distance={distances[0]:.6f}"
+        )
+
+        # Get the embedding of the nearest neighbor from the database
+        nearest_vector_id = vector_ids[0]
+
+        # Query the embeddings database for the nearest neighbor
+        nearest_embedding_result = embeddings_db.query(attrs=["vals"]).df[
+            nearest_vector_id:nearest_vector_id
+        ]
+        nearest_embedding = nearest_embedding_result["vals"].iloc[0]
+
+        # Verify that the distance computation is reasonable
+        # The IVFPQ search should return vectors that are actually close
+        computed_distance = np.linalg.norm(computed_embeddings[0] - nearest_embedding)
+
+        print(f"Computed distance to nearest neighbor: {computed_distance:.6f}")
+        print(f"IVFPQ reported distance: {distances[0]:.6f}")
+
+        # Validate that we found a meaningful nearest neighbor
+        # The computed embedding should be reasonably close to something in the database
+        assert len(vector_ids) == 1, "Should return exactly 1 nearest neighbor"
+        assert distances[0] >= 0, "Distance should be non-negative"
+        assert (
+            computed_distance < 100.0
+        ), "Distance should be reasonable for normalized embeddings"
+
+        # Ensure we got valid results
+        assert isinstance(
+            vector_ids[0], (int, np.integer)
+        ), "Vector ID should be an integer"
+        assert isinstance(
+            distances[0], (float, np.floating)
+        ), "Distance should be a float"
+
+        print(
+            "✅ Successfully computed embeddings and found nearest neighbor via IVFPQ"
+        )
