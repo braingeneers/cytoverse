@@ -109,7 +109,7 @@ class TestIVFPQComplete:
             # Verify export files exist
             ivfpq_dir = model_path / "ivfpq"
             assert (ivfpq_dir / "metadata.json").exists()
-            assert (ivfpq_dir / "centroids.arrow").exists()
+            assert (ivfpq_dir / "centroids.bin").exists()
             partitions_dir = ivfpq_dir / "partitions"
             assert partitions_dir.exists()
 
@@ -264,7 +264,7 @@ class TestIVFPQComplete:
             ivfpq_dir = model_path / "ivfpq"
             assert ivfpq_dir.exists()
             assert (ivfpq_dir / "metadata.json").exists()
-            assert (ivfpq_dir / "centroids.arrow").exists()
+            assert (ivfpq_dir / "centroids.bin").exists()
 
             # Check metadata content
             with open(ivfpq_dir / "metadata.json") as f:
