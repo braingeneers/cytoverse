@@ -129,7 +129,9 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
   const totalCodes = pq_embedding.length
   const expectedCodes = batchSize * codesPerVector
 
-  console.log(`Expected codes: ${expectedCodes}, actual codes: ${totalCodes}, codes per vector: ${codesPerVector}`)
+  console.log(
+    `Expected codes: ${expectedCodes}, actual codes: ${totalCodes}, codes per vector: ${codesPerVector}`
+  )
 
   // Determine how many vectors we can actually process
   const actualBatchSize = Math.min(batchSize, Math.floor(totalCodes / codesPerVector))

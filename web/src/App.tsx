@@ -172,7 +172,7 @@ function App() {
         case 'labeled':
           console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
           console.log('Train vector IDs received:', evt.data.train_vector_id?.length)
-          
+
           // Process labeling results for feedback tallies and progress
           if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
             console.log('Processing labeling results...')
@@ -191,7 +191,9 @@ function App() {
               }
             }
 
-            console.log(`Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`)
+            console.log(
+              `Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`
+            )
 
             // Update label counts
             setLabelCounts((prev) => {
