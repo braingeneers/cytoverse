@@ -341,12 +341,17 @@ class IVFPQ:
                 vector_ids = np.array(partition_data["vector_ids"], dtype=np.int32)
                 pq_codes = np.array(partition_data["pq_codes"], dtype=np.uint8)
 
-                # Store PQ codes as individual columns (code_0, code_1, ..., code_m-1)
-                table_data = {"vector_id": pa.array(vector_ids, type=pa.int32())}
+                # Convert PQ codes to list of flattened codes per vector
+                # This allows direct use in asymmetric distance computation
+                pq_codes_per_vector = []
+                for i in range(pq_codes.shape[0]):
+                    pq_codes_per_vector.append(pq_codes[i].tolist())
 
-                # Add each PQ code as a separate column
-                for i in range(self.m):
-                    table_data[f"code_{i}"] = pa.array(pq_codes[:, i], type=pa.uint8())
+                # Create Arrow table with per-vector flattened PQ codes
+                table_data = {
+                    "vector_id": pa.array(vector_ids, type=pa.int32()),
+                    "pq_codes_flat": pa.array(pq_codes_per_vector),
+                }
 
                 # Create Arrow table with partition data
                 table = pa.table(table_data)
@@ -510,18 +515,14 @@ class IVFPQ:
         # Load Arrow file
         with pa.OSFile(str(partition_file), "rb") as source:
             reader = pa.RecordBatchFileReader(source)
-            table = reader.read_all()
-
-        # Convert to Python data structures
+            table = reader.read_all()  # Convert to Python data structures
         vector_ids = table["vector_id"].to_pylist()
 
-        # Reconstruct PQ codes from individual columns
-        pq_codes = []
-        for i in range(len(vector_ids)):
-            codes = []
-            for j in range(self.m):
-                codes.append(table[f"code_{j}"][i].as_py())
-            pq_codes.append(codes)
+        # Load flattened PQ codes (stored as list of lists)
+        pq_codes_flat_lists = table["pq_codes_flat"].to_pylist()
+
+        # Convert back to expected format for compatibility with existing code
+        pq_codes = pq_codes_flat_lists
 
         return {
             "vector_ids": vector_ids,

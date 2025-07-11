@@ -21,7 +21,7 @@ interface IVFMetadata {
  */
 interface PartitionData {
   vector_ids: Int32Array
-  pq_codes: Uint8Array[][] // [N, m] where each pq_codes[i] is array of m codes
+  pq_codes: Uint8Array // Pre-flattened codes: [N * m] for direct use in asymmetric distance
   size: number
 }
 
@@ -157,31 +157,27 @@ export class InvertedFileIndex {
         vectorIds[i] = vectorIdsColumn.get(i)
       }
 
-      // Extract PQ codes (assuming they are stored as code_0, code_1, ..., code_m-1)
-      const pqCodes: Uint8Array[][] = []
-      const firstCodeColumn = table.getChild('code_0')
-      if (!firstCodeColumn) {
-        throw new Error(`PQ code columns not found in partition ${partitionId}`)
+      // Extract PQ codes from the nested list format
+      const pqCodesColumn = table.getChild('pq_codes_flat')
+      if (!pqCodesColumn) {
+        throw new Error(`pq_codes_flat column not found in partition ${partitionId}`)
       }
 
-      // Determine number of subquantizers by checking available code columns
-      let m = 0
-      while (table.getChild(`code_${m}`)) {
-        m++
-      }
+      // Convert nested list format to flattened format for direct use in asymmetric distance
+      const numVectors = vectorIds.length
+      const numSubquantizers = pqCodesColumn.get(0).length // Get m from first vector's codes
+      const pqCodes = new Uint8Array(numVectors * numSubquantizers)
 
-      for (let i = 0; i < vectorIds.length; i++) {
-        const codes = new Uint8Array(m)
-        for (let j = 0; j < m; j++) {
-          const codeColumn = table.getChild(`code_${j}`)!
-          codes[j] = codeColumn.get(i)
+      for (let i = 0; i < numVectors; i++) {
+        const vectorCodes = pqCodesColumn.get(i)
+        for (let j = 0; j < numSubquantizers; j++) {
+          pqCodes[i * numSubquantizers + j] = vectorCodes.get(j)
         }
-        pqCodes.push([codes])
       }
 
       const partitionData: PartitionData = {
         vector_ids: vectorIds,
-        pq_codes: pqCodes,
+        pq_codes: pqCodes, // Pre-flattened format for direct use
         size: vectorIds.length,
       }
 

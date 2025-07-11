@@ -73,6 +73,7 @@ ivfpq-export:
 	python src/cytoverse/scripts/ivfpq_train.py ivfpq-export \
 	web/public/models/scimilarity \
 	data/scimilarity/vectors.npy \
+	--max-vectors 100000 \
 	--test-performance
 
 ivfpq: pq-train ivf-train ivfpq-export

@@ -167,14 +167,8 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
 
         if (partitionData.size === 0) continue
 
-        // Prepare codes for asymmetric distance computation
-        const partitionCodes = new Uint8Array(partitionData.size * pq.m)
-        for (let k = 0; k < partitionData.size; k++) {
-          const vectorCodes = partitionData.pq_codes[k][0]
-          for (let j = 0; j < pq.m; j++) {
-            partitionCodes[k * pq.m + j] = vectorCodes[j]
-          }
-        }
+        // Use pre-flattened partition codes directly for asymmetric distance computation
+        const partitionCodes = partitionData.pq_codes
 
         // Compute asymmetric distances for all vectors in partition
         const distances = pq.asymmetricDistance(reconstructed, partitionCodes)
