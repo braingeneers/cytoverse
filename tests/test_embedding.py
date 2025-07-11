@@ -16,6 +16,8 @@ from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
 import scanpy as sc
 
+from src.cytoverse.ivfpq import IVFPQ
+
 
 @pytest.fixture
 def adata():
@@ -119,9 +121,11 @@ class TestEmbeddingData:
             study_present
         ), f"Study '{h5ad_study_id}' should appear at least once in labels.parquet"
 
-    def test_find_train_sample_via_scimilarity(self, scimilarity_model, embeddings_db):
+    def test_find_train_sample_via_scimilarity(
+        self, scimilarity_model, embeddings_db, metadata_db, labels_df
+    ):
         """Test computing embeddings and finding nearest neighbors using IVFPQ search."""
-        # Load 10 cells from GSE154109.h5ad
+        # Load 10 cells from GSE154109.h5ad - was part of the training and reference?
         gse154109_path = Path("data/GSE154109.h5ad")
         adata_query = anndata.read_h5ad(gse154109_path)
         adata_query = adata_query[:10].copy()  # Take first 10 cells
@@ -135,35 +139,18 @@ class TestEmbeddingData:
         # Align dataset to model genes and compute embeddings
         adata_aligned = align_dataset(adata_query, scimilarity_model.gene_order)
         adata_normalized = lognorm_counts(adata_aligned)
-
-        # Get expression data for embedding computation
-        expression_data = (
-            adata_normalized.X.toarray().astype(np.float32)
-            if hasattr(adata_normalized.X, "toarray")
-            else adata_normalized.X.astype(np.float32)
-        )
-
-        # Compute embeddings using SCimilarity model
+        expression_data = adata_normalized.X.toarray().astype(np.float32)
         computed_embeddings = scimilarity_model.get_embeddings(expression_data)
         print(f"Computed embeddings shape: {computed_embeddings.shape}")
 
         # Load the IVFPQ model for nearest neighbor search
-        from src.cytoverse.ivfpq import IVFPQ
-
         ivfpq_model_path = Path("web/public/models/scimilarity")
-
-        # Check if IVFPQ model exists
-        if not ivfpq_model_path.exists():
-            print("⚠️  IVFPQ model not found, skipping search validation")
-            # Still validate that we can compute embeddings
-            assert computed_embeddings.shape[0] == 10
-            assert computed_embeddings.shape[1] > 0  # Should have embedding dimensions
-            return
-
+        assert ivfpq_model_path.exists()
         ivfpq = IVFPQ(ivfpq_model_path)
 
         # Search for nearest neighbors for the first embedding
         query_embedding = torch.from_numpy(computed_embeddings[0:1]).float()
+        # query_embedding = torch.from_numpy(computed_embeddings[1:2]).float()
 
         # Perform nearest neighbor search using disk-based partitions
         vector_ids, partition_ids, distances, labels = ivfpq.search(
@@ -208,6 +195,18 @@ class TestEmbeddingData:
         assert isinstance(
             distances[0], (float, np.floating)
         ), "Distance should be a float"
+
+        # See if the metadata on this cell matches that in the h5ad
+        neighbor_metadata = metadata_db.query().df[vector_ids]
+        print("Neighbor metadata")
+        print(neighbor_metadata.iloc[0])
+
+        assert neighbor_metadata.iloc[0]["study"] == "GSE154109"
+        assert neighbor_metadata.iloc[0]["sample"] == "GSM4664022"
+        assert (
+            neighbor_metadata.iloc[0]["prediction"]
+            == labels_df.iloc[nearest_vector_id].prediction
+        )
 
         print(
             "✅ Successfully computed embeddings and found nearest neighbor via IVFPQ"
