@@ -126,11 +126,11 @@ class TestEmbeddingData:
     ):
         """Test computing embeddings and finding nearest neighbors using IVFPQ search."""
         # Load 10 cells from GSE154109.h5ad - was part of the training and reference?
-        gse154109_path = Path("data/GSE154109.h5ad")
+        gse154109_path = Path("tests/GSE154109_10.h5ad")
         adata_query = anndata.read_h5ad(gse154109_path)
         adata_query = adata_query[:10].copy()  # Take first 10 cells
 
-        print(f"Loaded {adata_query.n_obs} cells from GSE154109.h5ad")
+        print(f"Loaded {adata_query.n_obs} cells from GSE154109_10.h5ad")
 
         # Add counts layer if it doesn't exist (required by lognorm_counts)
         if "counts" not in adata_query.layers:
@@ -202,7 +202,7 @@ class TestEmbeddingData:
         print(neighbor_metadata.iloc[0])
 
         assert neighbor_metadata.iloc[0]["study"] == "GSE154109"
-        assert neighbor_metadata.iloc[0]["sample"] == "GSM4664022"
+        assert neighbor_metadata.iloc[0]["sample"] == "GSM4664010"
         assert (
             neighbor_metadata.iloc[0]["prediction"]
             == labels_df.iloc[nearest_vector_id].prediction
