@@ -2,10 +2,8 @@
  * Browser-side Inverted File Index (IVF) implementation for IVFPQ search.
  *
  * This module provides IVF search functionality for finding the most relevant
- * partitions given a query vector, and loading partition data from Arrow files.
+ * partitions given a query vector, and loading partition data from custom binary files.
  */
-
-import * as arrow from 'apache-arrow'
 
 /**
  * IVF metadata loaded from centroids.arrow
@@ -38,39 +36,26 @@ export class InvertedFileIndex {
   }
 
   /**
-   * Load IVF metadata from centroids.arrow
+   * Load IVF metadata from centroids.bin
    */
   async loadMetadata(): Promise<void> {
-    console.log(`Loading IVF metadata from ${this.basePath}/centroids.arrow`)
+    console.log(`Loading IVF metadata from ${this.basePath}/centroids.bin`)
 
     try {
-      const response = await fetch(`${this.basePath}/centroids.arrow`)
+      const response = await fetch(`${this.basePath}/centroids.bin`)
       if (!response.ok) {
         throw new Error(`Failed to load centroids: ${response.status}`)
       }
 
       const arrayBuffer = await response.arrayBuffer()
-      const table = arrow.tableFromIPC(new Uint8Array(arrayBuffer))
-
-      // Extract centroids data
-      const centroidCoordsColumn = table.getChild('centroid_coords')
-      if (!centroidCoordsColumn) {
-        throw new Error('centroid_coords column not found in centroids.arrow')
-      }
-
-      // Convert centroids to Float32Array
-      const nPartitions = centroidCoordsColumn.length
-      const firstCentroid = centroidCoordsColumn.get(0)
-      const d = firstCentroid.length
-
-      const centroids = new Float32Array(nPartitions * d)
-      let offset = 0
-      for (let i = 0; i < nPartitions; i++) {
-        const centroid = centroidCoordsColumn.get(i)
-        for (let j = 0; j < d; j++) {
-          centroids[offset++] = centroid.get(j)
-        }
-      }
+      const dataView = new DataView(arrayBuffer)
+      
+      // Read header
+      const nPartitions = dataView.getUint32(0, true) // little-endian
+      const d = dataView.getUint32(4, true) // little-endian
+      
+      // Read centroids data
+      const centroids = new Float32Array(arrayBuffer, 8) // Skip 8-byte header
 
       this.metadata = {
         n_partitions: nPartitions,
@@ -134,7 +119,7 @@ export class InvertedFileIndex {
 
     const partitionFile = `${this.basePath}/partitions/partition_${partitionId
       .toString()
-      .padStart(4, '0')}.arrow`
+      .padStart(4, '0')}.bin`
     console.log(`Loading partition ${partitionId} from ${partitionFile}`)
 
     try {
@@ -144,41 +129,36 @@ export class InvertedFileIndex {
       }
 
       const arrayBuffer = await response.arrayBuffer()
-      const table = arrow.tableFromIPC(new Uint8Array(arrayBuffer))
-
-      // Extract vector IDs
-      const vectorIdsColumn = table.getChild('vector_id')
-      if (!vectorIdsColumn) {
-        throw new Error(`vector_id column not found in partition ${partitionId}`)
-      }
-
-      const vectorIds = new Int32Array(vectorIdsColumn.length)
-      for (let i = 0; i < vectorIdsColumn.length; i++) {
-        vectorIds[i] = vectorIdsColumn.get(i)
-      }
-
-      // Extract PQ codes from the nested list format
-      const pqCodesColumn = table.getChild('pq_codes_flat')
-      if (!pqCodesColumn) {
-        throw new Error(`pq_codes_flat column not found in partition ${partitionId}`)
-      }
-
-      // Convert nested list format to flattened format for direct use in asymmetric distance
-      const numVectors = vectorIds.length
-      const numSubquantizers = pqCodesColumn.get(0).length // Get m from first vector's codes
-      const pqCodes = new Uint8Array(numVectors * numSubquantizers)
-
+      const dataView = new DataView(arrayBuffer)
+      
+      // Read header
+      const numVectors = dataView.getUint32(0, true) // little-endian
+      const m = dataView.getUint32(4, true) // little-endian
+      
+      console.log(`Partition ${partitionId}: ${numVectors} vectors, ${m} subquantizers`)
+      
+      // Pre-allocate arrays for optimal performance
+      const vectorIds = new Int32Array(numVectors)
+      const pqCodes = new Uint8Array(numVectors * m) // Pre-flattened for direct use
+      
+      // Read interleaved data efficiently
+      let offset = 8 // Skip header
       for (let i = 0; i < numVectors; i++) {
-        const vectorCodes = pqCodesColumn.get(i)
-        for (let j = 0; j < numSubquantizers; j++) {
-          pqCodes[i * numSubquantizers + j] = vectorCodes.get(j)
+        // Read vector ID
+        vectorIds[i] = dataView.getUint32(offset, true)
+        offset += 4
+        
+        // Read PQ codes directly into flattened array
+        const codesOffset = i * m
+        for (let j = 0; j < m; j++) {
+          pqCodes[codesOffset + j] = dataView.getUint8(offset++)
         }
       }
 
       const partitionData: PartitionData = {
         vector_ids: vectorIds,
-        pq_codes: pqCodes, // Pre-flattened format for direct use
-        size: vectorIds.length,
+        pq_codes: pqCodes, // Already in optimal flattened format
+        size: numVectors,
       }
 
       // Cache the partition data

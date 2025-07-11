@@ -331,82 +331,54 @@ class IVFPQ:
         logger.info(f"IVFPQ export completed successfully to {ivfpq_dir}")
 
     def _export_partition_files(self, output_dir: Path) -> None:
-        """Export each partition as a separate Arrow file."""
+        """Export each partition as a custom binary file optimized for browser loading."""
         partitions_dir = output_dir / "partitions"
         partitions_dir.mkdir(exist_ok=True)
 
         for partition_id, partition_data in self.partition_data.items():
             if partition_data["size"] > 0:  # Only export non-empty partitions
                 # Convert lists back to numpy arrays for processing
-                vector_ids = np.array(partition_data["vector_ids"], dtype=np.int32)
+                vector_ids = np.array(partition_data["vector_ids"], dtype=np.uint32)
                 pq_codes = np.array(partition_data["pq_codes"], dtype=np.uint8)
-
-                # Convert PQ codes to list of flattened codes per vector
-                # This allows direct use in asymmetric distance computation
-                pq_codes_per_vector = []
-                for i in range(pq_codes.shape[0]):
-                    pq_codes_per_vector.append(pq_codes[i].tolist())
-
-                # Create Arrow table with per-vector flattened PQ codes
-                table_data = {
-                    "vector_id": pa.array(vector_ids, type=pa.int32()),
-                    "pq_codes_flat": pa.array(pq_codes_per_vector),
-                }
-
-                # Create Arrow table with partition data
-                table = pa.table(table_data)
-
+                
+                num_vectors = len(vector_ids)
+                
                 # Use zero-padded naming convention for proper sorting
-                partition_file = partitions_dir / f"partition_{partition_id:04d}.arrow"
-
-                # Write Arrow file
-                with pa.OSFile(str(partition_file), "wb") as sink:
-                    with pa.RecordBatchFileWriter(sink, table.schema) as writer:
-                        writer.write_table(table)
+                partition_file = partitions_dir / f"partition_{partition_id:04d}.bin"
+                
+                # Write custom binary format:
+                # Header: [num_vectors:uint32, m:uint32]
+                # Data: [vector_id:uint32, pq_codes:uint8[m]] × num_vectors
+                with open(partition_file, 'wb') as f:
+                    # Write header
+                    f.write(np.uint32(num_vectors).tobytes())
+                    f.write(np.uint32(self.m).tobytes())
+                    
+                    # Write data in interleaved format for optimal access
+                    for i in range(num_vectors):
+                        f.write(vector_ids[i].tobytes())
+                        f.write(pq_codes[i].tobytes())
 
         logger.info(
             f"Exported {len([p for p in self.partition_data.values() if p['size'] > 0])} partition files to {partitions_dir}"
         )
 
     def _export_centroid_index(self, output_dir: Path) -> None:
-        """Export centroid index with partition metadata."""
-        # Prepare centroid data with metadata
-        centroids = self.ivf.centroids.detach().cpu().numpy()
+        """Export centroid index in custom binary format."""
+        # Prepare centroid data
+        centroids = self.ivf.centroids.detach().cpu().numpy().astype(np.float32)
+        n_partitions, d = centroids.shape
 
-        # Create partition metadata
-        partition_ids = []
-        partition_sizes = []
-        partition_files = []
-
-        for partition_id in range(self.n_partitions):
-            partition_ids.append(partition_id)
-
-            if partition_id in self.partition_data:
-                partition_sizes.append(self.partition_data[partition_id]["size"])
-                partition_files.append(f"partitions/partition_{partition_id:04d}.arrow")
-            else:
-                # Empty partition
-                partition_sizes.append(0)
-                partition_files.append(None)
-
-        # Create Arrow table
-        # Store centroids as a nested array (list of coordinates)
-        centroid_lists = [centroid.tolist() for centroid in centroids]
-
-        table = pa.table(
-            {
-                "centroid_id": pa.array(partition_ids, type=pa.int32()),
-                "centroid_coords": centroid_lists,
-                "partition_size": pa.array(partition_sizes, type=pa.int32()),
-                "partition_file": partition_files,
-            }
-        )
-
-        # Export centroid index as Arrow file
-        centroids_file = output_dir / "centroids.arrow"
-        with pa.OSFile(str(centroids_file), "wb") as sink:
-            with pa.RecordBatchFileWriter(sink, table.schema) as writer:
-                writer.write_table(table)
+        # Export centroids as binary file
+        centroids_file = output_dir / "centroids.bin"
+        with open(centroids_file, 'wb') as f:
+            # Write header: [n_partitions:uint32, d:uint32]
+            f.write(np.uint32(n_partitions).tobytes())
+            f.write(np.uint32(d).tobytes())
+            
+            # Write centroids data: [centroid:float32[d]] × n_partitions
+            centroids.tobytes() # This is already in row-major order
+            f.write(centroids.tobytes())
 
         logger.info(f"Exported centroid index to {centroids_file}")
 
@@ -494,7 +466,7 @@ class IVFPQ:
 
     def _load_partition_from_disk(self, partition_id: int, model_path: Path) -> Dict:
         """
-        Load a partition from disk using Arrow format.
+        Load a partition from disk using custom binary format.
 
         Args:
             partition_id: Partition ID to load
@@ -503,26 +475,29 @@ class IVFPQ:
         Returns:
             Dictionary with vector_ids, pq_codes, and size
         """
-        import pyarrow as pa
-
         partitions_dir = model_path / "ivfpq" / "partitions"
-        partition_file = partitions_dir / f"partition_{partition_id:04d}.arrow"
+        partition_file = partitions_dir / f"partition_{partition_id:04d}.bin"
 
         if not partition_file.exists():
             # Return empty partition
             return {"vector_ids": [], "pq_codes": [], "size": 0}
 
-        # Load Arrow file
-        with pa.OSFile(str(partition_file), "rb") as source:
-            reader = pa.RecordBatchFileReader(source)
-            table = reader.read_all()  # Convert to Python data structures
-        vector_ids = table["vector_id"].to_pylist()
-
-        # Load flattened PQ codes (stored as list of lists)
-        pq_codes_flat_lists = table["pq_codes_flat"].to_pylist()
-
-        # Convert back to expected format for compatibility with existing code
-        pq_codes = pq_codes_flat_lists
+        # Load custom binary format
+        with open(partition_file, 'rb') as f:
+            # Read header
+            num_vectors = np.frombuffer(f.read(4), dtype=np.uint32)[0]
+            m = np.frombuffer(f.read(4), dtype=np.uint32)[0]
+            
+            # Read interleaved data
+            vector_ids = []
+            pq_codes = []
+            
+            for i in range(num_vectors):
+                vector_id = np.frombuffer(f.read(4), dtype=np.uint32)[0]
+                codes = np.frombuffer(f.read(m), dtype=np.uint8).tolist()
+                
+                vector_ids.append(int(vector_id))
+                pq_codes.append(codes)
 
         return {
             "vector_ids": vector_ids,
