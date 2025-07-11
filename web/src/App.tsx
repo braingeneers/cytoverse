@@ -17,7 +17,6 @@ import {
   RadioGroup,
   FormControlLabel,
   Radio,
-  Checkbox,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -65,7 +64,6 @@ function App() {
   const [isRunning, setIsRunning] = useState(false)
   const [hasWebGPU, setHasWebGPU] = useState(false)
   const [useWebGPU, setUseWebGPU] = useState(false)
-  const [labelingEnabled, setLabelingEnabled] = useState(true) // Default to enabled
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
   // Scatter plot data state - training data (static)
@@ -83,6 +81,7 @@ function App() {
   // Labeling feedback state - counts of predicted labels
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
+  const [totalNumCells, setTotalNumCells] = useState<number>(0)
 
   // Share modal state
   const [shareModalOpen, setShareModalOpen] = useState(false)
@@ -153,88 +152,90 @@ function App() {
 
   function createWorkers() {
     const embedder = new EmbeddingWorker()
-    let labeler: Worker | null = null
+    const labeler = new LabelerWorker()
 
-    // Create labeler worker if labeling is enabled
-    if (labelingEnabled) {
-      labeler = new LabelerWorker()
-      setLabelerWorker(labeler)
+    setLabelerWorker(labeler)
 
-      // Initialize labeler
-      labeler.postMessage({
-        type: 'start',
-        modelsURL: `${sitePath}/models`,
-        modelID: 'scimilarity',
-      })
+    // Initialize labeler
+    labeler.postMessage({
+      type: 'start',
+      modelsURL: `${sitePath}/models`,
+      modelID: 'scimilarity',
+    })
 
-      // Handle labeler messages
-      labeler.onmessage = (evt) => {
-        switch (evt.data.type) {
-          case 'status':
-            console.log('Labeler status:', evt.data.message)
-            break
-          case 'labeled':
-            console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
-            // Add new embeddings to test data - umap_coordinates contains [[x1, y1], [x2, y2], ...]
-            if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
-              const newXPoints: number[] = []
-              const newYPoints: number[] = []
+    // Handle labeler messages
+    labeler.onmessage = (evt) => {
+      switch (evt.data.type) {
+        case 'status':
+          console.log('Labeler status:', evt.data.message)
+          break
+        case 'labeled':
+          console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
+          console.log('Train vector IDs received:', evt.data.train_vector_id?.length)
+          
+          // Process labeling results for feedback tallies and progress
+          if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
+            console.log('Processing labeling results...')
+            const newLabelCounts: { [label: string]: number } = {}
+            let validLabels = 0
 
-              // Extract X and Y coordinates from the array of tuples and normalize them
-              for (const coordinate of evt.data.umap_coordinates) {
-                if (coordinate && coordinate.length >= 2) {
-                  // Normalize the coordinates using the same transformation as pumap.py
-                  const [normalizedX, normalizedY] = normalizeCoordinates(
-                    coordinate[0],
-                    coordinate[1]
-                  )
-                  newXPoints.push(normalizedX)
-                  newYPoints.push(normalizedY)
+            for (const trainVectorId of evt.data.train_vector_id) {
+              if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+                // Get category index from training data
+                const categoryIndex = categoryData.get(trainVectorId)
+                if (categoryIndex != null && categoryIndex < categoryLabels.length) {
+                  const labelName = categoryLabels[categoryIndex]
+                  newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
+                  validLabels++
                 }
               }
-
-              setXTestData((prev) => [...prev, ...newXPoints])
-              setYTestData((prev) => [...prev, ...newYPoints])
-
-              console.log('Added', newXPoints.length, 'new labeled test points')
             }
 
-            // Process labeling results for feedback tallies
-            if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
-              const newLabelCounts: { [label: string]: number } = {}
-              let validLabels = 0
+            console.log(`Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`)
 
-              for (const trainVectorId of evt.data.train_vector_id) {
-                if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-                  // Get category index from training data
-                  const categoryIndex = categoryData.get(trainVectorId)
-                  if (categoryIndex != null && categoryIndex < categoryLabels.length) {
-                    const labelName = categoryLabels[categoryIndex]
-                    newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
-                    validLabels++
+            // Update label counts
+            setLabelCounts((prev) => {
+              const updated = { ...prev }
+              for (const [label, count] of Object.entries(newLabelCounts)) {
+                updated[label] = (updated[label] || 0) + count
+              }
+              return updated
+            })
+
+            // Update total labeled and progress using callback to get current state
+            setTotalLabeled((prevTotalLabeled) => {
+              const newTotalLabeled = prevTotalLabeled + validLabels
+
+              // Update progress based on labeler results (end of pipeline)
+              // Use callback to get current totalNumCells value
+              setTotalNumCells((currentTotalNumCells) => {
+                console.log(`Progress update: ${newTotalLabeled}/${currentTotalNumCells} labeled`)
+                if (currentTotalNumCells > 0) {
+                  const progressPercent = Math.round((newTotalLabeled / currentTotalNumCells) * 100)
+                  console.log(`Setting progress to ${progressPercent}%`)
+                  setProgress(progressPercent)
+                  setStatusMessage(`Labeled ${newTotalLabeled} of ${currentTotalNumCells} cells...`)
+
+                  // Check if processing is complete
+                  if (newTotalLabeled >= currentTotalNumCells) {
+                    console.log('Processing complete! Setting isRunning to false')
+                    setIsRunning(false)
+                    setStatusMessage(`Processing complete: labeled ${newTotalLabeled} cells`)
                   }
                 }
-              }
-
-              // Update label counts
-              setLabelCounts((prev) => {
-                const updated = { ...prev }
-                for (const [label, count] of Object.entries(newLabelCounts)) {
-                  updated[label] = (updated[label] || 0) + count
-                }
-                return updated
+                return currentTotalNumCells // Return unchanged
               })
 
-              setTotalLabeled((prev) => prev + validLabels)
-            }
-            break
-          case 'error':
-            console.error('Labeler error:', evt.data.error)
-            setStatusMessage(`Labeling error: ${evt.data.error}`)
-            break
-          default:
-            break
-        }
+              return newTotalLabeled
+            })
+          }
+          break
+        case 'error':
+          console.error('Labeler error:', evt.data.error)
+          setStatusMessage(`Labeling error: ${evt.data.error}`)
+          break
+        default:
+          break
       }
     }
 
@@ -244,53 +245,58 @@ function App() {
           setStatusMessage(evt.data.message)
           break
         case 'progress':
+          // Capture total number of cells from embedder
+          if (evt.data.totalToProcess && totalNumCells === 0) {
+            console.log('Setting totalNumCells to:', evt.data.totalToProcess)
+            setTotalNumCells(evt.data.totalToProcess)
+          }
+          // Don't update progress here - wait for labeler results
           setStatusMessage(evt.data.message)
-          setProgress(Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
           break
         case 'embedding':
           console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
 
-          if (labelingEnabled && labeler) {
-            // Route through labeler for cell type prediction
-            labeler.postMessage({
-              type: 'embedding',
-              test_vector_id: evt.data.test_vector_id,
-              pq_embedding: evt.data.pq_embedding,
-              umap_coordinates: evt.data.umap_coordinates,
-            })
-          } else {
-            // Direct visualization without labeling
-            if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
-              const newXPoints: number[] = []
-              const newYPoints: number[] = []
+          // Plot coordinates immediately when received from embedder
+          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
+            const newXPoints: number[] = []
+            const newYPoints: number[] = []
 
-              // Extract X and Y coordinates from the array of tuples and normalize them
-              for (const coordinate of evt.data.umap_coordinates) {
-                if (coordinate && coordinate.length >= 2) {
-                  // Normalize the coordinates using the same transformation as pumap.py
-                  const [normalizedX, normalizedY] = normalizeCoordinates(
-                    coordinate[0],
-                    coordinate[1]
-                  )
-                  newXPoints.push(normalizedX)
-                  newYPoints.push(normalizedY)
-                }
+            // Extract X and Y coordinates from the array of tuples and normalize them
+            for (const coordinate of evt.data.umap_coordinates) {
+              if (coordinate && coordinate.length >= 2) {
+                // Normalize the coordinates using the same transformation as pumap.py
+                const [normalizedX, normalizedY] = normalizeCoordinates(
+                  coordinate[0],
+                  coordinate[1]
+                )
+                newXPoints.push(normalizedX)
+                newYPoints.push(normalizedY)
               }
-
-              setXTestData((prev) => [...prev, ...newXPoints])
-              setYTestData((prev) => [...prev, ...newYPoints])
-
-              console.log('Added', newXPoints.length, 'new normalized test points')
             }
+
+            setXTestData((prev) => [...prev, ...newXPoints])
+            setYTestData((prev) => [...prev, ...newYPoints])
+
+            console.log('Added', newXPoints.length, 'new test points from embedder')
           }
+
+          // Always route through labeler for cell type prediction
+          console.log('Routing to labeler - test_vector_id count:', evt.data.test_vector_id?.length)
+          console.log('Routing to labeler - pq_embedding size:', evt.data.pq_embedding?.length)
+          labeler.postMessage({
+            type: 'embedding',
+            test_vector_id: evt.data.test_vector_id,
+            pq_embedding: evt.data.pq_embedding,
+            umap_coordinates: evt.data.umap_coordinates,
+          })
           break
         case 'finished':
+          // Don't stop running here - wait for labeler to finish processing all cells
           setStatusMessage(
-            `Processed ${evt.data.totalProcessed} of ${
+            `Embedder finished: processed ${evt.data.totalProcessed} of ${
               evt.data.totalNumCells
-            } cells in ${evt.data.elapsedTime?.toFixed(2)} minutes`
+            } cells in ${evt.data.elapsedTime?.toFixed(2)} minutes. Labeling in progress...`
           )
-          setIsRunning(false)
           break
         case 'error':
           setStatusMessage(evt.data.error.toString())
@@ -391,6 +397,7 @@ function App() {
     setYTestData([])
     setLabelCounts({})
     setTotalLabeled(0)
+    setTotalNumCells(0)
 
     const embedder = createWorkers()
     setEmbedderWorker(embedder)
@@ -631,20 +638,6 @@ function App() {
               </RadioGroup>
             </FormControl>
 
-            {/* Labeling Toggle */}
-            <FormControl component="fieldset" sx={{ mb: 2 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={labelingEnabled}
-                    onChange={(e) => setLabelingEnabled(e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label="Enable real-time cell labeling"
-              />
-            </FormControl>
-
             <Button
               data-testid="run-stop-button"
               variant="contained"
@@ -716,108 +709,106 @@ function App() {
             </Box>
 
             {/* Predicted Labels */}
-            {labelingEnabled && (
+            <Box
+              sx={{
+                mt: 2,
+                p: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+              }}
+            >
               <Box
                 sx={{
-                  mt: 2,
-                  p: 2,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: 1,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  mb: 2,
                 }}
               >
-                <Box
+                <Typography variant="h6">Predicted Labels</Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => setShareModalOpen(true)}
                   sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    mb: 2,
+                    color: 'primary.main',
+                    '&:focus': {
+                      outline: 'none',
+                    },
+                    '&:focus-visible': {
+                      outline: 'none',
+                    },
                   }}
                 >
-                  <Typography variant="h6">Predicted Labels</Typography>
-                  <IconButton
-                    size="small"
-                    onClick={() => setShareModalOpen(true)}
+                  <ShareIcon />
+                </IconButton>
+              </Box>
+              {totalLabeled > 0 ? (
+                <Box>
+                  <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
+                    Total Labeled: {totalLabeled.toLocaleString()}
+                  </Typography>
+                  <Box
                     sx={{
-                      color: 'primary.main',
-                      '&:focus': {
-                        outline: 'none',
+                      maxHeight: 200,
+                      overflowY: 'auto',
+                      // Hide scrollbar while keeping functionality
+                      '&::-webkit-scrollbar': {
+                        display: 'none',
                       },
-                      '&:focus-visible': {
-                        outline: 'none',
-                      },
+                      '-ms-overflow-style': 'none',
+                      'scrollbar-width': 'none',
                     }}
                   >
-                    <ShareIcon />
-                  </IconButton>
-                </Box>
-                {totalLabeled > 0 ? (
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
-                      Total Labeled: {totalLabeled.toLocaleString()}
-                    </Typography>
-                    <Box
-                      sx={{
-                        maxHeight: 200,
-                        overflowY: 'auto',
-                        // Hide scrollbar while keeping functionality
-                        '&::-webkit-scrollbar': {
-                          display: 'none',
-                        },
-                        '-ms-overflow-style': 'none',
-                        'scrollbar-width': 'none',
-                      }}
-                    >
-                      {Object.entries(labelCounts)
-                        .sort(([, a], [, b]) => b - a) // Sort by count descending
-                        .map(([label, count]) => (
-                          <Box
-                            key={label}
+                    {Object.entries(labelCounts)
+                      .sort(([, a], [, b]) => b - a) // Sort by count descending
+                      .map(([label, count]) => (
+                        <Box
+                          key={label}
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            py: 0.5,
+                            borderBottom: '1px solid',
+                            borderColor: 'divider',
+                          }}
+                        >
+                          <Typography
+                            variant="body2"
                             sx={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              py: 0.5,
-                              borderBottom: '1px solid',
-                              borderColor: 'divider',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              flex: 1,
+                              mr: 1,
                             }}
                           >
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                flex: 1,
-                                mr: 1,
-                              }}
-                            >
-                              {label}
-                            </Typography>
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                fontWeight: 'bold',
-                                minWidth: 'fit-content',
-                              }}
-                            >
-                              {count.toLocaleString()}
-                            </Typography>
-                          </Box>
-                        ))}
-                    </Box>
+                            {label}
+                          </Typography>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 'bold',
+                              minWidth: 'fit-content',
+                            }}
+                          >
+                            {count.toLocaleString()}
+                          </Typography>
+                        </Box>
+                      ))}
                   </Box>
-                ) : isRunning ? (
-                  <Typography variant="body2" color="text.secondary">
-                    Waiting for predictions...
-                  </Typography>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">
-                    No predictions yet
-                  </Typography>
-                )}
-              </Box>
-            )}
+                </Box>
+              ) : isRunning ? (
+                <Typography variant="body2" color="text.secondary">
+                  Waiting for predictions...
+                </Typography>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No predictions yet
+                </Typography>
+              )}
+            </Box>
           </Box>
         </Drawer>
 

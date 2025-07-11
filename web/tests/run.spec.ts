@@ -7,7 +7,8 @@ test('Navigate to root, click run, wait for results', async ({ page }) => {
 
   // NOTE: Playwright reads the entire file so in practice only use MB size files...
   const fileInputElement = page.locator('[type="file"]')
-  await fileInputElement.setInputFiles('tests/GSE136831_subsample_10.h5ad')
+  // await fileInputElement.setInputFiles('tests/GSE136831_subsample_10.h5ad')
+  await fileInputElement.setInputFiles('tests/GSE136831_subsample_100.h5ad')
 
   await page.getByTestId('run-stop-button').click()
   // await page.waitForTimeout(1000)

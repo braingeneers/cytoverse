@@ -119,6 +119,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
   const batchSize = test_vector_id.length
 
   console.log(`Processing batch of ${batchSize} embeddings for labeling`)
+  console.log(`PQ embedding length: ${pq_embedding.length}`)
 
   // For each PQ embedding, find the closest training vector
   const trainVectorIds: number[] = []
@@ -128,12 +129,18 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
   const totalCodes = pq_embedding.length
   const expectedCodes = batchSize * codesPerVector
 
+  console.log(`Expected codes: ${expectedCodes}, actual codes: ${totalCodes}, codes per vector: ${codesPerVector}`)
+
+  // Determine how many vectors we can actually process
+  const actualBatchSize = Math.min(batchSize, Math.floor(totalCodes / codesPerVector))
+  console.log(`Processing ${actualBatchSize} out of ${batchSize} vectors`)
+
   if (totalCodes !== expectedCodes) {
-    throw new Error(`PQ embedding size mismatch: expected ${expectedCodes}, got ${totalCodes}`)
+    console.error(`PQ embedding size mismatch: expected ${expectedCodes}, got ${totalCodes}`)
   }
 
   // Process each vector in the batch
-  for (let i = 0; i < batchSize; i++) {
+  for (let i = 0; i < actualBatchSize; i++) {
     try {
       // Extract PQ codes for this vector
       const vectorCodes = new Uint8Array(codesPerVector)
@@ -186,6 +193,13 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       trainVectorIds.push(-1) // Use -1 to indicate failure
     }
   }
+
+  // Fill remaining slots with -1 if we couldn't process all vectors
+  while (trainVectorIds.length < batchSize) {
+    trainVectorIds.push(-1)
+  }
+
+  console.log(`Processed ${actualBatchSize} vectors, returning ${trainVectorIds.length} results`)
 
   // Send results back to main thread
   self.postMessage({
