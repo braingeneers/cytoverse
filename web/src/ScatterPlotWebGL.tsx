@@ -74,6 +74,7 @@ interface ScatterPlotWebGLProps {
   yTrainData: Vector
   xTestData: number[]
   yTestData: number[]
+  testDataLabels: number[]
   categoryData: Vector
   categoryLabels: string[]
 }
@@ -83,6 +84,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
   yTrainData,
   xTestData,
   yTestData,
+  testDataLabels,
   categoryData,
   categoryLabels,
 }) => {
@@ -105,7 +107,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       canvas: canvasRef.current,
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
-      pointSize: [1, 5], // Use a range for point sizes
+      pointSize: [1, 10, 5], // Use a range for point sizes: training, unlabeled test, labeled test
       // performanceMode: true, // Enable performance mode for better rendering
     })
 
@@ -265,14 +267,33 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     const allX = new Float32Array([...trainX, ...xTestData])
     const allY = new Float32Array([...trainY, ...yTestData])
 
-    // Create category data for test points (use a special category for test data)
+    // Create category data for test points
     const categoryColors = generateCategoryColors(categoryLabels.length)
-    const testCategories = new Array(xTestData.length).fill(categoryColors.length - 1)
+
+    // Use actual labels when available, fallback to red (last color) for unlabeled points
+    const testCategories = xTestData.map((_, index) => {
+      if (index < testDataLabels.length) {
+        const labelIndex = testDataLabels[index]
+        // Use the actual label if valid, otherwise use red (last color)
+        return labelIndex >= 0 && labelIndex < categoryLabels.length
+          ? labelIndex
+          : categoryColors.length - 1
+      }
+      return categoryColors.length - 1 // Default to red for points without labels yet
+    })
+
     const allCategories = [...categoryArrayData.slice(0, numPoints), ...testCategories]
 
-    // Create size data: 0 for training data (first pointSize), 1 for test data (second pointSize)
+    // Create size data: 0 for training data (first pointSize), 1 for unlabeled test data (second pointSize), 2 for labeled test data (third pointSize)
     const trainSize = new Array(numPoints).fill(0)
-    const testSize = new Array(xTestData.length).fill(1)
+    const testSize = xTestData.map((_, index) => {
+      if (index < testDataLabels.length) {
+        const labelIndex = testDataLabels[index]
+        // Use size 2 for labeled points (valid label), size 1 for unlabeled
+        return labelIndex >= 0 && labelIndex < categoryLabels.length ? 2 : 1
+      }
+      return 1 // Default to unlabeled size for points without labels yet
+    })
     const allSizes = [...trainSize, ...testSize]
 
     const columnData = {
@@ -302,7 +323,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       }
     }
     redrawAllData()
-  }, [xTestData, yTestData, xTrainData, yTrainData, categoryData, categoryLabels])
+  }, [xTestData, yTestData, testDataLabels, xTrainData, yTrainData, categoryData, categoryLabels])
 
   return (
     <div

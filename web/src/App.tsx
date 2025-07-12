@@ -77,6 +77,7 @@ function App() {
   // Test data state - incremental mappings
   const [xTestData, setXTestData] = useState<number[]>([])
   const [yTestData, setYTestData] = useState<number[]>([])
+  const [testDataLabels, setTestDataLabels] = useState<number[]>([])
 
   // Labeling feedback state - counts of predicted labels
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
@@ -177,6 +178,7 @@ function App() {
           if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
             console.log('Processing labeling results...')
             const newLabelCounts: { [label: string]: number } = {}
+            const newTestLabels: number[] = []
             let validLabels = 0
 
             for (const trainVectorId of evt.data.train_vector_id) {
@@ -186,10 +188,18 @@ function App() {
                 if (categoryIndex != null && categoryIndex < categoryLabels.length) {
                   const labelName = categoryLabels[categoryIndex]
                   newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
+                  newTestLabels.push(categoryIndex)
                   validLabels++
+                } else {
+                  newTestLabels.push(-1) // Invalid category index
                 }
+              } else {
+                newTestLabels.push(-1) // Invalid train vector ID
               }
             }
+
+            // Store test point labels for visualization
+            setTestDataLabels((prev) => [...prev, ...newTestLabels])
 
             console.log(
               `Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`
@@ -397,6 +407,7 @@ function App() {
     // Clear any existing test data and label counts
     setXTestData([])
     setYTestData([])
+    setTestDataLabels([])
     setLabelCounts({})
     setTotalLabeled(0)
     setTotalNumCells(0)
@@ -843,6 +854,7 @@ function App() {
               yTrainData={yTrainData}
               xTestData={xTestData}
               yTestData={yTestData}
+              testDataLabels={testDataLabels}
               categoryData={categoryData}
               categoryLabels={categoryLabels}
             />
