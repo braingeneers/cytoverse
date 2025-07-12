@@ -280,6 +280,16 @@ function getCellNames(annData: H5File): string[] {
 }
 
 /**
+ * Validate if an array contains gene symbols by checking for known genes
+ * @param {string[]} geneArray - Array of potential gene symbols
+ * @returns {boolean} - True if array appears to contain gene symbols
+ */
+function validateGeneSymbols(geneArray: string[]): boolean {
+  const knownGenes = ['TP53', 'BRCA1']
+  return knownGenes.some(gene => geneArray.includes(gene))
+}
+
+/**
  * Extract gene names/symbols from an h5ad file
  * @param {H5File} annData - The h5ad file
  * @returns {string[]} - Array of gene names
@@ -317,10 +327,27 @@ function getSampleGenes(annData: H5File): string[] {
     for (const key of geneKeys) {
       if (varKeys.includes(key)) {
         try {
-          return (varGroup.get(key) as H5DataSet).value
+          const genes = (varGroup.get(key) as H5DataSet).value
+          if (validateGeneSymbols(genes)) {
+            return genes
+          }
         } catch (e) {
           console.warn(`Failed to read gene names from var/${key}`)
         }
+      }
+    }
+    
+    // Fallback: Check if there's an index in the var group that might contain gene names
+    if (varKeys.length > 0) {
+      try {
+        // Try to get the first available key as a potential gene name source
+        const firstKey = varKeys[0]
+        const potentialGenes = (varGroup.get(firstKey) as H5DataSet).value
+        if (Array.isArray(potentialGenes) && validateGeneSymbols(potentialGenes)) {
+          return potentialGenes
+        }
+      } catch (e) {
+        console.warn('Failed to read potential gene names from first available var key')
       }
     }
     
