@@ -83,6 +83,7 @@ function App() {
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
   const [totalNumCells, setTotalNumCells] = useState<number>(0)
+  const [processingComplete, setProcessingComplete] = useState<boolean>(false)
 
   // Share modal state
   const [shareModalOpen, setShareModalOpen] = useState(false)
@@ -90,6 +91,10 @@ function App() {
 
   // Help modal state
   const [helpModalOpen, setHelpModalOpen] = useState(false)
+
+  // Error modal state
+  const [errorModalOpen, setErrorModalOpen] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   // Normalization parameters from metadata
   const [xCenter, setXCenter] = useState<number>(0)
@@ -152,6 +157,12 @@ function App() {
   }
 
   function createWorkers() {
+    // Terminate any existing workers before creating new ones
+    if (labelerWorker) {
+      console.log('Terminating existing labeler worker before creating new one...')
+      labelerWorker.terminate()
+    }
+    
     const embedder = new EmbeddingWorker()
     const labeler = new LabelerWorker()
 
@@ -232,6 +243,7 @@ function App() {
                   if (newTotalLabeled >= currentTotalNumCells) {
                     console.log('Processing complete! Setting isRunning to false')
                     setIsRunning(false)
+                    setProcessingComplete(true)
                     setStatusMessage(`Processing complete: labeled ${newTotalLabeled} cells`)
                   }
                 }
@@ -311,8 +323,11 @@ function App() {
           )
           break
         case 'error':
-          setStatusMessage(evt.data.error.toString())
+          console.error('Embedder error:', evt.data.error)
           setIsRunning(false)
+          setStatusMessage('')
+          setErrorMessage(evt.data.error.toString())
+          setErrorModalOpen(true)
           break
         default:
           break
@@ -401,16 +416,19 @@ function App() {
 
   const start = () => {
     console.log('Starting embedding...', selectedFile?.name)
-    setProgress(0)
-    setIsRunning(true)
-
-    // Clear any existing test data and label counts
+    
+    // Clear any existing test data and label counts immediately
     setXTestData([])
     setYTestData([])
     setTestDataLabels([])
     setLabelCounts({})
     setTotalLabeled(0)
     setTotalNumCells(0)
+    setProcessingComplete(false)
+    
+    // Set progress and running state after clearing data
+    setProgress(0)
+    setIsRunning(true)
 
     const embedder = createWorkers()
     setEmbedderWorker(embedder)
@@ -429,14 +447,20 @@ function App() {
     setIsRunning(false)
     setProgress(0)
 
+    // Terminate workers and clear their state
     if (embedderWorker) {
+      console.log('Terminating embedder worker...')
       embedderWorker.terminate()
       setEmbedderWorker(null)
     }
     if (labelerWorker) {
+      console.log('Terminating labeler worker...')
       labelerWorker.terminate()
       setLabelerWorker(null)
     }
+    
+    // Reset processing state
+    setProcessingComplete(false)
     setStatusMessage('Processing stopped')
   }
 
@@ -857,6 +881,7 @@ function App() {
               testDataLabels={testDataLabels}
               categoryData={categoryData}
               categoryLabels={categoryLabels}
+              processingComplete={processingComplete}
             />
           ) : (
             <Box display="flex" justifyContent="center" alignItems="center" height="100%">
@@ -921,6 +946,31 @@ function App() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setHelpModalOpen(false)} variant="contained">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Error Modal */}
+      <Dialog open={errorModalOpen} onClose={() => setErrorModalOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Error Processing File</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {errorMessage}
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              The h5ad file could not be processed. Please ensure your file contains:
+              <ul>
+                <li>Cell names/barcodes in obs group</li>
+                <li>Gene names/symbols in var group</li>
+                <li>Raw counts in layers/counts, layers/raw_counts, raw/X, or X</li>
+              </ul>
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setErrorModalOpen(false)} variant="contained">
             Close
           </Button>
         </DialogActions>

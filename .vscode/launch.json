@@ -5,6 +5,19 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "ingest h5ad from s3",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ingest_h5ad_from_s3.py",
+      "console": "integratedTerminal",
+      "args": [
+        "s3://braingeneersdev/jgf/sspsygene/alldataresults/integrated_data.h5ad",
+        "${workspaceFolder}/web/public/models/brain",
+        "--max-cells",
+        "2"
+      ]
+    },
+    {
       "name": "scimilarity export model",
       "type": "debugpy",
       "request": "launch",
@@ -62,7 +75,7 @@
         "${workspaceFolder}/data/scimilarity/vectors.npy",
         "${workspaceFolder}/data/scimilarity/",
         "--num-vectors",
-        "10000"
+        "10000",
         "--export-png"
       ]
     },

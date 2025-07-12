@@ -58,6 +58,13 @@ interface H5File {
   close(): void
 }
 
+interface RawCountsData {
+  isSparse: boolean
+  data: H5DataSet
+  indices: H5DataSet | null
+  indptr: H5DataSet | null
+}
+
 interface EmbeddingOutput {
   output: Tensor
 }
@@ -226,6 +233,231 @@ function precomputeInflationIndices(currentModelGenes: string[], sampleGenes: st
 }
 
 /**
+ * Extract cell names (barcodes) from an h5ad file
+ * @param {H5File} annData - The h5ad file
+ * @returns {string[]} - Array of cell names
+ * @throws {Error} - If cell names cannot be found
+ */
+function getCellNames(annData: H5File): string[] {
+  // Check if obs exists
+  if (!annData.keys().includes('obs')) {
+    throw new Error('Unable to find cell names: Missing "obs" group in h5ad file')
+  }
+
+  const obs = annData.get('obs')
+  
+  // Case 1: obs is a Dataset (structured array)
+  if (obs.type === 'Dataset') {
+    try {
+      return (obs as H5DataSet).value.map((e: any) => e[0])
+    } catch (e) {
+      throw new Error('Unable to extract cell names from obs Dataset')
+    }
+  }
+  
+  // Case 2: obs is a Group
+  if (obs.type === 'Group') {
+    const obsGroup = obs as H5Group
+    const obsKeys = obsGroup.keys()
+    
+    // Try common locations for cell names/barcodes
+    const indexKeys = ['index', '_index', 'barcodes', '_barcodes', 'cell_id', 'cell_name']
+    
+    for (const key of indexKeys) {
+      if (obsKeys.includes(key)) {
+        try {
+          return (obsGroup.get(key) as H5DataSet).value
+        } catch (e) {
+          console.warn(`Failed to read cell names from obs/${key}`)
+        }
+      }
+    }
+    
+    throw new Error(`Unable to find cell names in obs group. Available keys: ${obsKeys.join(', ')}`)
+  }
+  
+  throw new Error('Unable to find cell names: obs is neither Dataset nor Group')
+}
+
+/**
+ * Extract gene names/symbols from an h5ad file
+ * @param {H5File} annData - The h5ad file
+ * @returns {string[]} - Array of gene names
+ * @throws {Error} - If gene names cannot be found
+ */
+function getSampleGenes(annData: H5File): string[] {
+  // Check if var exists
+  if (!annData.keys().includes('var')) {
+    throw new Error('Unable to find gene names: Missing "var" group in h5ad file')
+  }
+
+  const varData = annData.get('var')
+  
+  // Case 1: var is a Dataset (structured array)
+  if (varData.type === 'Dataset') {
+    try {
+      return (varData as H5DataSet).value.map((e: any) => e[0])
+    } catch (e) {
+      throw new Error('Unable to extract gene names from var Dataset')
+    }
+  }
+  
+  // Case 2: var is a Group
+  if (varData.type === 'Group') {
+    const varGroup = varData as H5Group
+    const varKeys = varGroup.keys()
+    
+    // Try common locations for gene names in order of preference
+    // symbol/gene_symbol is preferred over index as it contains gene names rather than IDs
+    const geneKeys = [
+      'symbol', 'gene_symbol', 'gene_symbols', 'gene_name', 'gene_names',
+      'feature_name', 'features', 'index', '_index', 'gene_id', 'gene_ids'
+    ]
+    
+    for (const key of geneKeys) {
+      if (varKeys.includes(key)) {
+        try {
+          return (varGroup.get(key) as H5DataSet).value
+        } catch (e) {
+          console.warn(`Failed to read gene names from var/${key}`)
+        }
+      }
+    }
+    
+    throw new Error(`Unable to find gene names in var group. Available keys: ${varKeys.join(', ')}`)
+  }
+  
+  throw new Error('Unable to find gene names: var is neither Dataset nor Group')
+}
+
+/**
+ * Extract raw counts expression data from an h5ad file
+ * @param {H5File} annData - The h5ad file
+ * @returns {RawCountsData} - Object containing expression data and metadata
+ * @throws {Error} - If raw counts cannot be found
+ */
+function getRawCounts(annData: H5File): RawCountsData {
+  const topLevelKeys = annData.keys()
+  
+  // Strategy 1: Check layers for raw counts (most common location)
+  if (topLevelKeys.includes('layers')) {
+    const layers = annData.get('layers')
+    if (layers.type === 'Group') {
+      const layersGroup = layers as H5Group
+      const layerKeys = layersGroup.keys()
+      
+      // Try common raw count layer names
+      const rawCountKeys = ['counts', 'raw_counts', 'raw', 'count', 'spliced', 'unspliced']
+      
+      for (const key of rawCountKeys) {
+        if (layerKeys.includes(key)) {
+          const countsData = layersGroup.get(key)
+          
+          // Handle dense matrix
+          if (countsData.type === 'Dataset') {
+            return {
+              isSparse: false,
+              data: countsData as H5DataSet,
+              indices: null,
+              indptr: null
+            }
+          }
+          
+          // Handle sparse matrix
+          if (countsData.type === 'Group') {
+            const sparseGroup = countsData as H5Group
+            const sparseKeys = sparseGroup.keys()
+            
+            if (sparseKeys.includes('data') && sparseKeys.includes('indices') && sparseKeys.includes('indptr')) {
+              return {
+                isSparse: true,
+                data: sparseGroup.get('data') as H5DataSet,
+                indices: sparseGroup.get('indices') as H5DataSet,
+                indptr: sparseGroup.get('indptr') as H5DataSet
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Strategy 2: Check raw attribute (older format)
+  if (topLevelKeys.includes('raw')) {
+    const raw = annData.get('raw')
+    if (raw.type === 'Group') {
+      const rawGroup = raw as H5Group
+      if (rawGroup.keys().includes('X')) {
+        const rawX = rawGroup.get('X')
+        
+        // Handle dense matrix
+        if (rawX.type === 'Dataset') {
+          return {
+            isSparse: false,
+            data: rawX as H5DataSet,
+            indices: null,
+            indptr: null
+          }
+        }
+        
+        // Handle sparse matrix
+        if (rawX.type === 'Group') {
+          const sparseGroup = rawX as H5Group
+          const sparseKeys = sparseGroup.keys()
+          
+          if (sparseKeys.includes('data') && sparseKeys.includes('indices') && sparseKeys.includes('indptr')) {
+            return {
+              isSparse: true,
+              data: sparseGroup.get('data') as H5DataSet,
+              indices: sparseGroup.get('indices') as H5DataSet,
+              indptr: sparseGroup.get('indptr') as H5DataSet
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Strategy 3: Use main X matrix as last resort (might be normalized)
+  if (topLevelKeys.includes('X')) {
+    console.warn('Using main X matrix - this may contain normalized data instead of raw counts')
+    const X = annData.get('X')
+    
+    // Handle dense matrix
+    if (X.type === 'Dataset') {
+      return {
+        isSparse: false,
+        data: X as H5DataSet,
+        indices: null,
+        indptr: null
+      }
+    }
+    
+    // Handle sparse matrix
+    if (X.type === 'Group') {
+      const sparseGroup = X as H5Group
+      const sparseKeys = sparseGroup.keys()
+      
+      if (sparseKeys.includes('data') && sparseKeys.includes('indices') && sparseKeys.includes('indptr')) {
+        return {
+          isSparse: true,
+          data: sparseGroup.get('data') as H5DataSet,
+          indices: sparseGroup.get('indices') as H5DataSet,
+          indptr: sparseGroup.get('indptr') as H5DataSet
+        }
+      }
+    }
+  }
+  
+  // If we get here, we couldn't find any expression data
+  const availableKeys = topLevelKeys.join(', ')
+  throw new Error(
+    `Unable to find raw counts data. Looked in: layers/counts, layers/raw_counts, raw/X, and X. ` +
+    `Available top-level keys in h5ad file: ${availableKeys}`
+  )
+}
+
+/**
  * Fill the batch data and inflate it into the model's gene list space
  * @param {number} batchStart - The start index of the batch
  * @param {number} currentBatchSize - The size of the batch
@@ -337,38 +569,22 @@ async function start(
 
     console.log(`Top level keys: ${annData.keys()}`)
 
-    let cellNames: string[] = []
-    if (annData.get('obs').type == 'Dataset') {
-      cellNames = (annData.get('obs') as H5DataSet).value.map((e: any) => e[0])
-    } else if (annData.get('obs').type == 'Group') {
-      const obsGroup = annData.get('obs') as H5Group
-      if (obsGroup.keys().includes('index')) {
-        cellNames = (obsGroup.get('index') as H5DataSet).value
-      } else if (obsGroup.keys().includes('_index')) {
-        cellNames = (obsGroup.get('_index') as H5DataSet).value
-      } else {
-        throw new Error('Could not find cell names')
-      }
-    } else {
-      throw new Error('Could not find cell names')
+    // Extract cell names using the new function
+    let cellNames: string[]
+    try {
+      cellNames = getCellNames(annData)
+      console.log(`Found ${cellNames.length} cells`)
+    } catch (error) {
+      throw new Error(`Failed to extract cell names: ${error.message}`)
     }
 
-    let sampleGenes: string[] = []
-    if (annData.get('var').type == 'Dataset') {
-      sampleGenes = (annData.get('var') as H5DataSet).value.map((e: any) => e[0])
-    } else if (annData.get('var').type == 'Group') {
-      const varGroup = annData.get('var') as H5Group
-      if (varGroup.keys().includes('symbol')) {
-        sampleGenes = (varGroup.get('symbol') as H5DataSet).value
-      } else if (varGroup.keys().includes('index')) {
-        sampleGenes = (varGroup.get('index') as H5DataSet).value
-      } else if (varGroup.keys().includes('_index')) {
-        sampleGenes = (varGroup.get('_index') as H5DataSet).value
-      } else {
-        throw new Error('Could not find genes')
-      }
-    } else {
-      throw new Error('Could not find genes')
+    // Extract gene names using the new function
+    let sampleGenes: string[]
+    try {
+      sampleGenes = getSampleGenes(annData)
+      console.log(`Found ${sampleGenes.length} genes`)
+    } catch (error) {
+      throw new Error(`Failed to extract gene names: ${error.message}`)
     }
 
     const totalNumCells = cellNames.length
@@ -376,43 +592,17 @@ async function start(
     // Limit the number of cells to process based on % slider
     cellNames = cellNames.slice(0, (cellRangePercent * cellNames.length) / 100)
 
-    // Setup all the data structures for reading the raw counts data incrementally
-    // including dealing with sparse and inflating the sample gene list into the
-    // model's gene list.
-    let isSparse = false
-    let data: H5DataSet
-    let indices: H5DataSet | null = null
-    let indptr: H5DataSet | null = null
-
-    // Look for raw counts in layers - try common locations
-    let rawCountsData: H5DataSet | H5Group | null = null
-    const layersGroup = annData.get('layers') as H5Group
-
-    if (layersGroup && layersGroup.type === 'Group') {
-      // Try common raw counts locations
-      if (layersGroup.keys().includes('counts')) {
-        rawCountsData = layersGroup.get('counts')
-      } else if (layersGroup.keys().includes('raw_counts')) {
-        rawCountsData = layersGroup.get('raw_counts')
-      }
+    // Extract raw counts using the new function
+    let rawCountsData: RawCountsData
+    try {
+      rawCountsData = getRawCounts(annData)
+      console.log(`Found expression data (sparse: ${rawCountsData.isSparse})`)
+    } catch (error) {
+      throw new Error(`Failed to extract expression data: ${error.message}`)
     }
 
-    if (!rawCountsData) {
-      throw new Error('Could not find raw counts data in layers/counts or layers/raw_counts')
-    }
-
-    if (rawCountsData.type == 'Dataset') {
-      isSparse = false
-      data = rawCountsData as H5DataSet
-    } else if (rawCountsData.type == 'Group') {
-      isSparse = true
-      const countsGroup = rawCountsData as H5Group
-      data = countsGroup.get('data') as H5DataSet
-      indices = countsGroup.get('indices') as H5DataSet
-      indptr = countsGroup.get('indptr') as H5DataSet
-    } else {
-      throw new Error('Could not find raw counts expression data')
-    }
+    // Destructure the raw counts data for use in the rest of the function
+    const { isSparse, data, indices, indptr } = rawCountsData
 
     // const coordinates: number[][] = []
 
@@ -551,7 +741,19 @@ async function start(
       totalNumCells,
     })
   } catch (error) {
-    // FS.unmount("/work");
-    self.postMessage({ type: 'predictionError', error: error })
+    // Try to unmount the file system if it was mounted
+    try {
+      FS.unmount('/work')
+    } catch (unmountError) {
+      console.error('Failed to unmount file system:', unmountError)
+    }
+    
+    // Send error message to main thread
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('Embedder error:', errorMessage)
+    self.postMessage({ 
+      type: 'error', 
+      error: errorMessage 
+    })
   }
 }
