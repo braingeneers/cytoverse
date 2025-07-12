@@ -575,7 +575,7 @@ async function start(
       cellNames = getCellNames(annData)
       console.log(`Found ${cellNames.length} cells`)
     } catch (error) {
-      throw new Error(`Failed to extract cell names: ${error.message}`)
+      throw new Error(`Failed to extract cell names: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     // Extract gene names using the new function
@@ -584,7 +584,7 @@ async function start(
       sampleGenes = getSampleGenes(annData)
       console.log(`Found ${sampleGenes.length} genes`)
     } catch (error) {
-      throw new Error(`Failed to extract gene names: ${error.message}`)
+      throw new Error(`Failed to extract gene names: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     const totalNumCells = cellNames.length
@@ -598,7 +598,7 @@ async function start(
       rawCountsData = getRawCounts(annData)
       console.log(`Found expression data (sparse: ${rawCountsData.isSparse})`)
     } catch (error) {
-      throw new Error(`Failed to extract expression data: ${error.message}`)
+      throw new Error(`Failed to extract expression data: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     // Destructure the raw counts data for use in the rest of the function
