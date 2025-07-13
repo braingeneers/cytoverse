@@ -162,7 +162,7 @@ function App() {
       console.log('Terminating existing labeler worker before creating new one...')
       labelerWorker.terminate()
     }
-    
+
     const embedder = new EmbeddingWorker()
     const labeler = new LabelerWorker()
 
@@ -416,7 +416,7 @@ function App() {
 
   const start = () => {
     console.log('Starting embedding...', selectedFile?.name)
-    
+
     // Clear any existing test data and label counts immediately
     setXTestData([])
     setYTestData([])
@@ -425,7 +425,7 @@ function App() {
     setTotalLabeled(0)
     setTotalNumCells(0)
     setProcessingComplete(false)
-    
+
     // Set progress and running state after clearing data
     setProgress(0)
     setIsRunning(true)
@@ -458,7 +458,7 @@ function App() {
       labelerWorker.terminate()
       setLabelerWorker(null)
     }
-    
+
     // Reset processing state
     setProcessingComplete(false)
     setStatusMessage('Processing stopped')
@@ -730,7 +730,7 @@ function App() {
 
             {/* Status and Progress */}
             <Box sx={{ mt: 2 }}>
-              <Typography>{statusMessage}</Typography>
+              <Typography data-cy="status">{statusMessage}</Typography>
               {isRunning && (
                 <Box my={2}>
                   <LinearProgress variant="determinate" value={progress} />
@@ -952,8 +952,13 @@ function App() {
       </Dialog>
 
       {/* Error Modal */}
-      <Dialog open={errorModalOpen} onClose={() => setErrorModalOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Error Processing File</DialogTitle>
+      <Dialog
+        open={errorModalOpen}
+        onClose={() => setErrorModalOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle data-cy="error-title">Error Processing File</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1 }}>
             <Alert severity="error" sx={{ mb: 2 }}>
