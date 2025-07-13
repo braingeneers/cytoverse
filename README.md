@@ -18,6 +18,24 @@ CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed
 
 This architecture ensures privacy, scalability, and collaborative potential without server dependency.
 
+## Data Flow
+
+```
+35-60k dimension float32 gene expression 'test' vector (batch streamed from h5ad)
+↓
+Embedding ONNX model (SCimilarity)
+↓
+128-1024 dimension float32 embedding vector
+↓
+PQ Encoding ONNX model to 16 byte quantized embedding 
++ 
+UMAP ONNX mapping model to 2d coordinates
+↓
+Approximate Nearest Neighor (ANN) search of an Inverted File System (IVF) via partitions over HTTP
+↓
+List of cells in the training set and associated labels
+```
+
 ## Install
 
 Download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into data/GSE136831_subsample.h5ad

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { createTheme } from '@mui/material/styles'
@@ -60,10 +60,12 @@ function App() {
   const [progress, setProgress] = useState(0)
 
   const [embedderWorker, setEmbedderWorker] = useState<Worker | null>(null)
-  const [labelerWorker, setLabelerWorker] = useState<Worker | null>(null)
+  const [labelerWorkers, setLabelerWorkers] = useState<Worker[]>([])
+  const labelerWorkersRef = useRef<Worker[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [hasWebGPU, setHasWebGPU] = useState(false)
   const [useWebGPU, setUseWebGPU] = useState(false)
+  const [embedFinished, setEmbedFinished] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
   // Scatter plot data state - training data (static)
@@ -82,6 +84,7 @@ function App() {
   // Labeling feedback state - counts of predicted labels
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
+  const [totalProcessed, setTotalProcessed] = useState<number>(0)
   const [totalNumCells, setTotalNumCells] = useState<number>(0)
   const [processingComplete, setProcessingComplete] = useState<boolean>(false)
 
@@ -156,113 +159,85 @@ function App() {
     }
   }
 
-  function createWorkers() {
-    // Terminate any existing workers before creating new ones
-    if (labelerWorker) {
-      console.log('Terminating existing labeler worker before creating new one...')
-      labelerWorker.terminate()
+  // Number of labeler workers to create for parallel processing
+  const numLabelers = 2 // Reduced to 2
+
+  const pendingRef = useRef<any[]>([])
+  const busyRef = useRef<boolean[]>(new Array(numLabelers).fill(false))
+  const sentBatchesRef = useRef(0)
+  const receivedBatchesRef = useRef(0)
+  const pausedRef = useRef(false)
+  const maxPending = numLabelers * 2 // Backpressure threshold
+
+  function tryAssignToLabelers() {
+    while (pendingRef.current.length > 0) {
+      let assigned = false
+      for (let i = 0; i < numLabelers; i++) {
+        if (!busyRef.current[i]) {
+          const batch = pendingRef.current.shift()
+          labelerWorkersRef.current[i].postMessage({
+            type: 'embedding',
+            test_vector_id: batch.test_vector_id,
+            pq_embedding: batch.pq_embedding,
+            umap_coordinates: batch.umap_coordinates,
+          })
+          busyRef.current[i] = true
+          assigned = true
+          break
+        }
+      }
+      if (!assigned) break // All busy, wait for next 'labeled'
     }
 
-    const embedder = new EmbeddingWorker()
-    const labeler = new LabelerWorker()
-
-    setLabelerWorker(labeler)
-
-    // Initialize labeler
-    labeler.postMessage({
-      type: 'start',
-      modelsURL: `${sitePath}/models`,
-      modelID: 'scimilarity',
-    })
-
-    // Handle labeler messages
-    labeler.onmessage = (evt) => {
-      switch (evt.data.type) {
-        case 'status':
-          console.log('Labeler status:', evt.data.message)
-          break
-        case 'labeled':
-          console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
-          console.log('Train vector IDs received:', evt.data.train_vector_id?.length)
-
-          // Process labeling results for feedback tallies and progress
-          if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
-            console.log('Processing labeling results...')
-            const newLabelCounts: { [label: string]: number } = {}
-            const newTestLabels: number[] = []
-            let validLabels = 0
-
-            for (const trainVectorId of evt.data.train_vector_id) {
-              if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-                // Get category index from training data
-                const categoryIndex = categoryData.get(trainVectorId)
-                if (categoryIndex != null && categoryIndex < categoryLabels.length) {
-                  const labelName = categoryLabels[categoryIndex]
-                  newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
-                  newTestLabels.push(categoryIndex)
-                  validLabels++
-                } else {
-                  newTestLabels.push(-1) // Invalid category index
-                }
-              } else {
-                newTestLabels.push(-1) // Invalid train vector ID
-              }
-            }
-
-            // Store test point labels for visualization
-            setTestDataLabels((prev) => [...prev, ...newTestLabels])
-
-            console.log(
-              `Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`
-            )
-
-            // Update label counts
-            setLabelCounts((prev) => {
-              const updated = { ...prev }
-              for (const [label, count] of Object.entries(newLabelCounts)) {
-                updated[label] = (updated[label] || 0) + count
-              }
-              return updated
-            })
-
-            // Update total labeled and progress using callback to get current state
-            setTotalLabeled((prevTotalLabeled) => {
-              const newTotalLabeled = prevTotalLabeled + validLabels
-
-              // Update progress based on labeler results (end of pipeline)
-              // Use callback to get current totalNumCells value
-              setTotalNumCells((currentTotalNumCells) => {
-                console.log(`Progress update: ${newTotalLabeled}/${currentTotalNumCells} labeled`)
-                if (currentTotalNumCells > 0) {
-                  const progressPercent = Math.round((newTotalLabeled / currentTotalNumCells) * 100)
-                  console.log(`Setting progress to ${progressPercent}%`)
-                  setProgress(progressPercent)
-                  setStatusMessage(`Labeled ${newTotalLabeled} of ${currentTotalNumCells} cells...`)
-
-                  // Check if processing is complete
-                  if (newTotalLabeled >= currentTotalNumCells) {
-                    console.log('Processing complete! Setting isRunning to false')
-                    setIsRunning(false)
-                    setProcessingComplete(true)
-                    setStatusMessage(`Processing complete: labeled ${newTotalLabeled} cells`)
-                  }
-                }
-                return currentTotalNumCells // Return unchanged
-              })
-
-              return newTotalLabeled
-            })
-          }
-          break
-        case 'error':
-          console.error('Labeler error:', evt.data.error)
-          setStatusMessage(`Labeling error: ${evt.data.error}`)
-          break
-        default:
-          break
+    // Check if we need to resume embedder
+    if (pausedRef.current && pendingRef.current.length < maxPending / 2) {
+      if (embedderWorker) {
+        embedderWorker.postMessage({ type: 'resume' })
+        pausedRef.current = false
+        console.log('Resumed embedder')
       }
     }
+  }
 
+  function createWorkers() {
+    // Terminate any existing workers before creating new ones
+    if (embedderWorker) {
+      console.log('Terminating existing embedder worker...')
+      embedderWorker.terminate()
+      setEmbedderWorker(null)
+    }
+    labelerWorkers.forEach((worker, idx) => {
+      console.log(`Terminating existing labeler worker ${idx}...`)
+      worker.terminate()
+    })
+    setLabelerWorkers([])
+    labelerWorkersRef.current = []
+
+    const embedder = new EmbeddingWorker()
+
+    // Create multiple labeler workers
+    const newLabelerWorkers: Worker[] = []
+    for (let i = 0; i < numLabelers; i++) {
+      const labeler = new LabelerWorker()
+      newLabelerWorkers.push(labeler)
+
+      // Initialize each labeler
+      labeler.postMessage({
+        type: 'start',
+        modelsURL: `${sitePath}/models`,
+        modelID: 'scimilarity',
+      })
+
+      // Handle messages from each labeler with index
+      const index = i
+      labeler.onmessage = (evt) => handleLabelerMessage(index, evt)
+    }
+
+    setLabelerWorkers(newLabelerWorkers)
+    labelerWorkersRef.current = newLabelerWorkers
+    setEmbedderWorker(embedder)
+
+    // Handle embedder messages
     embedder.onmessage = (evt) => {
       switch (evt.data.type) {
         case 'status':
@@ -274,8 +249,9 @@ function App() {
             console.log('Setting totalNumCells to:', evt.data.totalToProcess)
             setTotalNumCells(evt.data.totalToProcess)
           }
-          // Don't update progress here - wait for labeler results
-          setStatusMessage(evt.data.message)
+          if (!embedFinished) {
+            setStatusMessage(evt.data.message)
+          }
           break
         case 'embedding':
           console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
@@ -304,15 +280,21 @@ function App() {
             console.log('Added', newXPoints.length, 'new test points from embedder')
           }
 
-          // Always route through labeler for cell type prediction
-          console.log('Routing to labeler - test_vector_id count:', evt.data.test_vector_id?.length)
-          console.log('Routing to labeler - pq_embedding size:', evt.data.pq_embedding?.length)
-          labeler.postMessage({
-            type: 'embedding',
+          // Add to pending queue and try to assign
+          pendingRef.current.push({
             test_vector_id: evt.data.test_vector_id,
             pq_embedding: evt.data.pq_embedding,
             umap_coordinates: evt.data.umap_coordinates,
           })
+          sentBatchesRef.current += 1
+          tryAssignToLabelers()
+
+          // Check for backpressure
+          if (!pausedRef.current && pendingRef.current.length >= maxPending) {
+            embedder.postMessage({ type: 'pause' })
+            pausedRef.current = true
+            console.log('Paused embedder due to backpressure')
+          }
           break
         case 'finished':
           // Don't stop running here - wait for labeler to finish processing all cells
@@ -321,6 +303,13 @@ function App() {
               evt.data.totalNumCells
             } cells in ${evt.data.elapsedTime?.toFixed(2)} minutes. Labeling in progress...`
           )
+          setEmbedFinished(true)
+          // Check if all batches processed
+          if (receivedBatchesRef.current === sentBatchesRef.current) {
+            console.log('All processing complete!')
+            setIsRunning(false)
+            setProcessingComplete(true)
+          }
           break
         case 'error':
           console.error('Embedder error:', evt.data.error)
@@ -334,6 +323,99 @@ function App() {
       }
     }
     return embedder
+  }
+
+  // Handler for labeler messages with worker index
+  const handleLabelerMessage = (index: number, evt: MessageEvent) => {
+    switch (evt.data.type) {
+      case 'status':
+        console.log('Labeler status:', evt.data.message)
+        break
+      case 'labeled':
+        console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
+        console.log('Train vector IDs received:', evt.data.train_vector_id?.length)
+
+        receivedBatchesRef.current += 1
+        busyRef.current[index] = false
+        tryAssignToLabelers()
+
+        // Process labeling results for feedback tallies and progress
+        if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
+          console.log('Processing labeling results...')
+          const newLabelCounts: { [label: string]: number } = {}
+          const newTestLabels: number[] = []
+          let validLabels = 0
+
+          for (const trainVectorId of evt.data.train_vector_id) {
+            let categoryIndex = -1
+            if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+              // Get category index from training data
+              categoryIndex = categoryData.get(trainVectorId) ?? -1
+              if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
+                const labelName = categoryLabels[categoryIndex]
+                newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
+                validLabels++
+              }
+            }
+            newTestLabels.push(categoryIndex)
+          }
+
+          // Store test point labels for visualization
+          setTestDataLabels((prev) => [...prev, ...newTestLabels])
+
+          console.log(
+            `Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`
+          )
+
+          // Update label counts
+          setLabelCounts((prev) => {
+            const updated = { ...prev }
+            for (const [label, count] of Object.entries(newLabelCounts)) {
+              updated[label] = (updated[label] || 0) + count
+            }
+            return updated
+          })
+
+          // Update total labeled and processed
+          setTotalLabeled((prevLabeled) => prevLabeled + validLabels)
+          setTotalProcessed((prevProcessed) => {
+            const newTotalProcessed = prevProcessed + evt.data.train_vector_id.length
+
+            // Update progress
+            if (totalNumCells > 0) {
+              const progressPercent = Math.min(
+                100,
+                Math.round((newTotalProcessed / totalNumCells) * 100)
+              )
+              setProgress(progressPercent)
+              setStatusMessage(`Processed ${newTotalProcessed} of ${totalNumCells} cells...`)
+            }
+
+            // Check if complete
+            if (
+              newTotalProcessed >= totalNumCells &&
+              embedFinished &&
+              receivedBatchesRef.current === sentBatchesRef.current
+            ) {
+              console.log('Processing complete! Setting isRunning to false')
+              setIsRunning(false)
+              setProcessingComplete(true)
+              setStatusMessage(`Processing complete: processed ${newTotalProcessed} cells`)
+            }
+
+            return newTotalProcessed
+          })
+        }
+        break
+      case 'error':
+        console.error('Labeler error:', evt.data.error)
+        setStatusMessage(`Labeling error: ${evt.data.error}`)
+        busyRef.current[index] = false
+        tryAssignToLabelers()
+        break
+      default:
+        break
+    }
   }
 
   const sitePath =
@@ -423,15 +505,21 @@ function App() {
     setTestDataLabels([])
     setLabelCounts({})
     setTotalLabeled(0)
+    setTotalProcessed(0)
     setTotalNumCells(0)
     setProcessingComplete(false)
+    setEmbedFinished(false)
+    pendingRef.current = []
+    busyRef.current = new Array(numLabelers).fill(false)
+    sentBatchesRef.current = 0
+    receivedBatchesRef.current = 0
+    pausedRef.current = false
 
     // Set progress and running state after clearing data
     setProgress(0)
     setIsRunning(true)
 
     const embedder = createWorkers()
-    setEmbedderWorker(embedder)
     embedder.postMessage({
       type: 'start',
       modelsURL: `${sitePath}/models`,
@@ -453,11 +541,12 @@ function App() {
       embedderWorker.terminate()
       setEmbedderWorker(null)
     }
-    if (labelerWorker) {
-      console.log('Terminating labeler worker...')
-      labelerWorker.terminate()
-      setLabelerWorker(null)
-    }
+    labelerWorkers.forEach((worker, idx) => {
+      console.log(`Terminating labeler worker ${idx}...`)
+      worker.terminate()
+    })
+    setLabelerWorkers([])
+    labelerWorkersRef.current = []
 
     // Reset processing state
     setProcessingComplete(false)
@@ -488,17 +577,16 @@ function App() {
       if (embedderWorker) {
         console.log('Terminating embedder worker...')
         embedderWorker.terminate()
-        setEmbedderWorker(null)
         console.log('Embedder worker terminated')
       }
-      if (labelerWorker) {
-        console.log('Terminating labeler worker...')
-        labelerWorker.terminate()
-        setLabelerWorker(null)
-        console.log('Labeler worker terminated')
-      }
+      labelerWorkers.forEach((worker, idx) => {
+        console.log(`Terminating labeler worker ${idx}...`)
+        worker.terminate()
+      })
+      labelerWorkersRef.current = []
+      console.log('Labeler workers terminated')
     }
-  }, [embedderWorker, labelerWorker])
+  }, [])
 
   return (
     <ThemeProvider theme={theme}>
@@ -780,7 +868,7 @@ function App() {
                   <ShareIcon />
                 </IconButton>
               </Box>
-              {totalLabeled > 0 ? (
+              {totalProcessed > 0 ? (
                 <Box>
                   <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
                     Total Labeled: {totalLabeled.toLocaleString()}
