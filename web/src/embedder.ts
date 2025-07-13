@@ -667,8 +667,7 @@ async function start(
 
     const inflationIndices = precomputeInflationIndices(model.genes, sampleGenes)
 
-    const startTime = Date.now() // Record start time
-
+  
     // Initialize double buffers of batches
     const buffers: Buffer[] = [
       {
@@ -781,15 +780,11 @@ async function start(
     annData.close()
     FS.unmount('/work')
 
-    // Record end time and calculate elapsed time of prediction only
-    const endTime = Date.now() // Record end time
-    const elapsedTime = (endTime - startTime) / 60000 // Calculate elapsed time in minutes
 
     // Let the main thread know we're done and results are ready in IndexDB
     self.postMessage({
       type: 'finished',
       datasetLabel: h5File.name,
-      elapsedTime,
       totalProcessed: cellNames.length,
       totalNumCells,
     })

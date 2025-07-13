@@ -83,6 +83,10 @@ function App() {
   // Total number of cells to process
   const totalNumCells = useRef(0)
   const totalProcessed = useRef(0)
+  
+  // Elapsed time tracking
+  const startTime = useRef<number | null>(null)
+  const [elapsedTime, setElapsedTime] = useState<number>(0)
 
   // Labeling feedback state - counts of predicted labels
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
@@ -298,6 +302,12 @@ function App() {
           break
         case 'finished':
           console.log('Embedder finished processing')
+          // Calculate final elapsed time when embedder finishes if not already done
+          if (startTime.current && isRunning) {
+            const endTime = Date.now()
+            const totalElapsed = Math.round((endTime - startTime.current) / 1000) // in seconds
+            setElapsedTime(totalElapsed)
+          }
           break
         case 'error':
           console.error('Embedder error:', evt.data.error)
@@ -381,7 +391,21 @@ function App() {
             console.log('Processing complete! Setting isRunning to false')
             setIsRunning(false)
             setProcessingComplete(true)
-            setStatusMessage('Processing complete')
+            
+            // Calculate final elapsed time
+            if (startTime.current) {
+              const endTime = Date.now()
+              const totalElapsed = Math.round((endTime - startTime.current) / 1000) // in seconds
+              setElapsedTime(totalElapsed)
+              
+              // Format the status message with cells labeled and time
+              const minutes = Math.floor(totalElapsed / 60)
+              const seconds = totalElapsed % 60
+              const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+              setStatusMessage(`Labeled ${totalProcessed.current.toLocaleString()} cells in ${timeStr}`)
+            } else {
+              setStatusMessage('Processing complete')
+            }
           }
         }
         break
@@ -492,6 +516,10 @@ function App() {
     receivedBatchesRef.current = 0
     pausedRef.current = false
 
+    // Start time tracking
+    startTime.current = Date.now()
+    setElapsedTime(0)
+
     // Set progress and running state after clearing data
     setProgress(0)
     setIsRunning(true)
@@ -511,6 +539,19 @@ function App() {
     setStatusMessage('Stopping processing...')
     setIsRunning(false)
     setProgress(0)
+    
+    // Calculate elapsed time when stopped
+    if (startTime.current) {
+      const endTime = Date.now()
+      const totalElapsed = Math.round((endTime - startTime.current) / 1000) // in seconds
+      setElapsedTime(totalElapsed)
+      
+      // Format the status message with cells labeled and time
+      const minutes = Math.floor(totalElapsed / 60)
+      const seconds = totalElapsed % 60
+      const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+      setStatusMessage(`Stopped - Labeled ${totalProcessed.current.toLocaleString()} cells in ${timeStr}`)
+    }
 
     // Terminate workers and clear their state
     if (embedderWorker) {
