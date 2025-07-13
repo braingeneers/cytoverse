@@ -8,10 +8,10 @@
       "name": "ingest h5ad from s3",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/ingest_h5ad_from_s3.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ingest_h5ad_as_reference.py",
       "console": "integratedTerminal",
       "args": [
-        "s3://braingeneersdev/jgf/sspsygene/alldataresults/integrated_data.h5ad",
+        "data/allen-celltypes+human-cortex+m1.h5ad",
         "${workspaceFolder}/web/public/models/brain",
         "--max-cells",
         "2"
