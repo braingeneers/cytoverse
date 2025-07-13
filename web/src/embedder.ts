@@ -245,7 +245,7 @@ function getCellNames(annData: H5File): string[] {
   }
 
   const obs = annData.get('obs')
-  
+
   // Case 1: obs is a Dataset (structured array)
   if (obs.type === 'Dataset') {
     try {
@@ -254,15 +254,15 @@ function getCellNames(annData: H5File): string[] {
       throw new Error('Unable to extract cell names from obs Dataset')
     }
   }
-  
+
   // Case 2: obs is a Group
   if (obs.type === 'Group') {
     const obsGroup = obs as H5Group
     const obsKeys = obsGroup.keys()
-    
+
     // Try common locations for cell names/barcodes
     const indexKeys = ['index', '_index', 'barcodes', '_barcodes', 'cell_id', 'cell_name']
-    
+
     for (const key of indexKeys) {
       if (obsKeys.includes(key)) {
         try {
@@ -272,10 +272,10 @@ function getCellNames(annData: H5File): string[] {
         }
       }
     }
-    
+
     throw new Error(`Unable to find cell names in obs group. Available keys: ${obsKeys.join(', ')}`)
   }
-  
+
   throw new Error('Unable to find cell names: obs is neither Dataset nor Group')
 }
 
@@ -286,7 +286,7 @@ function getCellNames(annData: H5File): string[] {
  */
 function validateGeneSymbols(geneArray: string[]): boolean {
   const knownGenes = ['TP53', 'BRCA1']
-  return knownGenes.some(gene => geneArray.includes(gene))
+  return knownGenes.some((gene) => geneArray.includes(gene))
 }
 
 /**
@@ -302,7 +302,7 @@ function getSampleGenes(annData: H5File): string[] {
   }
 
   const varData = annData.get('var')
-  
+
   // Case 1: var is a Dataset (structured array)
   if (varData.type === 'Dataset') {
     try {
@@ -311,24 +311,34 @@ function getSampleGenes(annData: H5File): string[] {
       throw new Error('Unable to extract gene names from var Dataset')
     }
   }
-  
+
   // Case 2: var is a Group
   if (varData.type === 'Group') {
     const varGroup = varData as H5Group
     const varKeys = varGroup.keys()
-    
+
     // Try common locations for gene names in order of preference
     // symbol/gene_symbol is preferred over index as it contains gene names rather than IDs
     const geneKeys = [
-      'symbol', 'gene_symbol', 'gene_symbols', 'gene_name', 'gene_names',
-      'feature_name', 'features', 'index', '_index', 'gene_id', 'gene_ids'
+      'symbol',
+      'gene_symbol',
+      'gene_symbols',
+      'gene_name',
+      'gene_names',
+      'feature_name',
+      'features',
+      'index',
+      '_index',
+      'gene_id',
+      'gene_ids',
     ]
-    
+
     for (const key of geneKeys) {
       if (varKeys.includes(key)) {
         try {
           const genes = (varGroup.get(key) as H5DataSet).value
           if (validateGeneSymbols(genes)) {
+            console.log(`Found gene names in var/${key}`)
             return genes
           }
         } catch (e) {
@@ -336,7 +346,7 @@ function getSampleGenes(annData: H5File): string[] {
         }
       }
     }
-    
+
     // Fallback: Check if there's an index in the var group that might contain gene names
     if (varKeys.length > 0) {
       try {
@@ -344,16 +354,17 @@ function getSampleGenes(annData: H5File): string[] {
         const firstKey = varKeys[0]
         const potentialGenes = (varGroup.get(firstKey) as H5DataSet).value
         if (Array.isArray(potentialGenes) && validateGeneSymbols(potentialGenes)) {
+          console.warn('Falling back to using var index as gene names')
           return potentialGenes
         }
       } catch (e) {
         console.warn('Failed to read potential gene names from first available var key')
       }
     }
-    
+
     throw new Error(`Unable to find gene names in var group. Available keys: ${varKeys.join(', ')}`)
   }
-  
+
   throw new Error('Unable to find gene names: var is neither Dataset nor Group')
 }
 
@@ -365,42 +376,47 @@ function getSampleGenes(annData: H5File): string[] {
  */
 function getRawCounts(annData: H5File): RawCountsData {
   const topLevelKeys = annData.keys()
-  
+
   // Strategy 1: Check layers for raw counts (most common location)
   if (topLevelKeys.includes('layers')) {
     const layers = annData.get('layers')
     if (layers.type === 'Group') {
       const layersGroup = layers as H5Group
       const layerKeys = layersGroup.keys()
-      
+
       // Try common raw count layer names
       const rawCountKeys = ['counts', 'raw_counts', 'raw', 'count', 'spliced', 'unspliced']
-      
+
       for (const key of rawCountKeys) {
         if (layerKeys.includes(key)) {
+          console.log(`Found raw counts in layers/${key}`)
           const countsData = layersGroup.get(key)
-          
+
           // Handle dense matrix
           if (countsData.type === 'Dataset') {
             return {
               isSparse: false,
               data: countsData as H5DataSet,
               indices: null,
-              indptr: null
+              indptr: null,
             }
           }
-          
+
           // Handle sparse matrix
           if (countsData.type === 'Group') {
             const sparseGroup = countsData as H5Group
             const sparseKeys = sparseGroup.keys()
-            
-            if (sparseKeys.includes('data') && sparseKeys.includes('indices') && sparseKeys.includes('indptr')) {
+
+            if (
+              sparseKeys.includes('data') &&
+              sparseKeys.includes('indices') &&
+              sparseKeys.includes('indptr')
+            ) {
               return {
                 isSparse: true,
                 data: sparseGroup.get('data') as H5DataSet,
                 indices: sparseGroup.get('indices') as H5DataSet,
-                indptr: sparseGroup.get('indptr') as H5DataSet
+                indptr: sparseGroup.get('indptr') as H5DataSet,
               }
             }
           }
@@ -408,7 +424,7 @@ function getRawCounts(annData: H5File): RawCountsData {
       }
     }
   }
-  
+
   // Strategy 2: Check raw attribute (older format)
   if (topLevelKeys.includes('raw')) {
     const raw = annData.get('raw')
@@ -416,71 +432,79 @@ function getRawCounts(annData: H5File): RawCountsData {
       const rawGroup = raw as H5Group
       if (rawGroup.keys().includes('X')) {
         const rawX = rawGroup.get('X')
-        
+
         // Handle dense matrix
         if (rawX.type === 'Dataset') {
           return {
             isSparse: false,
             data: rawX as H5DataSet,
             indices: null,
-            indptr: null
+            indptr: null,
           }
         }
-        
+
         // Handle sparse matrix
         if (rawX.type === 'Group') {
           const sparseGroup = rawX as H5Group
           const sparseKeys = sparseGroup.keys()
-          
-          if (sparseKeys.includes('data') && sparseKeys.includes('indices') && sparseKeys.includes('indptr')) {
+
+          if (
+            sparseKeys.includes('data') &&
+            sparseKeys.includes('indices') &&
+            sparseKeys.includes('indptr')
+          ) {
             return {
               isSparse: true,
               data: sparseGroup.get('data') as H5DataSet,
               indices: sparseGroup.get('indices') as H5DataSet,
-              indptr: sparseGroup.get('indptr') as H5DataSet
+              indptr: sparseGroup.get('indptr') as H5DataSet,
             }
           }
         }
       }
     }
   }
-  
+
   // Strategy 3: Use main X matrix as last resort (might be normalized)
   if (topLevelKeys.includes('X')) {
     console.warn('Using main X matrix - this may contain normalized data instead of raw counts')
     const X = annData.get('X')
-    
+
     // Handle dense matrix
     if (X.type === 'Dataset') {
       return {
         isSparse: false,
         data: X as H5DataSet,
         indices: null,
-        indptr: null
+        indptr: null,
       }
     }
-    
+
     // Handle sparse matrix
     if (X.type === 'Group') {
       const sparseGroup = X as H5Group
       const sparseKeys = sparseGroup.keys()
-      
-      if (sparseKeys.includes('data') && sparseKeys.includes('indices') && sparseKeys.includes('indptr')) {
+
+      if (
+        sparseKeys.includes('data') &&
+        sparseKeys.includes('indices') &&
+        sparseKeys.includes('indptr')
+      ) {
         return {
           isSparse: true,
           data: sparseGroup.get('data') as H5DataSet,
           indices: sparseGroup.get('indices') as H5DataSet,
-          indptr: sparseGroup.get('indptr') as H5DataSet
+          indptr: sparseGroup.get('indptr') as H5DataSet,
         }
       }
     }
   }
-  
+
   // If we get here, we couldn't find any expression data
   const availableKeys = topLevelKeys.join(', ')
   throw new Error(
     `Unable to find raw counts data. Looked in: layers/counts, layers/raw_counts, raw/X, and X. ` +
-    `Available top-level keys in h5ad file: ${availableKeys}`
+      `Available top-level keys in h5ad file: ${availableKeys}`
   )
 }
 
@@ -602,7 +626,9 @@ async function start(
       cellNames = getCellNames(annData)
       console.log(`Found ${cellNames.length} cells`)
     } catch (error) {
-      throw new Error(`Failed to extract cell names: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(
+        `Failed to extract cell names: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
 
     // Extract gene names using the new function
@@ -611,7 +637,9 @@ async function start(
       sampleGenes = getSampleGenes(annData)
       console.log(`Found ${sampleGenes.length} genes`)
     } catch (error) {
-      throw new Error(`Failed to extract gene names: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(
+        `Failed to extract gene names: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
 
     const totalNumCells = cellNames.length
@@ -625,7 +653,11 @@ async function start(
       rawCountsData = getRawCounts(annData)
       console.log(`Found expression data (sparse: ${rawCountsData.isSparse})`)
     } catch (error) {
-      throw new Error(`Failed to extract expression data: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(
+        `Failed to extract expression data: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
     }
 
     // Destructure the raw counts data for use in the rest of the function
@@ -774,13 +806,13 @@ async function start(
     } catch (unmountError) {
       console.error('Failed to unmount file system:', unmountError)
     }
-    
+
     // Send error message to main thread
     const errorMessage = error instanceof Error ? error.message : String(error)
     console.error('Embedder error:', errorMessage)
-    self.postMessage({ 
-      type: 'error', 
-      error: errorMessage 
+    self.postMessage({
+      type: 'error',
+      error: errorMessage,
     })
   }
 }
