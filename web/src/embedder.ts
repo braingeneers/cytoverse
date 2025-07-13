@@ -76,8 +76,8 @@ interface MappingOutput {
 // Dictionary with various model information (id, genes, session)
 let model = null as ModelInfo | null
 
-// Number of threads to use for inference. Use all but one for the GUI to run in
-const numThreads = navigator.hardwareConcurrency - 1
+// Number of threads to use for inference. Leave some for the labeler...
+const numThreads = Math.floor(navigator.hardwareConcurrency / 3)
 
 // Tuned batch size - if I/O, pre-processing and inflation is fast relative to
 // the model inference then increase the batch size so that inference is never
@@ -85,7 +85,7 @@ const numThreads = navigator.hardwareConcurrency - 1
 // reduce the batch size so that inference can be parallelized across more
 // threads. The ONNX model supports variable size batches which plays into
 // this as well.
-const batchSize = 2 * numThreads
+const batchSize = 64
 
 console.log(`Number of threads: ${numThreads}`)
 console.log(`Batch size: ${batchSize}`)
@@ -150,7 +150,7 @@ async function instantiateModel(
 
     // Send progress update to the main thread
     self.postMessage({
-      type: 'progress',
+      type: 'modelDownloadProgress',
       message: 'Downloading model...',
       countFinished: loadedBytes,
       totalToProcess: totalBytes,
@@ -770,12 +770,6 @@ async function start(
         test_vector_id: testVectorIds,
         pq_embedding: pqCodes,
         umap_coordinates: coordinates,
-      })
-
-      self.postMessage({
-        type: 'progress',
-        message: `Embedded and mapped ${cellNames.length} out of ${totalNumCells}...`,
-        countFinished: nextStart,
         totalToProcess: cellNames.length,
       })
 

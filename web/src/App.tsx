@@ -65,7 +65,6 @@ function App() {
   const [isRunning, setIsRunning] = useState(false)
   const [hasWebGPU, setHasWebGPU] = useState(false)
   const [useWebGPU, setUseWebGPU] = useState(false)
-  const [embedFinished, setEmbedFinished] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
   // Scatter plot data state - training data (static)
@@ -81,11 +80,14 @@ function App() {
   const [yTestData, setYTestData] = useState<number[]>([])
   const [testDataLabels, setTestDataLabels] = useState<number[]>([])
 
+  // Total number of cells to process
+  const totalNumCells = useRef(0)
+  const totalProcessed = useRef(0)
+
   // Labeling feedback state - counts of predicted labels
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
-  const [totalProcessed, setTotalProcessed] = useState<number>(0)
-  const [totalNumCells, setTotalNumCells] = useState<number>(0)
+
   const [processingComplete, setProcessingComplete] = useState<boolean>(false)
 
   // Share modal state
@@ -160,7 +162,7 @@ function App() {
   }
 
   // Number of labeler workers to create for parallel processing
-  const numLabelers = 2 // Reduced to 2
+  const numLabelers = Math.floor(navigator.hardwareConcurrency / 3)
 
   const pendingRef = useRef<any[]>([])
   const busyRef = useRef<boolean[]>(new Array(numLabelers).fill(false))
@@ -243,18 +245,16 @@ function App() {
         case 'status':
           setStatusMessage(evt.data.message)
           break
-        case 'progress':
-          // Capture total number of cells from embedder
-          if (evt.data.totalToProcess && totalNumCells === 0) {
-            console.log('Setting totalNumCells to:', evt.data.totalToProcess)
-            setTotalNumCells(evt.data.totalToProcess)
-          }
-          if (!embedFinished) {
-            setStatusMessage(evt.data.message)
-          }
+        case 'modelDownloadProgress':
+          setProgress(
+            Math.min(100, Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
+          )
+          setStatusMessage('Downloading model...')
           break
         case 'embedding':
           console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
+          totalNumCells.current = evt.data.totalToProcess
+          console.log('Total cells to process:', totalNumCells.current)
 
           // Plot coordinates immediately when received from embedder
           if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
@@ -297,19 +297,7 @@ function App() {
           }
           break
         case 'finished':
-          // Don't stop running here - wait for labeler to finish processing all cells
-          setStatusMessage(
-            `Embedder finished: processed ${evt.data.totalProcessed} of ${
-              evt.data.totalNumCells
-            } cells in ${evt.data.elapsedTime?.toFixed(2)} minutes. Labeling in progress...`
-          )
-          setEmbedFinished(true)
-          // Check if all batches processed
-          if (receivedBatchesRef.current === sentBatchesRef.current) {
-            console.log('All processing complete!')
-            setIsRunning(false)
-            setProcessingComplete(true)
-          }
+          console.log('Embedder finished processing')
           break
         case 'error':
           console.error('Embedder error:', evt.data.error)
@@ -378,33 +366,23 @@ function App() {
 
           // Update total labeled and processed
           setTotalLabeled((prevLabeled) => prevLabeled + validLabels)
-          setTotalProcessed((prevProcessed) => {
-            const newTotalProcessed = prevProcessed + evt.data.train_vector_id.length
+          totalProcessed.current += validLabels
 
-            // Update progress
-            if (totalNumCells > 0) {
-              const progressPercent = Math.min(
-                100,
-                Math.round((newTotalProcessed / totalNumCells) * 100)
-              )
-              setProgress(progressPercent)
-              setStatusMessage(`Processed ${newTotalProcessed} of ${totalNumCells} cells...`)
-            }
+          const progressPercent = Math.min(
+            100,
+            Math.round((totalProcessed.current / totalNumCells.current) * 100)
+          )
+          setProgress(progressPercent)
+          setStatusMessage(
+            `Processed ${totalProcessed.current} of ${totalNumCells.current} cells...`
+          )
 
-            // Check if complete
-            if (
-              newTotalProcessed >= totalNumCells &&
-              embedFinished &&
-              receivedBatchesRef.current === sentBatchesRef.current
-            ) {
-              console.log('Processing complete! Setting isRunning to false')
-              setIsRunning(false)
-              setProcessingComplete(true)
-              setStatusMessage(`Processing complete: processed ${newTotalProcessed} cells`)
-            }
-
-            return newTotalProcessed
-          })
+          if (totalProcessed.current == totalNumCells.current) {
+            console.log('Processing complete! Setting isRunning to false')
+            setIsRunning(false)
+            setProcessingComplete(true)
+            setStatusMessage('Processing complete')
+          }
         }
         break
       case 'error':
@@ -505,10 +483,9 @@ function App() {
     setTestDataLabels([])
     setLabelCounts({})
     setTotalLabeled(0)
-    setTotalProcessed(0)
-    setTotalNumCells(0)
+    totalNumCells.current = 0
+    totalProcessed.current = 0
     setProcessingComplete(false)
-    setEmbedFinished(false)
     pendingRef.current = []
     busyRef.current = new Array(numLabelers).fill(false)
     sentBatchesRef.current = 0
@@ -868,7 +845,7 @@ function App() {
                   <ShareIcon />
                 </IconButton>
               </Box>
-              {totalProcessed > 0 ? (
+              {totalLabeled > 0 ? (
                 <Box>
                   <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
                     Total Labeled: {totalLabeled.toLocaleString()}
@@ -881,8 +858,8 @@ function App() {
                       '&::-webkit-scrollbar': {
                         display: 'none',
                       },
-                      '-ms-overflow-style': 'none',
-                      'scrollbar-width': 'none',
+                      msOverflowStyle: 'none',
+                      scrollbarWidth: 'none',
                     }}
                   >
                     {Object.entries(labelCounts)
