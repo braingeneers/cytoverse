@@ -7,6 +7,16 @@ reset:
 	rm data/scimilarity/*.*
 	rm -rf web/public/models/scimilarity
 
+# Brain
+brain-embeddings:
+	python src/cytoverse/scripts/ingest_h5ad_as_reference.py \
+	data/integrated_data_10k.h5ad \
+	data/scimilarity/model_v1.1 \
+	data/brain \
+	--labels CellType \
+	--labels tissue_type \
+	--max-cells 10
+
 # SCimilarity
 scimilarity-model:
 	python src/cytoverse/scripts/scimilarity_export_model.py \
