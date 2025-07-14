@@ -609,7 +609,7 @@ async function start(
     // Load the h5ad file mapping it to the /work directory so we can read
     // it with h5wasm incrementally to support unlimited file sizes
     // We also figure out the list of genes in the sample and the list of cell names
-    self.postMessage({ type: 'status', message: 'Loading file' })
+    self.postMessage({ type: 'status', message: 'Loading file...' })
     if (!FS.analyzePath('/work').exists) {
       FS.mkdir('/work')
     }
@@ -667,7 +667,6 @@ async function start(
 
     const inflationIndices = precomputeInflationIndices(model.genes, sampleGenes)
 
-  
     // Initialize double buffers of batches
     const buffers: Buffer[] = [
       {
@@ -680,6 +679,8 @@ async function start(
       },
     ]
     let activeBuffer = 0
+
+    self.postMessage({ type: 'status', message: 'Embedding cells...' })
 
     // Fill the first buffer to kickstart the process whereby while prediction runs
     // on the first buffer, the second buffer is filled with
@@ -779,7 +780,6 @@ async function start(
     // All done so unmount the h5 file from the browsers file system
     annData.close()
     FS.unmount('/work')
-
 
     // Let the main thread know we're done and results are ready in IndexDB
     self.postMessage({
