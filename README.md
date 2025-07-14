@@ -27,8 +27,8 @@ Embedding ONNX model (SCimilarity)
 ↓
 128-1024 dimension float32 embedding vector
 ↓
-PQ Encoding ONNX model to 16 byte quantized embedding 
-+ 
+PQ Encoding ONNX model to 16 byte quantized embedding
++
 UMAP ONNX mapping model to 2d coordinates
 ↓
 Approximate Nearest Neighor (ANN) search of an Inverted File System (IVF) via partitions over HTTP
@@ -51,7 +51,7 @@ uv sync
 Export SCimilarity embeddings and labels, train a parametric umap model on a stratified subset of cells, train IVFPQ, populate partitions and export models to ONNX:
 
 ```
-make scimilarity pumap ivfpq
+make scimilarity
 ```
 
 Verify that web/public/models/scimilarity is populated (~900MB Total):

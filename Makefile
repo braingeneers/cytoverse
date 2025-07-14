@@ -1,17 +1,22 @@
+# Default to scimilarity model and reference dataaset
+export model_id=scimilarity
+
 test:
 	python -m pytest tests/ -v
 
-all: scimilarity pumap ivfpq
+# Populate model artifacts for the selected model to web/public/models/<model_id>
+notice:
+	@echo "⚙️ Populating $(model_id)"
+	@echo "- Embeddings & metadata to data/$(model_id)"
+	@echo "- Web Artificats to web/public/models/$(model_id)"
 
-reset:
-	rm data/scimilarity/*.*
-	rm -rf web/public/models/scimilarity
+brain: model_id=brain
+brain: notice brain-embeddings embedding-model pumap ivfpq
 
-model:
-	python src/cytoverse/scripts/scimilarity_export_model.py \
-	data/scimilarity/model_v1.1 \
-	web/public/models/$(model_id)/embedding
+scimilarity: model_id=scimilarity
+scimilarity: notice scimilarity-embeddings embedding-model pumap ivfpq
 
+# Embeddings
 scimilarity-embeddings:
 	python src/cytoverse/scripts/scimilarity_export_embeddings.py \
 	data/scimilarity/model_v1.1/cellsearch \
@@ -21,13 +26,6 @@ scimilarity-embeddings:
 	--labels author_label \
 	--labels study \
 	--validate
-	parquet-tools inspect data/scimilarity/labels.parquet
-
-# Brain
-pull-brain-embeddings:
-	rsync -avh \
-	rcurrie@hgwdev.gi.ucsc.edu:/scratch/rcurrie/cytoverse/brain/ \
-	data/brain/
 
 brain-embeddings:
 	python src/cytoverse/scripts/ingest_h5ad_as_reference.py \
@@ -36,7 +34,13 @@ brain-embeddings:
 	data/brain \
 	--labels CellType \
 	--labels tissue_type \
-	--max-cells 10
+	--validate
+
+# Embedding Model
+embedding-model:
+	python src/cytoverse/scripts/scimilarity_export_model.py \
+	data/scimilarity/model_v1.1 \
+	web/public/models/$(model_id)/embedding
 
 # PUMAP
 pumap-train:
