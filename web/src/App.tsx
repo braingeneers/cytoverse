@@ -22,6 +22,9 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  Select,
+  MenuItem,
+  InputLabel,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import GitHubIcon from '@mui/icons-material/GitHub'
@@ -58,6 +61,8 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [progress, setProgress] = useState(0)
+  // const [selectedModel, setSelectedModel] = useState<string>('scimilarity')
+  const [selectedModel, setSelectedModel] = useState<string>('brain')
 
   const [embedderWorker, setEmbedderWorker] = useState<Worker | null>(null)
   const [labelerWorkers, setLabelerWorkers] = useState<Worker[]>([])
@@ -73,7 +78,8 @@ function App() {
   const [categoryData, setCategoryData] = useState<Vector | null>(null)
   const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>('prediction') // TODO: Add category selector UI
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [availableCategories, setAvailableCategories] = useState<string[]>([])
 
   // Test data state - incremental mappings
   const [xTestData, setXTestData] = useState<number[]>([])
@@ -165,8 +171,10 @@ function App() {
   }
 
   // Number of labeler workers to create for parallel processing
-  const numLabelers = Math.floor(navigator.hardwareConcurrency / 3)
+  const numLabelers = Math.max(1, Math.floor(navigator.hardwareConcurrency / 3))
+  console.log(`Creating ${numLabelers} labeler workers (${navigator.hardwareConcurrency} cores available)`)
 
+  // Product/consumer management for embedding and labeling
   const pendingRef = useRef<any[]>([])
   const busyRef = useRef<boolean[]>(new Array(numLabelers).fill(false))
   const sentBatchesRef = useRef(0)
@@ -175,11 +183,29 @@ function App() {
   const maxPending = numLabelers * 2 // Backpressure threshold
 
   function tryAssignToLabelers() {
+    // Safety check to ensure labeler workers are initialized
+    if (!labelerWorkersRef.current || labelerWorkersRef.current.length === 0) {
+      console.log('No labeler workers available')
+      return
+    }
+
+    console.log(`tryAssignToLabelers: ${pendingRef.current.length} pending, busyRef:`, busyRef.current)
+    console.log('Labeler workers available:', labelerWorkersRef.current.length)
+
     while (pendingRef.current.length > 0) {
       let assigned = false
       for (let i = 0; i < numLabelers; i++) {
-        if (!busyRef.current[i]) {
+        console.log(`Checking labeler ${i}: busy=${busyRef.current[i]}, exists=${!!labelerWorkersRef.current[i]}`)
+        if (!busyRef.current[i] && labelerWorkersRef.current[i]) {
           const batch = pendingRef.current.shift()
+          console.log(`Assigning batch to labeler ${i}:`, batch)
+          
+          // Ensure we have valid data before sending
+          if (!batch || !batch.test_vector_id || !batch.pq_embedding) {
+            console.error('Invalid batch data:', batch)
+            continue
+          }
+          
           labelerWorkersRef.current[i].postMessage({
             type: 'embedding',
             test_vector_id: batch.test_vector_id,
@@ -191,7 +217,10 @@ function App() {
           break
         }
       }
-      if (!assigned) break // All busy, wait for next 'labeled'
+      if (!assigned) {
+        console.log('No available labelers, waiting...')
+        break // All busy, wait for next 'labeled'
+      }
     }
 
     // Check if we need to resume embedder
@@ -227,19 +256,25 @@ function App() {
       newLabelerWorkers.push(labeler)
 
       // Initialize each labeler
+      console.log(
+        `Initializing labeler ${i} with modelID: ${selectedModel}, modelsURL: ${sitePath}/models`
+      )
       labeler.postMessage({
         type: 'start',
         modelsURL: `${sitePath}/models`,
-        modelID: 'scimilarity',
+        modelID: selectedModel,
       })
+      // Mark labeler as busy until it's initialized
+      busyRef.current[i] = true
 
       // Handle messages from each labeler with index
       const index = i
       labeler.onmessage = (evt) => handleLabelerMessage(index, evt)
     }
 
-    setLabelerWorkers(newLabelerWorkers)
+    // Set the ref immediately to ensure it's available for embedder messages
     labelerWorkersRef.current = newLabelerWorkers
+    setLabelerWorkers(newLabelerWorkers)
     setEmbedderWorker(embedder)
 
     // Handle embedder messages
@@ -254,7 +289,7 @@ function App() {
           )
           setStatusMessage('Downloading model...')
           break
-        case 'embedding':
+        case 'embedding': {
           console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
           totalNumCells.current = evt.data.totalToProcess
           console.log('Total cells to process:', totalNumCells.current)
@@ -284,11 +319,18 @@ function App() {
           }
 
           // Add to pending queue and try to assign
-          pendingRef.current.push({
+          const batch = {
             test_vector_id: evt.data.test_vector_id,
             pq_embedding: evt.data.pq_embedding,
             umap_coordinates: evt.data.umap_coordinates,
+          }
+          console.log('Adding batch to pending queue:', {
+            test_vector_id_length: batch.test_vector_id?.length,
+            pq_embedding_length: batch.pq_embedding?.length,
+            umap_coordinates_length: batch.umap_coordinates?.length,
+            hasData: !!(batch.test_vector_id && batch.pq_embedding && batch.umap_coordinates)
           })
+          pendingRef.current.push(batch)
           sentBatchesRef.current += 1
           tryAssignToLabelers()
 
@@ -299,6 +341,7 @@ function App() {
             console.log('Paused embedder due to backpressure')
           }
           break
+        }
         case 'finished':
           console.log('Embedder finished processing')
           break
@@ -320,7 +363,13 @@ function App() {
   const handleLabelerMessage = (index: number, evt: MessageEvent) => {
     switch (evt.data.type) {
       case 'status':
-        console.log('Labeler status:', evt.data.message)
+        console.log(`Labeler ${index} status:`, evt.data.message)
+        // If this is an initialization complete message, mark as not busy
+        if (evt.data.message && evt.data.message.includes('initialized successfully')) {
+          busyRef.current[index] = false
+          console.log(`Labeler ${index} is ready`)
+          tryAssignToLabelers()
+        }
         break
       case 'labeled':
         console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
@@ -404,7 +453,7 @@ function App() {
         }
         break
       case 'error':
-        console.error('Labeler error:', evt.data.error)
+        console.error(`Labeler ${index} error:`, evt.data.error)
         setStatusMessage(`Labeling error: ${evt.data.error}`)
         busyRef.current[index] = false
         tryAssignToLabelers()
@@ -425,11 +474,41 @@ function App() {
     return [normalizedX, normalizedY]
   }
 
+  const loadCategoriesFromMetadata = useCallback(async () => {
+    try {
+      const modelID = selectedModel
+      const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)
+      const metadata = await metadataResponse.json()
+
+      // Get available categories from metadata
+      if (metadata.categories && typeof metadata.categories === 'object') {
+        const categories = Object.keys(metadata.categories)
+        setAvailableCategories(categories)
+        
+        // If selectedCategory is empty or not in the new categories, select the first one
+        if (!selectedCategory || !categories.includes(selectedCategory)) {
+          if (categories.length > 0) {
+            setSelectedCategory(categories[0])
+          }
+        }
+      } else {
+        setAvailableCategories([])
+      }
+    } catch (error) {
+      console.error('Error loading categories from metadata:', error)
+      setAvailableCategories([])
+    }
+  }, [selectedModel, sitePath, selectedCategory])
+
   const loadTrainingData = useCallback(async () => {
+    // Don't load data if no category is selected
+    if (!selectedCategory) {
+      return
+    }
+    
     setIsLoadingData(true)
     try {
-      const modelID = 'scimilarity'
-      setSelectedCategory('prediction') // Default category, can be changed later
+      const modelID = selectedModel
 
       // Load metadata to get categories information
       const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)
@@ -483,14 +562,26 @@ function App() {
     } finally {
       setIsLoadingData(false)
     }
-  }, [sitePath, selectedCategory])
+  }, [sitePath, selectedCategory, selectedModel])
 
   useEffect(() => {
     console.log('App mounted')
     fetchSampleFile()
     detectWebGPU()
-    loadTrainingData()
-  }, [detectWebGPU, loadTrainingData])
+    loadCategoriesFromMetadata()
+  }, [detectWebGPU, loadCategoriesFromMetadata])
+
+  // Load categories when model changes
+  useEffect(() => {
+    loadCategoriesFromMetadata()
+  }, [selectedModel, loadCategoriesFromMetadata])
+
+  // Reload training data when selectedCategory changes
+  useEffect(() => {
+    if (selectedCategory) {
+      loadTrainingData()
+    }
+  }, [selectedCategory, loadTrainingData])
 
   const start = () => {
     console.log('Starting embedding...', selectedFile?.name)
@@ -518,10 +609,11 @@ function App() {
     setIsRunning(true)
 
     const embedder = createWorkers()
+    console.log(`Starting embedder with modelID: ${selectedModel}, modelsURL: ${sitePath}/models`)
     embedder.postMessage({
       type: 'start',
       modelsURL: `${sitePath}/models`,
-      modelID: 'scimilarity',
+      modelID: selectedModel,
       h5File: selectedFile,
       cellRangePercent: 100,
       useWebGPU: useWebGPU,
@@ -597,7 +689,7 @@ function App() {
       labelerWorkersRef.current = []
       console.log('Labeler workers terminated')
     }
-  }, [])
+  }, [embedderWorker, labelerWorkers])
 
   return (
     <ThemeProvider theme={theme}>
@@ -742,14 +834,53 @@ function App() {
             </IconButton>
           </Toolbar>
           <Box sx={{ p: 2 }}>
-            <MuiFileInput
-              fullWidth
-              placeholder="Select an AnnData/Scanpy (.h5ad) file"
-              value={selectedFile}
-              onChange={setSelectedFile}
-              inputProps={{ accept: '.h5ad' }}
-              sx={{ mb: 2 }}
-            />
+            {/* File Selection */}
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="file-input-label" shrink sx={{ backgroundColor: 'background.paper', px: 0.5 }}>
+                File
+              </InputLabel>
+              <MuiFileInput
+                fullWidth
+                placeholder="Select an AnnData/Scanpy (.h5ad) file"
+                value={selectedFile}
+                onChange={setSelectedFile}
+                inputProps={{ accept: '.h5ad' }}
+              />
+            </FormControl>
+
+            {/* Model Selection */}
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="model-select-label">Model</InputLabel>
+              <Select
+                labelId="model-select-label"
+                id="model-select"
+                value={selectedModel}
+                label="Model"
+                onChange={(e) => setSelectedModel(e.target.value)}
+              >
+                <MenuItem value="scimilarity">scimilarity</MenuItem>
+                <MenuItem value="brain">brain</MenuItem>
+              </Select>
+            </FormControl>
+
+            {/* Category Selection */}
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="category-select-label">Category</InputLabel>
+              <Select
+                labelId="category-select-label"
+                id="category-select"
+                value={selectedCategory}
+                label="Category"
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                disabled={availableCategories.length === 0}
+              >
+                {availableCategories.map((category) => (
+                  <MenuItem key={category} value={category}>
+                    {category}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
             {/* Execution Provider Selection */}
             <FormControl component="fieldset" sx={{ mb: 2 }}>
