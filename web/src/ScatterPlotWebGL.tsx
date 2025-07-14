@@ -77,7 +77,6 @@ interface ScatterPlotWebGLProps {
   testDataLabels: number[]
   categoryData: Vector | null
   categoryLabels: string[]
-  isLoading?: boolean
 }
 
 const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
@@ -88,7 +87,6 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
   testDataLabels,
   categoryData,
   categoryLabels,
-  isLoading,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)

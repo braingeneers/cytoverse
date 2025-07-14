@@ -3,14 +3,12 @@ import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { createTheme } from '@mui/material/styles'
 import {
-  Alert,
   Box,
   Drawer,
   Toolbar,
   Typography,
   IconButton,
   LinearProgress,
-  Link,
   useMediaQuery,
   Button,
   FormControl,
@@ -25,6 +23,7 @@ import {
   Select,
   MenuItem,
   InputLabel,
+  Tooltip,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import GitHubIcon from '@mui/icons-material/GitHub'
@@ -33,6 +32,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import ShareIcon from '@mui/icons-material/Share'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import InfoIcon from '@mui/icons-material/Info'
 import { MuiFileInput } from 'mui-file-input'
 import { tableFromIPC, Vector } from 'apache-arrow'
 
@@ -97,7 +97,6 @@ function App() {
   // Labeling feedback state
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
-  const [processingComplete, setProcessingComplete] = useState<boolean>(false)
 
   // Modal states
   const [shareModalOpen, setShareModalOpen] = useState(false)
@@ -259,7 +258,6 @@ function App() {
               )
 
               if (totalProcessed.current >= totalNumCells.current) {
-                setProcessingComplete(true)
                 setIsRunning(false)
                 if (startTime.current) {
                   const endTime = Date.now()
@@ -535,7 +533,6 @@ function App() {
     setTotalLabeled(0)
     totalNumCells.current = 0
     totalProcessed.current = 0
-    setProcessingComplete(false)
     pendingBatches.current = []
 
     // Start time tracking
@@ -582,7 +579,6 @@ function App() {
     }
 
     terminateWorkers()
-    setProcessingComplete(false)
   }
 
   const handleDrawerToggle = () => {
@@ -643,20 +639,6 @@ function App() {
               >
                 {isRunning ? <StopIcon /> : <PlayArrowIcon />}
               </IconButton>
-              <IconButton size="large" sx={{ mb: 2 }} onClick={() => setShareModalOpen(true)}>
-                <ShareIcon />
-              </IconButton>
-              <IconButton size="large" sx={{ mb: 2 }} onClick={() => setHelpModalOpen(true)}>
-                <HelpOutlineIcon />
-              </IconButton>
-              <IconButton
-                component={Link}
-                href="https://github.com/braingeneers/cytoverse"
-                target="_blank"
-                size="large"
-              >
-                <GitHubIcon />
-              </IconButton>
             </Box>
           </Box>
         )}
@@ -679,6 +661,20 @@ function App() {
             <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
               Cytoverse
             </Typography>
+            <Button
+              sx={{ mr: -4 }}
+              variant="text"
+              size="small"
+              startIcon={<HelpOutlineIcon />}
+              onClick={() => setHelpModalOpen(true)}
+            ></Button>
+            <Button
+              sx={{ mr: -3 }}
+              variant="text"
+              size="small"
+              href="https://github.com/braingeneers/cytoverse"
+              startIcon={<GitHubIcon />}
+            ></Button>
             <IconButton onClick={handleDrawerToggle}>
               <ChevronLeftIcon />
             </IconButton>
@@ -686,26 +682,21 @@ function App() {
           <Box sx={{ overflow: 'auto', p: 2 }}>
             {/* File Selection */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                File
-              </Typography>
               <MuiFileInput
                 value={selectedFile}
                 onChange={setSelectedFile}
-                label="Select H5AD file"
+                label="File"
                 variant="outlined"
                 fullWidth
-                accept=".h5ad"
+                inputProps={{ accept: '.h5ad' }}
+                placeholder="Select a .h5ad file"
               />
             </Box>
 
             {/* Model Selection */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Model
-              </Typography>
               <FormControl fullWidth>
-                <InputLabel>Model</InputLabel>
+                <InputLabel>Reference</InputLabel>
                 <Select
                   value={selectedModel}
                   label="Model"
@@ -713,16 +704,13 @@ function App() {
                   disabled={isRunning}
                 >
                   <MenuItem value="brain">Brain</MenuItem>
-                  <MenuItem value="scimilarity">Scimilarity</MenuItem>
+                  <MenuItem value="scimilarity">SCimilarity</MenuItem>
                 </Select>
               </FormControl>
             </Box>
 
             {/* Category Selection */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Category
-              </Typography>
               <FormControl fullWidth>
                 <InputLabel>Category</InputLabel>
                 <Select
@@ -740,31 +728,55 @@ function App() {
               </FormControl>
             </Box>
 
+            {/* Dataset Statistics */}
+            <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              {xTrainData && yTrainData && categoryLabels && categoryData ? (
+                <Box>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Reference Cells:</strong> {categoryData.length.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Plotted Cells:</strong> {xTrainData.length.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Labels:</strong> {categoryLabels.length}
+                  </Typography>
+                </Box>
+              ) : isLoadingData ? (
+                <Typography variant="body2" color="text.secondary">
+                  Loading statistics...
+                </Typography>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No data loaded
+                </Typography>
+              )}
+            </Box>
+
             {/* WebGPU Selection */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Processing
-              </Typography>
-              <FormControl component="fieldset">
-                <RadioGroup
-                  value={useWebGPU ? 'gpu' : 'cpu'}
-                  onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}
-                  disabled={isRunning}
-                >
-                  <FormControlLabel value="cpu" control={<Radio />} label="CPU (WebAssembly)" />
-                  <FormControlLabel
-                    value="gpu"
-                    control={<Radio />}
-                    label="GPU (WebGPU)"
-                    disabled={!hasWebGPU}
-                  />
-                </RadioGroup>
-              </FormControl>
-              {!hasWebGPU && (
-                <Alert severity="info" sx={{ mt: 1 }}>
-                  WebGPU not available in this browser
-                </Alert>
-              )}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <FormControl component="fieldset" disabled={isRunning} sx={{ flexGrow: 1 }}>
+                  <RadioGroup
+                    value={useWebGPU ? 'gpu' : 'cpu'}
+                    onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}
+                    row
+                  >
+                    <FormControlLabel value="cpu" control={<Radio />} label="CPU" />
+                    <FormControlLabel
+                      value="gpu"
+                      control={<Radio />}
+                      label="GPU"
+                      disabled={!hasWebGPU}
+                    />
+                  </RadioGroup>
+                </FormControl>
+                {!hasWebGPU && (
+                  <Tooltip title="WebGPU not available in this browser">
+                    <InfoIcon color="disabled" fontSize="small" />
+                  </Tooltip>
+                )}
+              </Box>
             </Box>
 
             {/* Run/Stop Button */}
@@ -796,9 +808,29 @@ function App() {
             {/* Label Counts */}
             {Object.keys(labelCounts).length > 0 && (
               <Box sx={{ mb: 3 }}>
-                <Typography variant="h6" gutterBottom>
-                  Predicted Labels ({totalLabeled.toLocaleString()} total)
-                </Typography>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    mb: 2,
+                  }}
+                >
+                  <Typography variant="h6">{selectedCategory && `${selectedCategory}`}</Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<ShareIcon />}
+                    onClick={() => setShareModalOpen(true)}
+                    disabled={Object.keys(labelCounts).length === 0}
+                  >
+                    Share
+                  </Button>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body1">Total:</Typography>
+                  <Typography variant="body1">{totalLabeled.toLocaleString()}</Typography>
+                </Box>
                 {Object.entries(labelCounts)
                   .sort(([, a], [, b]) => b - a)
                   .map(([label, count]) => (
@@ -814,40 +846,6 @@ function App() {
                   ))}
               </Box>
             )}
-
-            {/* Action Buttons */}
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<ShareIcon />}
-                onClick={() => setShareModalOpen(true)}
-                disabled={Object.keys(labelCounts).length === 0}
-              >
-                Share
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<HelpOutlineIcon />}
-                onClick={() => setHelpModalOpen(true)}
-              >
-                Help
-              </Button>
-            </Box>
-
-            {/* GitHub Link */}
-            <Button
-              component={Link}
-              href="https://github.com/braingeneers/cytoverse"
-              target="_blank"
-              variant="outlined"
-              size="small"
-              startIcon={<GitHubIcon />}
-              fullWidth
-            >
-              GitHub
-            </Button>
           </Box>
         </Drawer>
 
@@ -864,36 +862,55 @@ function App() {
               }),
           }}
         >
-          <ScatterPlotWebGL
-            xTrainData={xTrainData}
-            yTrainData={yTrainData}
-            categoryData={categoryData}
-            categoryLabels={categoryLabels}
-            xTestData={xTestData}
-            yTestData={yTestData}
-            testDataLabels={testDataLabels}
-            isLoading={isLoadingData}
-          />
+          {isLoadingData ? (
+            <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+              <Typography>Loading scatter plot data...</Typography>
+            </Box>
+          ) : xTrainData && yTrainData && categoryData && categoryLabels.length > 0 ? (
+            <ScatterPlotWebGL
+              xTrainData={xTrainData}
+              yTrainData={yTrainData}
+              categoryData={categoryData}
+              categoryLabels={categoryLabels}
+              xTestData={xTestData}
+              yTestData={yTestData}
+              testDataLabels={testDataLabels}
+            />
+          ) : (
+            <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+              <Typography>No data available</Typography>
+            </Box>
+          )}
         </Box>
 
         {/* Share Modal */}
-        <Dialog open={shareModalOpen} onClose={() => setShareModalOpen(false)}>
-          <DialogTitle>Share Labels</DialogTitle>
+        <Dialog
+          open={shareModalOpen}
+          onClose={() => setShareModalOpen(false)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>Share Embeddings</DialogTitle>
           <DialogContent>
-            <TextField
-              autoFocus
-              margin="dense"
-              label="Email Address"
-              type="email"
-              fullWidth
-              variant="outlined"
-              value={shareEmail}
-              onChange={(e) => setShareEmail(e.target.value)}
-            />
+            <Box sx={{ pt: 1 }}>
+              <TextField
+                fullWidth
+                label="Email Address"
+                type="email"
+                value={shareEmail}
+                onChange={(e) => setShareEmail(e.target.value)}
+                sx={{ mb: 2 }}
+              />
+              <Typography variant="body2" color="text.secondary">
+                Get introduced to others with similar embeddings? Enter your email and we'll connect
+                you. We'll never upload or share your raw data, only your embeddings. (Coming
+                soon...)
+              </Typography>
+            </Box>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setShareModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleShareLabels} variant="contained">
+            <Button variant="contained" onClick={handleShareLabels} disabled={!shareEmail.trim()}>
               Share
             </Button>
           </DialogActions>
@@ -904,8 +921,18 @@ function App() {
           <DialogTitle>Help</DialogTitle>
           <DialogContent>
             <Typography paragraph>
-              Cytoverse is a real-time single-cell analysis tool that maps your data using machine
-              learning models.
+              CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed for
+              cell annotation using foundation model embeddings. It runs entirely in the browser,
+              streaming h5ad files from local storage without uploading data or requiring server
+              computation. It uses SCimilarity for cell embeddings and parametric UMAP for 2D
+              visualization, leveraging large training datasets for accurate cell annotation. An
+              Inverted File with Product Quantization (IVFPQ) enables fast approximate nearest
+              neighbor searches across over 20 million samples. Built on WebAssembly and ONNX for
+              high-speed processing, it supports unlimited streaming analysis of h5ad files via
+              h5wasm. This enables distributed collaborative discovery, allowing researchers to
+              explore shared embedding spaces to identify overlapping or complementary assays,
+              particularly for perturbseq-driven research. The architecture ensures privacy,
+              scalability, and collaborative potential without server dependency.
             </Typography>
             <Typography paragraph>
               <strong>Getting Started:</strong>
