@@ -56,17 +56,20 @@ const theme = createTheme({
   },
 })
 
+// Types for embedding batches
+interface EmbeddingBatch {
+  test_vector_id: string[]
+  pq_embedding: Uint8Array
+  umap_coordinates: number[][]
+}
+
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [progress, setProgress] = useState(0)
-  // const [selectedModel, setSelectedModel] = useState<string>('scimilarity')
   const [selectedModel, setSelectedModel] = useState<string>('brain')
 
-  const [embedderWorker, setEmbedderWorker] = useState<Worker | null>(null)
-  const [labelerWorkers, setLabelerWorkers] = useState<Worker[]>([])
-  const labelerWorkersRef = useRef<Worker[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [hasWebGPU, setHasWebGPU] = useState(false)
   const [useWebGPU, setUseWebGPU] = useState(false)
@@ -86,27 +89,20 @@ function App() {
   const [yTestData, setYTestData] = useState<number[]>([])
   const [testDataLabels, setTestDataLabels] = useState<number[]>([])
 
-  // Total number of cells to process
+  // Processing state
   const totalNumCells = useRef(0)
   const totalProcessed = useRef(0)
-
-  // Elapsed time tracking
   const startTime = useRef<number | null>(null)
 
-  // Labeling feedback state - counts of predicted labels
+  // Labeling feedback state
   const [labelCounts, setLabelCounts] = useState<{ [label: string]: number }>({})
   const [totalLabeled, setTotalLabeled] = useState<number>(0)
-
   const [processingComplete, setProcessingComplete] = useState<boolean>(false)
 
-  // Share modal state
+  // Modal states
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [shareEmail, setShareEmail] = useState('')
-
-  // Help modal state
   const [helpModalOpen, setHelpModalOpen] = useState(false)
-
-  // Error modal state
   const [errorModalOpen, setErrorModalOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -115,11 +111,258 @@ function App() {
   const [yCenter, setYCenter] = useState<number>(0)
   const [maxRange, setMaxRange] = useState<number>(1)
 
+  // Worker management - simplified approach
+  const embedderWorker = useRef<Worker | null>(null)
+  const labelerWorkers = useRef<Worker[]>([])
+  const numLabelers = Math.max(1, Math.floor(navigator.hardwareConcurrency / 3))
+  const labelerBusy = useRef<boolean[]>(new Array(numLabelers).fill(false))
+  const pendingBatches = useRef<EmbeddingBatch[]>([])
+
+  // Site path calculation
+  const sitePath =
+    window.location.origin +
+    window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
+
+  console.log(
+    `Will create ${numLabelers} labeler workers (${navigator.hardwareConcurrency} cores available)`
+  )
+
+  // Helper function to normalize coordinates
+  const normalizeCoordinates = useCallback(
+    (x: number, y: number) => {
+      const normalizedX = (x - xCenter) / (maxRange / 2)
+      const normalizedY = (y - yCenter) / (maxRange / 2)
+      return [normalizedX, normalizedY]
+    },
+    [xCenter, yCenter, maxRange]
+  )
+
+  // Assign pending batches to available labelers
+  const assignBatchToLabeler = useCallback(() => {
+    if (pendingBatches.current.length === 0 || labelerWorkers.current.length === 0) {
+      return
+    }
+
+    // Find an available labeler
+    for (let i = 0; i < numLabelers; i++) {
+      if (!labelerBusy.current[i] && labelerWorkers.current[i]) {
+        const batch = pendingBatches.current.shift()
+        if (!batch || !batch.test_vector_id || !batch.pq_embedding) {
+          console.error('Invalid batch data:', batch)
+          continue
+        }
+
+        console.log(`Assigning batch to labeler ${i}`)
+        labelerWorkers.current[i].postMessage({
+          type: 'embedding',
+          test_vector_id: batch.test_vector_id,
+          pq_embedding: batch.pq_embedding,
+          umap_coordinates: batch.umap_coordinates,
+        })
+        labelerBusy.current[i] = true
+        break
+      }
+    }
+  }, [numLabelers])
+
+  // Terminate all workers
+  const terminateWorkers = useCallback(() => {
+    if (embedderWorker.current) {
+      console.log('Terminating embedder worker...')
+      embedderWorker.current.terminate()
+      embedderWorker.current = null
+    }
+
+    labelerWorkers.current.forEach((worker, idx) => {
+      console.log(`Terminating labeler worker ${idx}...`)
+      worker.terminate()
+    })
+    labelerWorkers.current = []
+    labelerBusy.current = new Array(numLabelers).fill(false)
+  }, [numLabelers])
+
+  // Create labeler workers
+  const createLabelerWorkers = useCallback(() => {
+    console.log('Creating labeler workers...')
+
+    const workers: Worker[] = []
+    for (let i = 0; i < numLabelers; i++) {
+      const labeler = new LabelerWorker()
+      workers.push(labeler)
+
+      // Initialize labeler
+      console.log(`Initializing labeler ${i} with modelID: ${selectedModel}`)
+      labeler.postMessage({
+        type: 'start',
+        modelsURL: `${sitePath}/models`,
+        modelID: selectedModel,
+      })
+
+      // Mark as busy until initialized
+      labelerBusy.current[i] = true
+
+      // Handle labeler messages
+      labeler.onmessage = (evt) => {
+        switch (evt.data.type) {
+          case 'status':
+            console.log(`Labeler ${i} status:`, evt.data.message)
+            if (evt.data.message && evt.data.message.includes('initialized successfully')) {
+              labelerBusy.current[i] = false
+              console.log(`Labeler ${i} is ready`)
+              // Try to assign any pending batches
+              assignBatchToLabeler()
+            }
+            break
+          case 'labeled':
+            console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
+            labelerBusy.current[i] = false
+
+            // Process labeling results
+            if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
+              const newLabelCounts: { [label: string]: number } = {}
+              const newTestLabels: number[] = []
+              let validLabels = 0
+
+              for (const trainVectorId of evt.data.train_vector_id) {
+                let categoryIndex = -1
+                if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+                  categoryIndex = categoryData.get(trainVectorId)
+                  if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
+                    const label = categoryLabels[categoryIndex]
+                    newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
+                    validLabels++
+                  }
+                }
+                newTestLabels.push(categoryIndex)
+              }
+
+              // Update state
+              setTestDataLabels((prev) => [...prev, ...newTestLabels])
+              setLabelCounts((prev) => {
+                const updated = { ...prev }
+                for (const [label, count] of Object.entries(newLabelCounts)) {
+                  updated[label] = (updated[label] || 0) + count
+                }
+                return updated
+              })
+
+              setTotalLabeled((prevLabeled) => prevLabeled + validLabels)
+              totalProcessed.current += validLabels
+
+              const progressPercent = Math.min(
+                100,
+                Math.round((totalProcessed.current / totalNumCells.current) * 100)
+              )
+              setProgress(progressPercent)
+              setStatusMessage(
+                `Processed ${totalProcessed.current} of ${totalNumCells.current} cells...`
+              )
+
+              if (totalProcessed.current >= totalNumCells.current) {
+                setProcessingComplete(true)
+                setIsRunning(false)
+                if (startTime.current) {
+                  const endTime = Date.now()
+                  const totalElapsed = Math.round((endTime - startTime.current) / 1000)
+                  const minutes = Math.floor(totalElapsed / 60)
+                  const seconds = totalElapsed % 60
+                  const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+                  setStatusMessage(
+                    `Complete - Labeled ${totalProcessed.current.toLocaleString()} cells in ${timeStr}`
+                  )
+                } else {
+                  setStatusMessage('Processing complete')
+                }
+              }
+            }
+
+            // Try to assign next batch
+            assignBatchToLabeler()
+            break
+          case 'error':
+            console.error(`Labeler ${i} error:`, evt.data.error)
+            labelerBusy.current[i] = false
+            assignBatchToLabeler()
+            break
+        }
+      }
+    }
+
+    labelerWorkers.current = workers
+  }, [selectedModel, sitePath, numLabelers, assignBatchToLabeler, categoryData, categoryLabels])
+
+  // Create embedder worker
+  const createEmbedderWorker = useCallback(() => {
+    console.log('Creating embedder worker...')
+
+    const embedder = new EmbeddingWorker()
+
+    embedder.onmessage = (evt) => {
+      switch (evt.data.type) {
+        case 'status':
+          setStatusMessage(evt.data.message)
+          break
+        case 'modelDownloadProgress':
+          setProgress(
+            Math.min(100, Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
+          )
+          setStatusMessage('Downloading model...')
+          break
+        case 'embedding': {
+          console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
+          totalNumCells.current = evt.data.totalToProcess
+
+          // Plot coordinates immediately
+          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
+            const newXPoints: number[] = []
+            const newYPoints: number[] = []
+
+            for (const coordinate of evt.data.umap_coordinates) {
+              if (coordinate && coordinate.length >= 2) {
+                const [normalizedX, normalizedY] = normalizeCoordinates(
+                  coordinate[0],
+                  coordinate[1]
+                )
+                newXPoints.push(normalizedX)
+                newYPoints.push(normalizedY)
+              }
+            }
+
+            setXTestData((prev) => [...prev, ...newXPoints])
+            setYTestData((prev) => [...prev, ...newYPoints])
+          }
+
+          // Add to pending queue and try to assign to labeler
+          const batch: EmbeddingBatch = {
+            test_vector_id: evt.data.test_vector_id,
+            pq_embedding: evt.data.pq_embedding,
+            umap_coordinates: evt.data.umap_coordinates,
+          }
+          pendingBatches.current.push(batch)
+          assignBatchToLabeler()
+          break
+        }
+        case 'finished':
+          console.log('Embedder finished processing')
+          break
+        case 'error':
+          console.error('Embedder error:', evt.data.error)
+          setIsRunning(false)
+          setStatusMessage('')
+          setErrorMessage(evt.data.error.toString())
+          setErrorModalOpen(true)
+          break
+      }
+    }
+
+    embedderWorker.current = embedder
+  }, [assignBatchToLabeler, normalizeCoordinates])
+
+  // WebGPU detection
   const detectWebGPU = useCallback(async () => {
     try {
       const webGPUSupported = await isWebGPUSupported()
       setHasWebGPU(webGPUSupported)
-      // Default to GPU if available, otherwise CPU
       setUseWebGPU(webGPUSupported)
     } catch (error) {
       console.error('WebGPU detection failed:', error)
@@ -136,13 +379,11 @@ function App() {
   // Function to check WebGPU support
   async function isWebGPUSupported(): Promise<boolean> {
     try {
-      // Check if WebGPU is available in the browser
       if (!navigator.gpu) {
         console.log('WebGPU is not supported in this browser.')
         return false
       }
 
-      // Check if a WebGPU adapter is available
       const adapter: GPUAdapter | null = await navigator.gpu.requestAdapter()
       if (!adapter) {
         console.log('No WebGPU adapter available.')
@@ -170,322 +411,16 @@ function App() {
     }
   }
 
-  // Number of labeler workers to create for parallel processing
-  const numLabelers = Math.max(1, Math.floor(navigator.hardwareConcurrency / 3))
-  console.log(`Creating ${numLabelers} labeler workers (${navigator.hardwareConcurrency} cores available)`)
-
-  // Product/consumer management for embedding and labeling
-  const pendingRef = useRef<any[]>([])
-  const busyRef = useRef<boolean[]>(new Array(numLabelers).fill(false))
-  const sentBatchesRef = useRef(0)
-  const receivedBatchesRef = useRef(0)
-  const pausedRef = useRef(false)
-  const maxPending = numLabelers * 2 // Backpressure threshold
-
-  function tryAssignToLabelers() {
-    // Safety check to ensure labeler workers are initialized
-    if (!labelerWorkersRef.current || labelerWorkersRef.current.length === 0) {
-      console.log('No labeler workers available')
-      return
-    }
-
-    console.log(`tryAssignToLabelers: ${pendingRef.current.length} pending, busyRef:`, busyRef.current)
-    console.log('Labeler workers available:', labelerWorkersRef.current.length)
-
-    while (pendingRef.current.length > 0) {
-      let assigned = false
-      for (let i = 0; i < numLabelers; i++) {
-        console.log(`Checking labeler ${i}: busy=${busyRef.current[i]}, exists=${!!labelerWorkersRef.current[i]}`)
-        if (!busyRef.current[i] && labelerWorkersRef.current[i]) {
-          const batch = pendingRef.current.shift()
-          console.log(`Assigning batch to labeler ${i}:`, batch)
-          
-          // Ensure we have valid data before sending
-          if (!batch || !batch.test_vector_id || !batch.pq_embedding) {
-            console.error('Invalid batch data:', batch)
-            continue
-          }
-          
-          labelerWorkersRef.current[i].postMessage({
-            type: 'embedding',
-            test_vector_id: batch.test_vector_id,
-            pq_embedding: batch.pq_embedding,
-            umap_coordinates: batch.umap_coordinates,
-          })
-          busyRef.current[i] = true
-          assigned = true
-          break
-        }
-      }
-      if (!assigned) {
-        console.log('No available labelers, waiting...')
-        break // All busy, wait for next 'labeled'
-      }
-    }
-
-    // Check if we need to resume embedder
-    if (pausedRef.current && pendingRef.current.length < maxPending / 2) {
-      if (embedderWorker) {
-        embedderWorker.postMessage({ type: 'resume' })
-        pausedRef.current = false
-        console.log('Resumed embedder')
-      }
-    }
-  }
-
-  function createWorkers() {
-    // Terminate any existing workers before creating new ones
-    if (embedderWorker) {
-      console.log('Terminating existing embedder worker...')
-      embedderWorker.terminate()
-      setEmbedderWorker(null)
-    }
-    labelerWorkers.forEach((worker, idx) => {
-      console.log(`Terminating existing labeler worker ${idx}...`)
-      worker.terminate()
-    })
-    setLabelerWorkers([])
-    labelerWorkersRef.current = []
-
-    const embedder = new EmbeddingWorker()
-
-    // Create multiple labeler workers
-    const newLabelerWorkers: Worker[] = []
-    for (let i = 0; i < numLabelers; i++) {
-      const labeler = new LabelerWorker()
-      newLabelerWorkers.push(labeler)
-
-      // Initialize each labeler
-      console.log(
-        `Initializing labeler ${i} with modelID: ${selectedModel}, modelsURL: ${sitePath}/models`
-      )
-      labeler.postMessage({
-        type: 'start',
-        modelsURL: `${sitePath}/models`,
-        modelID: selectedModel,
-      })
-      // Mark labeler as busy until it's initialized
-      busyRef.current[i] = true
-
-      // Handle messages from each labeler with index
-      const index = i
-      labeler.onmessage = (evt) => handleLabelerMessage(index, evt)
-    }
-
-    // Set the ref immediately to ensure it's available for embedder messages
-    labelerWorkersRef.current = newLabelerWorkers
-    setLabelerWorkers(newLabelerWorkers)
-    setEmbedderWorker(embedder)
-
-    // Handle embedder messages
-    embedder.onmessage = (evt) => {
-      switch (evt.data.type) {
-        case 'status':
-          setStatusMessage(evt.data.message)
-          break
-        case 'modelDownloadProgress':
-          setProgress(
-            Math.min(100, Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
-          )
-          setStatusMessage('Downloading model...')
-          break
-        case 'embedding': {
-          console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
-          totalNumCells.current = evt.data.totalToProcess
-          console.log('Total cells to process:', totalNumCells.current)
-
-          // Plot coordinates immediately when received from embedder
-          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
-            const newXPoints: number[] = []
-            const newYPoints: number[] = []
-
-            // Extract X and Y coordinates from the array of tuples and normalize them
-            for (const coordinate of evt.data.umap_coordinates) {
-              if (coordinate && coordinate.length >= 2) {
-                // Normalize the coordinates using the same transformation as pumap.py
-                const [normalizedX, normalizedY] = normalizeCoordinates(
-                  coordinate[0],
-                  coordinate[1]
-                )
-                newXPoints.push(normalizedX)
-                newYPoints.push(normalizedY)
-              }
-            }
-
-            setXTestData((prev) => [...prev, ...newXPoints])
-            setYTestData((prev) => [...prev, ...newYPoints])
-
-            console.log('Added', newXPoints.length, 'new test points from embedder')
-          }
-
-          // Add to pending queue and try to assign
-          const batch = {
-            test_vector_id: evt.data.test_vector_id,
-            pq_embedding: evt.data.pq_embedding,
-            umap_coordinates: evt.data.umap_coordinates,
-          }
-          console.log('Adding batch to pending queue:', {
-            test_vector_id_length: batch.test_vector_id?.length,
-            pq_embedding_length: batch.pq_embedding?.length,
-            umap_coordinates_length: batch.umap_coordinates?.length,
-            hasData: !!(batch.test_vector_id && batch.pq_embedding && batch.umap_coordinates)
-          })
-          pendingRef.current.push(batch)
-          sentBatchesRef.current += 1
-          tryAssignToLabelers()
-
-          // Check for backpressure
-          if (!pausedRef.current && pendingRef.current.length >= maxPending) {
-            embedder.postMessage({ type: 'pause' })
-            pausedRef.current = true
-            console.log('Paused embedder due to backpressure')
-          }
-          break
-        }
-        case 'finished':
-          console.log('Embedder finished processing')
-          break
-        case 'error':
-          console.error('Embedder error:', evt.data.error)
-          setIsRunning(false)
-          setStatusMessage('')
-          setErrorMessage(evt.data.error.toString())
-          setErrorModalOpen(true)
-          break
-        default:
-          break
-      }
-    }
-    return embedder
-  }
-
-  // Handler for labeler messages with worker index
-  const handleLabelerMessage = (index: number, evt: MessageEvent) => {
-    switch (evt.data.type) {
-      case 'status':
-        console.log(`Labeler ${index} status:`, evt.data.message)
-        // If this is an initialization complete message, mark as not busy
-        if (evt.data.message && evt.data.message.includes('initialized successfully')) {
-          busyRef.current[index] = false
-          console.log(`Labeler ${index} is ready`)
-          tryAssignToLabelers()
-        }
-        break
-      case 'labeled':
-        console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
-        console.log('Train vector IDs received:', evt.data.train_vector_id?.length)
-
-        receivedBatchesRef.current += 1
-        busyRef.current[index] = false
-        tryAssignToLabelers()
-
-        // Process labeling results for feedback tallies and progress
-        if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
-          console.log('Processing labeling results...')
-          const newLabelCounts: { [label: string]: number } = {}
-          const newTestLabels: number[] = []
-          let validLabels = 0
-
-          for (const trainVectorId of evt.data.train_vector_id) {
-            let categoryIndex = -1
-            if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-              // Get category index from training data
-              categoryIndex = categoryData.get(trainVectorId) ?? -1
-              if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
-                const labelName = categoryLabels[categoryIndex]
-                newLabelCounts[labelName] = (newLabelCounts[labelName] || 0) + 1
-                validLabels++
-              }
-            }
-            newTestLabels.push(categoryIndex)
-          }
-
-          // Store test point labels for visualization
-          setTestDataLabels((prev) => [...prev, ...newTestLabels])
-
-          console.log(
-            `Found ${validLabels} valid labels out of ${evt.data.train_vector_id.length} total`
-          )
-
-          // Update label counts
-          setLabelCounts((prev) => {
-            const updated = { ...prev }
-            for (const [label, count] of Object.entries(newLabelCounts)) {
-              updated[label] = (updated[label] || 0) + count
-            }
-            return updated
-          })
-
-          // Update total labeled and processed
-          setTotalLabeled((prevLabeled) => prevLabeled + validLabels)
-          totalProcessed.current += validLabels
-
-          const progressPercent = Math.min(
-            100,
-            Math.round((totalProcessed.current / totalNumCells.current) * 100)
-          )
-          setProgress(progressPercent)
-          setStatusMessage(
-            `Processed ${totalProcessed.current} of ${totalNumCells.current} cells...`
-          )
-
-          if (totalProcessed.current == totalNumCells.current) {
-            console.log('Processing complete! Setting isRunning to false')
-            setIsRunning(false)
-            setProcessingComplete(true)
-
-            // Calculate final elapsed time
-            if (startTime.current) {
-              const endTime = Date.now()
-              const totalElapsed = Math.round((endTime - startTime.current) / 1000) // in seconds
-
-              // Format the status message with cells labeled and time
-              const minutes = Math.floor(totalElapsed / 60)
-              const seconds = totalElapsed % 60
-              const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
-              setStatusMessage(
-                `Labeled ${totalProcessed.current.toLocaleString()} cells in ${timeStr}`
-              )
-            } else {
-              setStatusMessage('Processing complete')
-            }
-          }
-        }
-        break
-      case 'error':
-        console.error(`Labeler ${index} error:`, evt.data.error)
-        setStatusMessage(`Labeling error: ${evt.data.error}`)
-        busyRef.current[index] = false
-        tryAssignToLabelers()
-        break
-      default:
-        break
-    }
-  }
-
-  const sitePath =
-    window.location.origin +
-    window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
-
-  // Helper function to normalize coordinates using the same transformation as pumap.py
-  const normalizeCoordinates = (x: number, y: number) => {
-    const normalizedX = (x - xCenter) / (maxRange / 2)
-    const normalizedY = (y - yCenter) / (maxRange / 2)
-    return [normalizedX, normalizedY]
-  }
-
   const loadCategoriesFromMetadata = useCallback(async () => {
     try {
       const modelID = selectedModel
       const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)
       const metadata = await metadataResponse.json()
 
-      // Get available categories from metadata
       if (metadata.categories && typeof metadata.categories === 'object') {
         const categories = Object.keys(metadata.categories)
         setAvailableCategories(categories)
-        
-        // If selectedCategory is empty or not in the new categories, select the first one
+
         if (!selectedCategory || !categories.includes(selectedCategory)) {
           if (categories.length > 0) {
             setSelectedCategory(categories[0])
@@ -501,11 +436,10 @@ function App() {
   }, [selectedModel, sitePath, selectedCategory])
 
   const loadTrainingData = useCallback(async () => {
-    // Don't load data if no category is selected
     if (!selectedCategory) {
       return
     }
-    
+
     setIsLoadingData(true)
     try {
       const modelID = selectedModel
@@ -517,7 +451,7 @@ function App() {
       // Get category labels from metadata
       const labels = metadata.categories?.[selectedCategory]
       if (!labels || !Array.isArray(labels)) {
-        throw new Error(`Missing or invalid category labels for '${selectedCategory}' in metadata`)
+        throw new Error(`Category '${selectedCategory}' not found in metadata or invalid format`)
       }
 
       // Store normalization parameters for test data
@@ -543,26 +477,33 @@ function App() {
       const yTable = tableFromIPC(new Uint8Array(yBuffer))
       const categoryTable = tableFromIPC(new Uint8Array(categoryBuffer))
 
-      // Extract columns
-      const xColumn = xTable.getChild('x')
-      const yColumn = yTable.getChild('y')
-      const categoryColumn = categoryTable.getChild(selectedCategory)
+      // Extract vectors
+      const xVector = xTable.getChild('x')!
+      const yVector = yTable.getChild('y')!
+      const categoryVector = categoryTable.getChild(selectedCategory)!
 
-      if (!xColumn || !yColumn || !categoryColumn) {
-        throw new Error('Missing required columns in Arrow files')
-      }
-
-      // Set the Vector objects directly - no need for data transformation
-      setXTrainData(xColumn)
-      setYTrainData(yColumn)
-      setCategoryData(categoryColumn)
+      setXTrainData(xVector)
+      setYTrainData(yVector)
+      setCategoryData(categoryVector)
       setCategoryLabels(labels)
+
+      console.log(
+        `Loaded training data: ${xVector.length} points, ${labels.length} category labels`
+      )
     } catch (error) {
-      console.error('Error loading scatter plot data:', error)
+      console.error('Error loading training data:', error)
+      setErrorMessage(`Failed to load training data: ${error}`)
+      setErrorModalOpen(true)
     } finally {
       setIsLoadingData(false)
     }
   }, [sitePath, selectedCategory, selectedModel])
+
+  // Initialize workers when model changes
+  useEffect(() => {
+    terminateWorkers()
+    // Note: We don't create workers here, they are created on start
+  }, [selectedModel, terminateWorkers])
 
   useEffect(() => {
     console.log('App mounted')
@@ -586,7 +527,7 @@ function App() {
   const start = () => {
     console.log('Starting embedding...', selectedFile?.name)
 
-    // Clear any existing test data and label counts immediately
+    // Clear any existing test data and state
     setXTestData([])
     setYTestData([])
     setTestDataLabels([])
@@ -595,29 +536,32 @@ function App() {
     totalNumCells.current = 0
     totalProcessed.current = 0
     setProcessingComplete(false)
-    pendingRef.current = []
-    busyRef.current = new Array(numLabelers).fill(false)
-    sentBatchesRef.current = 0
-    receivedBatchesRef.current = 0
-    pausedRef.current = false
+    pendingBatches.current = []
 
     // Start time tracking
     startTime.current = Date.now()
 
-    // Set progress and running state after clearing data
+    // Set progress and running state
     setProgress(0)
     setIsRunning(true)
 
-    const embedder = createWorkers()
-    console.log(`Starting embedder with modelID: ${selectedModel}, modelsURL: ${sitePath}/models`)
-    embedder.postMessage({
-      type: 'start',
-      modelsURL: `${sitePath}/models`,
-      modelID: selectedModel,
-      h5File: selectedFile,
-      cellRangePercent: 100,
-      useWebGPU: useWebGPU,
-    })
+    // Create workers and start processing
+    terminateWorkers()
+    createLabelerWorkers()
+    createEmbedderWorker()
+
+    // Start the embedder
+    console.log(`Starting embedder with modelID: ${selectedModel}`)
+    if (embedderWorker.current) {
+      embedderWorker.current.postMessage({
+        type: 'start',
+        modelsURL: `${sitePath}/models`,
+        modelID: selectedModel,
+        h5File: selectedFile,
+        cellRangePercent: 100,
+        useWebGPU: useWebGPU,
+      })
+    }
   }
 
   const stop = () => {
@@ -628,9 +572,7 @@ function App() {
     // Calculate elapsed time when stopped
     if (startTime.current) {
       const endTime = Date.now()
-      const totalElapsed = Math.round((endTime - startTime.current) / 1000) // in seconds
-
-      // Format the status message with cells labeled and time
+      const totalElapsed = Math.round((endTime - startTime.current) / 1000)
       const minutes = Math.floor(totalElapsed / 60)
       const seconds = totalElapsed % 60
       const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
@@ -639,20 +581,7 @@ function App() {
       )
     }
 
-    // Terminate workers and clear their state
-    if (embedderWorker) {
-      console.log('Terminating embedder worker...')
-      embedderWorker.terminate()
-      setEmbedderWorker(null)
-    }
-    labelerWorkers.forEach((worker, idx) => {
-      console.log(`Terminating labeler worker ${idx}...`)
-      worker.terminate()
-    })
-    setLabelerWorkers([])
-    labelerWorkersRef.current = []
-
-    // Reset processing state
+    terminateWorkers()
     setProcessingComplete(false)
   }
 
@@ -675,21 +604,12 @@ function App() {
     setShareEmail('')
   }
 
+  // Cleanup workers on unmount
   useEffect(() => {
     return () => {
-      if (embedderWorker) {
-        console.log('Terminating embedder worker...')
-        embedderWorker.terminate()
-        console.log('Embedder worker terminated')
-      }
-      labelerWorkers.forEach((worker, idx) => {
-        console.log(`Terminating labeler worker ${idx}...`)
-        worker.terminate()
-      })
-      labelerWorkersRef.current = []
-      console.log('Labeler workers terminated')
+      terminateWorkers()
     }
-  }, [embedderWorker, labelerWorkers])
+  }, [terminateWorkers])
 
   return (
     <ThemeProvider theme={theme}>
@@ -701,90 +621,53 @@ function App() {
             sx={{
               width: miniDrawerWidth,
               flexShrink: 0,
-              backgroundColor: 'background.paper',
-              borderRight: '1px solid',
+              position: 'fixed',
+              height: '100vh',
+              zIndex: 1200,
+              bgcolor: 'background.paper',
+              borderRight: 1,
               borderColor: 'divider',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              pt: 2,
-              pb: 2,
             }}
           >
-            <IconButton
-              color="primary"
-              aria-label="open drawer"
-              onClick={handleDrawerToggle}
-              sx={{ mb: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
-            <IconButton
-              color={isRunning ? 'error' : 'primary'}
-              disabled={!selectedFile}
-              onClick={handleRunStopClick}
-              sx={{
-                width: 48,
-                height: 48,
-                backgroundColor: isRunning
-                  ? 'error.main'
-                  : selectedFile
-                  ? 'primary.main'
-                  : 'action.disabled',
-                color: isRunning
-                  ? 'error.contrastText'
-                  : selectedFile
-                  ? 'primary.contrastText'
-                  : 'text.disabled',
-                '&:hover': {
-                  backgroundColor: isRunning
-                    ? 'error.dark'
-                    : selectedFile
-                    ? 'primary.dark'
-                    : 'action.hover',
-                },
-                '&:disabled': {
-                  backgroundColor: 'action.disabled',
-                  color: 'text.disabled',
-                },
-                '& .MuiSvgIcon-root': {
-                  fontSize: '1.5rem',
-                },
-              }}
-            >
-              {isRunning ? <StopIcon /> : <PlayArrowIcon />}
-            </IconButton>
+            <Toolbar sx={{ justifyContent: 'center' }}>
+              <IconButton onClick={handleDrawerToggle} size="large">
+                <MenuIcon />
+              </IconButton>
+            </Toolbar>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 1 }}>
+              <IconButton
+                size="large"
+                sx={{ mb: 2 }}
+                onClick={handleRunStopClick}
+                disabled={!selectedFile || isLoadingData}
+              >
+                {isRunning ? <StopIcon /> : <PlayArrowIcon />}
+              </IconButton>
+              <IconButton size="large" sx={{ mb: 2 }} onClick={() => setShareModalOpen(true)}>
+                <ShareIcon />
+              </IconButton>
+              <IconButton size="large" sx={{ mb: 2 }} onClick={() => setHelpModalOpen(true)}>
+                <HelpOutlineIcon />
+              </IconButton>
+              <IconButton
+                component={Link}
+                href="https://github.com/braingeneers/cytoverse"
+                target="_blank"
+                size="large"
+              >
+                <GitHubIcon />
+              </IconButton>
+            </Box>
           </Box>
         )}
 
-        {/* Hamburger Menu Button - Only shown on mobile when sidebar is closed */}
-        {!sidebarOpen && isMobile && (
-          <IconButton
-            color="primary"
-            aria-label="open drawer"
-            onClick={handleDrawerToggle}
-            sx={{
-              position: 'fixed',
-              top: 16,
-              left: 16,
-              zIndex: (theme) => theme.zIndex.drawer + 1,
-              backgroundColor: 'background.paper',
-              '&:hover': {
-                backgroundColor: 'action.hover',
-              },
-            }}
-          >
-            <MenuIcon />
-          </IconButton>
-        )}
-
-        {/* Sidebar Drawer */}
+        {/* Main Sidebar */}
         <Drawer
           variant={isMobile ? 'temporary' : 'persistent'}
           open={sidebarOpen}
-          onClose={isMobile ? handleDrawerToggle : undefined}
+          onClose={handleDrawerToggle}
           sx={{
-            width: drawerWidth,
+            width: sidebarOpen ? drawerWidth : 0,
             flexShrink: 0,
             '& .MuiDrawer-paper': {
               width: drawerWidth,
@@ -793,289 +676,178 @@ function App() {
           }}
         >
           <Toolbar>
-            <Typography variant="h6" sx={{ flexGrow: 1 }}>
-              CytoVerse
+            <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+              Cytoverse
             </Typography>
-            <IconButton
-              size="small"
-              onClick={() => setHelpModalOpen(true)}
-              sx={{
-                color: 'text.secondary',
-                mr: 1,
-                '&:focus': {
-                  outline: 'none',
-                },
-                '&:focus-visible': {
-                  outline: 'none',
-                },
-              }}
-            >
-              <HelpOutlineIcon />
-            </IconButton>
-            <IconButton
-              component={Link}
-              href="https://github.com/braingeneers/cytoverse"
-              target="_blank"
-              sx={{
-                color: 'inherit',
-                mr: 1,
-                '&:focus': {
-                  outline: 'none',
-                },
-                '&:focus-visible': {
-                  outline: 'none',
-                },
-              }}
-            >
-              <GitHubIcon />
-            </IconButton>
             <IconButton onClick={handleDrawerToggle}>
               <ChevronLeftIcon />
             </IconButton>
           </Toolbar>
-          <Box sx={{ p: 2 }}>
+          <Box sx={{ overflow: 'auto', p: 2 }}>
             {/* File Selection */}
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel id="file-input-label" shrink sx={{ backgroundColor: 'background.paper', px: 0.5 }}>
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
                 File
-              </InputLabel>
+              </Typography>
               <MuiFileInput
-                fullWidth
-                placeholder="Select an AnnData/Scanpy (.h5ad) file"
                 value={selectedFile}
                 onChange={setSelectedFile}
-                inputProps={{ accept: '.h5ad' }}
+                label="Select H5AD file"
+                variant="outlined"
+                fullWidth
+                accept=".h5ad"
               />
-            </FormControl>
-
-            {/* Model Selection */}
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel id="model-select-label">Model</InputLabel>
-              <Select
-                labelId="model-select-label"
-                id="model-select"
-                value={selectedModel}
-                label="Model"
-                onChange={(e) => setSelectedModel(e.target.value)}
-              >
-                <MenuItem value="scimilarity">scimilarity</MenuItem>
-                <MenuItem value="brain">brain</MenuItem>
-              </Select>
-            </FormControl>
-
-            {/* Category Selection */}
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel id="category-select-label">Category</InputLabel>
-              <Select
-                labelId="category-select-label"
-                id="category-select"
-                value={selectedCategory}
-                label="Category"
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                disabled={availableCategories.length === 0}
-              >
-                {availableCategories.map((category) => (
-                  <MenuItem key={category} value={category}>
-                    {category}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            {/* Execution Provider Selection */}
-            <FormControl component="fieldset" sx={{ mb: 2 }}>
-              <RadioGroup
-                value={useWebGPU ? 'gpu' : 'cpu'}
-                onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}
-                row
-              >
-                <FormControlLabel
-                  data-testid="radio-cpu-option"
-                  value="cpu"
-                  control={<Radio />}
-                  label="CPU"
-                />
-                <FormControlLabel
-                  data-testid="radio-gpu-option"
-                  value="gpu"
-                  control={<Radio />}
-                  label="GPU"
-                  disabled={!hasWebGPU}
-                />
-              </RadioGroup>
-            </FormControl>
-
-            <Button
-              data-testid="run-stop-button"
-              variant="contained"
-              fullWidth
-              disabled={!selectedFile}
-              onClick={handleRunStopClick}
-              startIcon={isRunning ? <StopIcon /> : <PlayArrowIcon />}
-              sx={{
-                height: 56,
-                borderRadius: 1,
-                backgroundColor: isRunning ? 'error.main' : 'primary.main',
-                '&:hover': {
-                  backgroundColor: isRunning ? 'error.dark' : 'primary.dark',
-                },
-                '&:disabled': {
-                  backgroundColor: 'action.disabled',
-                  color: 'text.disabled',
-                },
-                fontSize: '1rem',
-                fontWeight: 'bold',
-              }}
-            >
-              {isRunning ? 'STOP' : 'RUN'}
-            </Button>
-
-            {/* Dataset Statistics */}
-            <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              {xTrainData && yTrainData && categoryLabels && categoryData ? (
-                <Box>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Plotted Cells:</strong> {xTrainData.length.toLocaleString()}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Category:</strong> {selectedCategory}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Labels:</strong> {categoryLabels.length}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Reference Cells:</strong> {categoryData.length.toLocaleString()}
-                  </Typography>
-                </Box>
-              ) : isLoadingData ? (
-                <Typography variant="body2" color="text.secondary">
-                  Loading statistics...
-                </Typography>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No data loaded
-                </Typography>
-              )}
             </Box>
 
-            {/* Status and Progress */}
-            <Box sx={{ mt: 2 }}>
-              <Typography data-cy="status">{statusMessage}</Typography>
-              {isRunning && (
-                <Box my={2}>
-                  <LinearProgress variant="determinate" value={progress} />
-                  <Typography>{progress}%</Typography>
-                </Box>
-              )}
+            {/* Model Selection */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Model
+              </Typography>
+              <FormControl fullWidth>
+                <InputLabel>Model</InputLabel>
+                <Select
+                  value={selectedModel}
+                  label="Model"
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  disabled={isRunning}
+                >
+                  <MenuItem value="brain">Brain</MenuItem>
+                  <MenuItem value="scimilarity">Scimilarity</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
 
-              {!window.crossOriginIsolated && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  Unable to use multiple cpu cores - notify the site owner
+            {/* Category Selection */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Category
+              </Typography>
+              <FormControl fullWidth>
+                <InputLabel>Category</InputLabel>
+                <Select
+                  value={selectedCategory}
+                  label="Category"
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  disabled={isLoadingData || availableCategories.length === 0}
+                >
+                  {availableCategories.map((category) => (
+                    <MenuItem key={category} value={category}>
+                      {category}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+
+            {/* WebGPU Selection */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Processing
+              </Typography>
+              <FormControl component="fieldset">
+                <RadioGroup
+                  value={useWebGPU ? 'gpu' : 'cpu'}
+                  onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}
+                  disabled={isRunning}
+                >
+                  <FormControlLabel value="cpu" control={<Radio />} label="CPU (WebAssembly)" />
+                  <FormControlLabel
+                    value="gpu"
+                    control={<Radio />}
+                    label="GPU (WebGPU)"
+                    disabled={!hasWebGPU}
+                  />
+                </RadioGroup>
+              </FormControl>
+              {!hasWebGPU && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  WebGPU not available in this browser
                 </Alert>
               )}
             </Box>
 
-            {/* Predicted Labels */}
-            <Box
-              sx={{
-                mt: 2,
-                p: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 1,
-              }}
+            {/* Run/Stop Button */}
+            <Button
+              variant="contained"
+              size="large"
+              fullWidth
+              startIcon={isRunning ? <StopIcon /> : <PlayArrowIcon />}
+              onClick={handleRunStopClick}
+              disabled={!selectedFile || isLoadingData}
+              sx={{ mb: 3 }}
             >
-              <Box
-                sx={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  mb: 2,
-                }}
-              >
-                <Typography variant="h6">Predicted Labels</Typography>
-                <IconButton
-                  size="small"
-                  onClick={() => setShareModalOpen(true)}
-                  sx={{
-                    color: 'primary.main',
-                    '&:focus': {
-                      outline: 'none',
-                    },
-                    '&:focus-visible': {
-                      outline: 'none',
-                    },
-                  }}
-                >
-                  <ShareIcon />
-                </IconButton>
+              {isRunning ? 'Stop' : 'Start'}
+            </Button>
+
+            {/* Progress and Status */}
+            {(progress > 0 || statusMessage) && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  {statusMessage}
+                </Typography>
+                <LinearProgress variant="determinate" value={progress} />
+                <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
+                  {progress.toFixed(1)}%
+                </Typography>
               </Box>
-              {totalLabeled > 0 ? (
-                <Box>
-                  <Typography variant="body2" sx={{ mb: 2, fontWeight: 'bold' }}>
-                    Total Labeled: {totalLabeled.toLocaleString()}
-                  </Typography>
-                  <Box
-                    sx={{
-                      maxHeight: 200,
-                      overflowY: 'auto',
-                      // Hide scrollbar while keeping functionality
-                      '&::-webkit-scrollbar': {
-                        display: 'none',
-                      },
-                      msOverflowStyle: 'none',
-                      scrollbarWidth: 'none',
-                    }}
-                  >
-                    {Object.entries(labelCounts)
-                      .sort(([, a], [, b]) => b - a) // Sort by count descending
-                      .map(([label, count]) => (
-                        <Box
-                          key={label}
-                          sx={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            py: 0.5,
-                            borderBottom: '1px solid',
-                            borderColor: 'divider',
-                          }}
-                        >
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              flex: 1,
-                              mr: 1,
-                            }}
-                          >
-                            {label}
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              fontWeight: 'bold',
-                              minWidth: 'fit-content',
-                            }}
-                          >
-                            {count.toLocaleString()}
-                          </Typography>
-                        </Box>
-                      ))}
-                  </Box>
-                </Box>
-              ) : isRunning ? (
-                <Typography variant="body2" color="text.secondary">
-                  Waiting for predictions...
+            )}
+
+            {/* Label Counts */}
+            {Object.keys(labelCounts).length > 0 && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Predicted Labels ({totalLabeled.toLocaleString()} total)
                 </Typography>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No predictions yet
-                </Typography>
-              )}
+                {Object.entries(labelCounts)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([label, count]) => (
+                    <Box
+                      key={label}
+                      sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}
+                    >
+                      <Typography variant="body2" noWrap sx={{ flexGrow: 1, mr: 1 }}>
+                        {label}
+                      </Typography>
+                      <Typography variant="body2">{count.toLocaleString()}</Typography>
+                    </Box>
+                  ))}
+              </Box>
+            )}
+
+            {/* Action Buttons */}
+            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<ShareIcon />}
+                onClick={() => setShareModalOpen(true)}
+                disabled={Object.keys(labelCounts).length === 0}
+              >
+                Share
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setHelpModalOpen(true)}
+              >
+                Help
+              </Button>
             </Box>
+
+            {/* GitHub Link */}
+            <Button
+              component={Link}
+              href="https://github.com/braingeneers/cytoverse"
+              target="_blank"
+              variant="outlined"
+              size="small"
+              startIcon={<GitHubIcon />}
+              fullWidth
+            >
+              GitHub
+            </Button>
           </Box>
         </Drawer>
 
@@ -1084,132 +856,89 @@ function App() {
           component="main"
           sx={{
             flexGrow: 1,
-            width: {
-              sm: `calc(100% - ${sidebarOpen ? drawerWidth : isMobile ? 0 : miniDrawerWidth}px)`,
-            },
-            ml: { sm: sidebarOpen ? 0 : `${miniDrawerWidth}px` },
+            marginLeft: sidebarOpen ? 0 : isMobile ? 0 : `${miniDrawerWidth}px`,
             transition: (theme) =>
-              theme.transitions.create(['margin', 'width'], {
+              theme.transitions.create('margin', {
                 easing: theme.transitions.easing.sharp,
                 duration: theme.transitions.duration.leavingScreen,
               }),
-            height: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
           }}
         >
-          {isLoadingData ? (
-            <Box display="flex" justifyContent="center" alignItems="center" height="100%">
-              <Typography>Loading scatter plot data...</Typography>
-            </Box>
-          ) : xTrainData && yTrainData && categoryData && categoryLabels.length > 0 ? (
-            <ScatterPlotWebGL
-              xTrainData={xTrainData}
-              yTrainData={yTrainData}
-              xTestData={xTestData}
-              yTestData={yTestData}
-              testDataLabels={testDataLabels}
-              categoryData={categoryData}
-              categoryLabels={categoryLabels}
-              processingComplete={processingComplete}
-            />
-          ) : (
-            <Box display="flex" justifyContent="center" alignItems="center" height="100%">
-              <Typography>No data available</Typography>
-            </Box>
-          )}
+          <ScatterPlotWebGL
+            xTrainData={xTrainData}
+            yTrainData={yTrainData}
+            categoryData={categoryData}
+            categoryLabels={categoryLabels}
+            xTestData={xTestData}
+            yTestData={yTestData}
+            testDataLabels={testDataLabels}
+            isLoading={isLoadingData}
+          />
         </Box>
-      </Box>
 
-      {/* Share Modal */}
-      <Dialog
-        open={shareModalOpen}
-        onClose={() => setShareModalOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Share Embeddings</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 1 }}>
+        {/* Share Modal */}
+        <Dialog open={shareModalOpen} onClose={() => setShareModalOpen(false)}>
+          <DialogTitle>Share Labels</DialogTitle>
+          <DialogContent>
             <TextField
-              fullWidth
+              autoFocus
+              margin="dense"
               label="Email Address"
               type="email"
+              fullWidth
+              variant="outlined"
               value={shareEmail}
               onChange={(e) => setShareEmail(e.target.value)}
-              sx={{ mb: 2 }}
             />
-            <Typography variant="body2" color="text.secondary">
-              Get introduced to others with similar embeddings? Enter your email and we'll connect
-              you. We'll never upload or share your raw data, only your embeddings. (Coming soon...)
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShareModalOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleShareLabels} disabled={!shareEmail.trim()}>
-            Share
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShareModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleShareLabels} variant="contained">
+              Share
+            </Button>
+          </DialogActions>
+        </Dialog>
 
-      {/* Help Modal */}
-      <Dialog open={helpModalOpen} onClose={() => setHelpModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>About CytoVerse</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 1 }}>
-            <Typography variant="body1" sx={{ mb: 2 }}>
-              CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed for
-              cell annotation using foundation model embeddings. It runs entirely in the browser,
-              streaming h5ad files from local storage without uploading data or requiring server
-              computation. It uses SCimilarity for cell embeddings and parametric UMAP for 2D
-              visualization, leveraging large training datasets for accurate cell annotation. An
-              Inverted File with Product Quantization (IVFPQ) enables fast approximate nearest
-              neighbor searches across over 20 million samples. Built on WebAssembly and ONNX for
-              high-speed processing, it supports unlimited streaming analysis of h5ad files via
-              h5wasm. This enables distributed collaborative discovery, allowing researchers to
-              explore shared embedding spaces to identify overlapping or complementary assays,
-              particularly for perturbseq-driven research. The architecture ensures privacy,
-              scalability, and collaborative potential without server dependency.
+        {/* Help Modal */}
+        <Dialog open={helpModalOpen} onClose={() => setHelpModalOpen(true)}>
+          <DialogTitle>Help</DialogTitle>
+          <DialogContent>
+            <Typography paragraph>
+              Cytoverse is a real-time single-cell analysis tool that maps your data using machine
+              learning models.
             </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setHelpModalOpen(false)} variant="contained">
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <Typography paragraph>
+              <strong>Getting Started:</strong>
+            </Typography>
+            <Typography component="div">
+              <ol>
+                <li>Select an H5AD file containing single-cell RNA-seq data</li>
+                <li>Choose a pre-trained model (Brain or Scimilarity)</li>
+                <li>Select a category for cell type prediction</li>
+                <li>Choose CPU or GPU processing (if available)</li>
+                <li>Click Start to begin analysis</li>
+              </ol>
+            </Typography>
+            <Typography paragraph>
+              The tool will display your cells in real-time as they are processed and labeled.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setHelpModalOpen(false)}>Close</Button>
+          </DialogActions>
+        </Dialog>
 
-      {/* Error Modal */}
-      <Dialog
-        open={errorModalOpen}
-        onClose={() => setErrorModalOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle data-cy="error-title">Error Processing File</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 1 }}>
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {errorMessage}
-            </Alert>
-            <Typography variant="body2" color="text.secondary">
-              The h5ad file could not be processed. Please ensure your file contains:
-              <ul>
-                <li>Cell names/barcodes in obs group</li>
-                <li>Gene names/symbols in var group</li>
-                <li>Raw counts in layers/counts, layers/raw_counts, raw/X, or X</li>
-              </ul>
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setErrorModalOpen(false)} variant="contained">
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+        {/* Error Modal */}
+        <Dialog open={errorModalOpen} onClose={() => setErrorModalOpen(false)}>
+          <DialogTitle>Error</DialogTitle>
+          <DialogContent>
+            <Typography>{errorMessage}</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setErrorModalOpen(false)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+      </Box>
     </ThemeProvider>
   )
 }

@@ -70,14 +70,14 @@ const generateCategoryColors = (numCategories: number): string[] => {
 }
 
 interface ScatterPlotWebGLProps {
-  xTrainData: Vector
-  yTrainData: Vector
+  xTrainData: Vector | null
+  yTrainData: Vector | null
   xTestData: number[]
   yTestData: number[]
   testDataLabels: number[]
-  categoryData: Vector
+  categoryData: Vector | null
   categoryLabels: string[]
-  processingComplete?: boolean
+  isLoading?: boolean
 }
 
 const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
@@ -88,7 +88,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
   testDataLabels,
   categoryData,
   categoryLabels,
-  processingComplete,
+  isLoading,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -227,11 +227,11 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
     if (xTestData.length === 0 && yTestData.length === 0) {
       const scatterplot = scatterplotRef.current
       const numPoints = Math.min(xTrainData.length, yTrainData.length, categoryData.length)
-      
+
       // Get training data for redraw
       let xArray: Float32Array
       let yArray: Float32Array
-      
+
       if (xTrainData.data.length > 0 && xTrainData.data[0].values instanceof Float32Array) {
         xArray = xTrainData.data[0].values as Float32Array
       } else {
@@ -240,7 +240,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
           xArray[i] = xTrainData.get(i) || 0
         }
       }
-      
+
       if (yTrainData.data.length > 0 && yTrainData.data[0].values instanceof Float32Array) {
         yArray = yTrainData.data[0].values as Float32Array
       } else {
@@ -249,7 +249,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
           yArray[i] = yTrainData.get(i) || 0
         }
       }
-      
+
       let categoryArrayData: number[]
       if (categoryData.data.length > 0 && categoryData.data[0].values) {
         categoryArrayData = Array.from(categoryData.data[0].values)
@@ -259,23 +259,23 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
           (_, i) => categoryData.get(i) || 0
         )
       }
-      
+
       const trainX = Array.from(xArray)
       const trainY = Array.from(yArray)
       const trainSize = new Array(numPoints).fill(0)
-      
+
       const columnData = {
         x: new Float32Array(trainX),
         y: new Float32Array(trainY),
         valueA: categoryArrayData,
         valueB: trainSize,
       }
-      
+
       // Redraw with only training data
       scatterplot.draw(columnData).then(() => {
         console.log('Cleared test data - showing only training points')
       })
-      
+
       return
     }
 
@@ -369,15 +369,14 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
           numPoints,
           'training +',
           xTestData.length,
-          'test)',
-          processingComplete ? '- FINAL REDRAW' : ''
+          'test)'
         )
       } finally {
         isDrawingRef.current = false
       }
     }
     redrawAllData()
-  }, [xTestData, yTestData, testDataLabels, xTrainData, yTrainData, categoryData, categoryLabels, processingComplete])
+  }, [xTestData, yTestData, testDataLabels, xTrainData, yTrainData, categoryData, categoryLabels])
 
   return (
     <div
