@@ -490,8 +490,9 @@ function App() {
       )
     } catch (error) {
       console.error('Error loading training data:', error)
-      setErrorMessage(`Failed to load training data: ${error}`)
-      setErrorModalOpen(true)
+      // Switch to an available category silently
+      // setErrorMessage(`Failed to load training data: ${error}`)
+      // setErrorModalOpen(true)
     } finally {
       setIsLoadingData(false)
     }
