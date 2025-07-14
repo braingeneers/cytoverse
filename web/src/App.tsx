@@ -68,7 +68,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [progress, setProgress] = useState(0)
-  const [selectedModel, setSelectedModel] = useState<string>('brain')
+  const [selectedModel, setSelectedModel] = useState<string>('scimilarity')
 
   const [isRunning, setIsRunning] = useState(false)
   const [hasWebGPU, setHasWebGPU] = useState(false)
@@ -81,7 +81,7 @@ function App() {
   const [categoryData, setCategoryData] = useState<Vector | null>(null)
   const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [selectedCategory, setSelectedCategory] = useState<string>('prediction')
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
 
   // Test data state - incremental mappings
