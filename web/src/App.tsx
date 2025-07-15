@@ -763,8 +763,14 @@ function App() {
                     onChange={(e) => setUseWebGPU(e.target.value === 'gpu')}
                     row
                   >
-                    <FormControlLabel value="cpu" control={<Radio />} label="CPU" />
                     <FormControlLabel
+                      data-testid="radio-cpu-option"
+                      value="cpu"
+                      control={<Radio />}
+                      label="CPU"
+                    />
+                    <FormControlLabel
+                      data-testid="radio-gpu-option"
                       value="gpu"
                       control={<Radio />}
                       label="GPU"
@@ -782,6 +788,7 @@ function App() {
 
             {/* Run/Stop Button */}
             <Button
+              data-testid="run-stop-button"
               variant="contained"
               size="large"
               fullWidth
@@ -796,7 +803,7 @@ function App() {
             {/* Progress and Status */}
             {(progress > 0 || statusMessage) && (
               <Box sx={{ mb: 3 }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>
+                <Typography data-cy="status" variant="body2" sx={{ mb: 1 }}>
                   {statusMessage}
                 </Typography>
                 <LinearProgress variant="determinate" value={progress} />
@@ -960,7 +967,7 @@ function App() {
         <Dialog open={errorModalOpen} onClose={() => setErrorModalOpen(false)}>
           <DialogTitle>Error</DialogTitle>
           <DialogContent>
-            <Typography>{errorMessage}</Typography>
+            <Typography data-cy="error-title">{errorMessage}</Typography>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setErrorModalOpen(false)}>Close</Button>
