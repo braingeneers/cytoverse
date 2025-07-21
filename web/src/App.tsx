@@ -81,7 +81,7 @@ function App() {
   const [categoryData, setCategoryData] = useState<Vector | null>(null)
   const [categoryLabels, setCategoryLabels] = useState<string[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>('prediction')
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
 
   // Test data state - incremental mappings
@@ -420,7 +420,12 @@ function App() {
         setAvailableCategories(categories)
 
         if (!selectedCategory || !categories.includes(selectedCategory)) {
-          if (categories.length > 0) {
+          // REMIND: Should switch to specifying in metadata.json
+          if (modelID === 'scimilarity' && categories.includes('prediction')) {
+            setSelectedCategory('prediction')
+          } else if (modelID === 'brain' && categories.includes('CellType')) {
+            setSelectedCategory('CellType')
+          } else if (categories.length > 0) {
             setSelectedCategory(categories[0])
           }
         }
@@ -701,7 +706,7 @@ function App() {
                 <InputLabel>Reference</InputLabel>
                 <Select
                   value={selectedModel}
-                  label="Model"
+                  label="Reference"
                   onChange={(e) => setSelectedModel(e.target.value)}
                   disabled={isRunning}
                 >
@@ -719,7 +724,7 @@ function App() {
                   value={selectedCategory}
                   label="Category"
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  disabled={isLoadingData || availableCategories.length === 0}
+                  disabled={isRunning}
                 >
                   {availableCategories.map((category) => (
                     <MenuItem key={category} value={category}>
