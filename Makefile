@@ -29,12 +29,11 @@ scimilarity-embeddings:
 
 brain-embeddings:
 	python src/cytoverse/scripts/ingest_h5ad_as_reference.py \
-	data/integrated_data_10k.h5ad \
+	data/brain/brain.h5ad \
 	data/scimilarity/model_v1.1 \
 	data/brain \
 	--labels CellType \
-	--labels tissue_type \
-	--validate
+	--labels tissue_type
 
 # Embedding Model
 embedding-model:
