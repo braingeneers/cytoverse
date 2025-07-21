@@ -64,7 +64,7 @@ const generateCategoryColors = (numCategories: number): string[] => {
     colors.push(`#${rHex}${gHex}${bHex}`)
   }
 
-  colors.push('#FF0000') // Add bright red for test points
+  colors.push('#999999') // Add white for un-labeled query cells
 
   return colors
 }

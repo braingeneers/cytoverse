@@ -684,6 +684,7 @@ function App() {
             {/* File Selection */}
             <Box sx={{ mb: 3 }}>
               <MuiFileInput
+                key={selectedFile?.name || 'no-file'}
                 value={selectedFile}
                 onChange={setSelectedFile}
                 label="File"
