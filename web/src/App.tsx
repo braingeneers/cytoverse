@@ -36,7 +36,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import InfoIcon from '@mui/icons-material/Info'
 import { MuiFileInput } from 'mui-file-input'
 import { tableFromIPC, Vector } from 'apache-arrow'
-import { openDB, DBSchema, IDBPDatabase } from 'idb'
+import { openDB, deleteDB, DBSchema, IDBPDatabase } from 'idb'
 
 import EmbeddingWorker from './embedder?worker'
 import LabelerWorker from './labeler?worker'
@@ -67,22 +67,17 @@ interface EmbeddingBatch {
 
 // IndexedDB schema
 interface ResultsDB extends DBSchema {
-  categoryLabels: {
+  labels: {
     key: number
-    value: {
-      id: number
-      label: string
-    }
+    value: string
   }
-  testResults: {
-    key: number
+  results: {
+    key: string
     value: {
-      vectorId: string
-      categoryId: number
+      labelId: number
       x: number
       y: number
     }
-    indexes: { 'by-vector': string }
   }
 }
 
@@ -249,13 +244,13 @@ function App() {
 
               // Store results in IndexedDB
               if (db && evt.data.test_vector_id && evt.data.umap_coordinates) {
-                const tx = db.transaction('testResults', 'readwrite')
+                const tx = db.transaction('results', 'readwrite')
                 const promises: Promise<any>[] = []
-                
+
                 for (let idx = 0; idx < evt.data.train_vector_id.length; idx++) {
                   const trainVectorId = evt.data.train_vector_id[idx]
                   let categoryIndex = -1
-                  
+
                   if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
                     categoryIndex = categoryData.get(trainVectorId)
                     if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
@@ -264,22 +259,26 @@ function App() {
                       validLabels++
                     }
                   }
-                  
+
                   newTestLabels.push(categoryIndex)
-                  
+
                   // Store in IndexedDB
                   if (evt.data.test_vector_id[idx] && evt.data.umap_coordinates[idx]) {
-                    promises.push(tx.store.add({
-                      vectorId: evt.data.test_vector_id[idx],
-                      categoryId: categoryIndex,
-                      x: evt.data.umap_coordinates[idx][0],
-                      y: evt.data.umap_coordinates[idx][1]
-                    }))
+                    promises.push(
+                      tx.store.put(
+                        {
+                          labelId: categoryIndex,
+                          x: evt.data.umap_coordinates[idx][0],
+                          y: evt.data.umap_coordinates[idx][1],
+                        },
+                        evt.data.test_vector_id[idx]
+                      )
+                    )
                   }
                 }
-                
+
                 // Wait for all database operations to complete
-                Promise.all(promises).catch(error => {
+                Promise.all(promises).catch((error) => {
                   console.error('Failed to store test results:', error)
                 })
               } else {
@@ -606,39 +605,34 @@ function App() {
 
     // Initialize or clear the IndexedDB
     try {
+      // Delete existing database if it exists
       if (db) {
-        await db.close()
+        db.close()
+        db = null
       }
-      
+      await deleteDB('cytoverse')
+
       // Create new database
-      db = await openDB<ResultsDB>('labelerResults', 1, {
+      db = await openDB<ResultsDB>('cytoverse', 1, {
         upgrade(db) {
           // Create categoryLabels store
-          if (!db.objectStoreNames.contains('categoryLabels')) {
-            db.createObjectStore('categoryLabels', { keyPath: 'id' })
+          if (!db.objectStoreNames.contains('labels')) {
+            db.createObjectStore('labels')
           }
-          
+
           // Create testResults store
-          if (!db.objectStoreNames.contains('testResults')) {
-            const testResults = db.createObjectStore('testResults', { autoIncrement: true })
-            testResults.createIndex('by-vector', 'vectorId')
+          if (!db.objectStoreNames.contains('results')) {
+            db.createObjectStore('results')
           }
         },
       })
-      
-      // Clear existing data
-      const tx = db.transaction(['categoryLabels', 'testResults'], 'readwrite')
-      await tx.objectStore('categoryLabels').clear()
-      await tx.objectStore('testResults').clear()
-      await tx.done
-      
+
+      // Database is now fresh - no need to clear data
+
       // Store category labels
-      const categoryTx = db.transaction('categoryLabels', 'readwrite')
+      const categoryTx = db.transaction('labels', 'readwrite')
       for (let i = 0; i < categoryLabels.length; i++) {
-        await categoryTx.store.add({
-          id: i,
-          label: categoryLabels[i]
-        })
+        await categoryTx.store.put(categoryLabels[i], i)
       }
       await categoryTx.done
     } catch (error) {
@@ -696,42 +690,48 @@ function App() {
       console.error('No database connection')
       return
     }
-    
+
     try {
       // Fetch all data from IndexedDB
-      const categoryTx = db.transaction('categoryLabels', 'readonly')
-      const categoryLabels = await categoryTx.store.getAll()
+      const categoryTx = db.transaction('labels', 'readonly')
+      const storedLabels = await categoryTx.store.getAll()
+      const storedLabelKeys = await categoryTx.store.getAllKeys()
       await categoryTx.done
-      
-      const resultsTx = db.transaction('testResults', 'readonly')
+
+      const resultsTx = db.transaction('results', 'readonly')
       const testResults = await resultsTx.store.getAll()
+      const testResultKeys = await resultsTx.store.getAllKeys()
       await resultsTx.done
-      
+
       // Create label lookup map
       const labelMap: { [id: number]: string } = {}
-      categoryLabels.forEach(cat => {
-        labelMap[cat.id] = cat.label
+      storedLabels.forEach((label, index) => {
+        const labelId = storedLabelKeys[index]
+        labelMap[labelId] = label
       })
-      
+
       // Generate CSV content
-      let csv = 'cellId,categoryLabel\n'
-      
-      testResults.forEach(result => {
-        const label = result.categoryId >= 0 ? labelMap[result.categoryId] || 'Unknown' : 'Unknown'
-        csv += `"${result.vectorId}","${label}"\n`
+      let csv = 'cell_id,category_label\n'
+
+      testResults.forEach((result, index) => {
+        const vectorId = testResultKeys[index]
+        const label = result.labelId >= 0 ? labelMap[result.labelId] || 'Unknown' : 'Unknown'
+        csv += `"${vectorId}","${label}"\n`
       })
-      
+
       // Create blob and download
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `labeler_results_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`
+      const baseFilename = selectedFile?.name.replace('.h5ad', '') || 'results'
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '_')
+      link.download = `${baseFilename}_labels_${timestamp}.csv`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
-      
+
       console.log(`Exported ${testResults.length} results to CSV`)
     } catch (error) {
       console.error('Failed to export results:', error)
@@ -818,20 +818,17 @@ function App() {
             <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
               Cytoverse
             </Typography>
-            <Button
-              sx={{ mr: -4 }}
-              variant="text"
-              size="small"
-              startIcon={<HelpOutlineIcon />}
-              onClick={() => setHelpModalOpen(true)}
-            ></Button>
-            <Button
-              sx={{ mr: -3 }}
-              variant="text"
+            <IconButton sx={{ mr: 1 }} size="small" onClick={() => setHelpModalOpen(true)}>
+              <HelpOutlineIcon />
+            </IconButton>
+            <IconButton
+              sx={{ mr: 1 }}
               size="small"
               href="https://github.com/braingeneers/cytoverse"
-              startIcon={<GitHubIcon />}
-            ></Button>
+              component="a"
+            >
+              <GitHubIcon />
+            </IconButton>
             <IconButton onClick={handleDrawerToggle}>
               <ChevronLeftIcon />
             </IconButton>
@@ -981,24 +978,26 @@ function App() {
                     mb: 2,
                   }}
                 >
-                  <Typography variant="h6" sx={{ flexGrow: 1 }}>{selectedCategory && `${selectedCategory}`}</Typography>
-                  <Button
-                    sx={{ mr: -4 }}
-                    variant="text"
+                  <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                    {selectedCategory && `${selectedCategory}`}
+                  </Typography>
+                  <IconButton
+                    sx={{ mr: 1 }}
                     size="small"
-                    startIcon={<DownloadIcon />}
                     onClick={exportResultsToCSV}
                     disabled={Object.keys(labelCounts).length === 0 || isRunning}
                     title="Download results as CSV"
-                  ></Button>
-                  <Button
-                    sx={{ mr: -3 }}
-                    variant="text"
+                  >
+                    <DownloadIcon />
+                  </IconButton>
+                  <IconButton
+                    sx={{ mr: 1 }}
                     size="small"
-                    startIcon={<ShareIcon />}
                     onClick={() => setShareModalOpen(true)}
                     disabled={Object.keys(labelCounts).length === 0 || isRunning}
-                  ></Button>
+                  >
+                    <ShareIcon />
+                  </IconButton>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body1">Total:</Typography>
