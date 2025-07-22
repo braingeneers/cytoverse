@@ -31,10 +31,12 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import ShareIcon from '@mui/icons-material/Share'
+import DownloadIcon from '@mui/icons-material/Download'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import InfoIcon from '@mui/icons-material/Info'
 import { MuiFileInput } from 'mui-file-input'
 import { tableFromIPC, Vector } from 'apache-arrow'
+import { openDB, DBSchema, IDBPDatabase } from 'idb'
 
 import EmbeddingWorker from './embedder?worker'
 import LabelerWorker from './labeler?worker'
@@ -62,6 +64,29 @@ interface EmbeddingBatch {
   pq_embedding: Uint8Array
   umap_coordinates: number[][]
 }
+
+// IndexedDB schema
+interface ResultsDB extends DBSchema {
+  categoryLabels: {
+    key: number
+    value: {
+      id: number
+      label: string
+    }
+  }
+  testResults: {
+    key: number
+    value: {
+      vectorId: string
+      categoryId: number
+      x: number
+      y: number
+    }
+    indexes: { 'by-vector': string }
+  }
+}
+
+let db: IDBPDatabase<ResultsDB> | null = null
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -222,17 +247,55 @@ function App() {
               const newTestLabels: number[] = []
               let validLabels = 0
 
-              for (const trainVectorId of evt.data.train_vector_id) {
-                let categoryIndex = -1
-                if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-                  categoryIndex = categoryData.get(trainVectorId)
-                  if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
-                    const label = categoryLabels[categoryIndex]
-                    newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
-                    validLabels++
+              // Store results in IndexedDB
+              if (db && evt.data.test_vector_id && evt.data.umap_coordinates) {
+                const tx = db.transaction('testResults', 'readwrite')
+                const promises: Promise<any>[] = []
+                
+                for (let idx = 0; idx < evt.data.train_vector_id.length; idx++) {
+                  const trainVectorId = evt.data.train_vector_id[idx]
+                  let categoryIndex = -1
+                  
+                  if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+                    categoryIndex = categoryData.get(trainVectorId)
+                    if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
+                      const label = categoryLabels[categoryIndex]
+                      newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
+                      validLabels++
+                    }
+                  }
+                  
+                  newTestLabels.push(categoryIndex)
+                  
+                  // Store in IndexedDB
+                  if (evt.data.test_vector_id[idx] && evt.data.umap_coordinates[idx]) {
+                    promises.push(tx.store.add({
+                      vectorId: evt.data.test_vector_id[idx],
+                      categoryId: categoryIndex,
+                      x: evt.data.umap_coordinates[idx][0],
+                      y: evt.data.umap_coordinates[idx][1]
+                    }))
                   }
                 }
-                newTestLabels.push(categoryIndex)
+                
+                // Wait for all database operations to complete
+                Promise.all(promises).catch(error => {
+                  console.error('Failed to store test results:', error)
+                })
+              } else {
+                // Fallback: process without storing
+                for (const trainVectorId of evt.data.train_vector_id) {
+                  let categoryIndex = -1
+                  if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+                    categoryIndex = categoryData.get(trainVectorId)
+                    if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
+                      const label = categoryLabels[categoryIndex]
+                      newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
+                      validLabels++
+                    }
+                  }
+                  newTestLabels.push(categoryIndex)
+                }
               }
 
               // Update state
@@ -528,7 +591,7 @@ function App() {
     }
   }, [selectedCategory, loadTrainingData])
 
-  const start = () => {
+  const start = async () => {
     console.log('Starting embedding...', selectedFile?.name)
 
     // Clear any existing test data and state
@@ -540,6 +603,47 @@ function App() {
     totalNumCells.current = 0
     totalProcessed.current = 0
     pendingBatches.current = []
+
+    // Initialize or clear the IndexedDB
+    try {
+      if (db) {
+        await db.close()
+      }
+      
+      // Create new database
+      db = await openDB<ResultsDB>('labelerResults', 1, {
+        upgrade(db) {
+          // Create categoryLabels store
+          if (!db.objectStoreNames.contains('categoryLabels')) {
+            db.createObjectStore('categoryLabels', { keyPath: 'id' })
+          }
+          
+          // Create testResults store
+          if (!db.objectStoreNames.contains('testResults')) {
+            const testResults = db.createObjectStore('testResults', { autoIncrement: true })
+            testResults.createIndex('by-vector', 'vectorId')
+          }
+        },
+      })
+      
+      // Clear existing data
+      const tx = db.transaction(['categoryLabels', 'testResults'], 'readwrite')
+      await tx.objectStore('categoryLabels').clear()
+      await tx.objectStore('testResults').clear()
+      await tx.done
+      
+      // Store category labels
+      const categoryTx = db.transaction('categoryLabels', 'readwrite')
+      for (let i = 0; i < categoryLabels.length; i++) {
+        await categoryTx.store.add({
+          id: i,
+          label: categoryLabels[i]
+        })
+      }
+      await categoryTx.done
+    } catch (error) {
+      console.error('Failed to initialize IndexedDB:', error)
+    }
 
     // Start time tracking
     startTime.current = Date.now()
@@ -585,6 +689,53 @@ function App() {
     }
 
     terminateWorkers()
+  }
+
+  const exportResultsToCSV = async () => {
+    if (!db) {
+      console.error('No database connection')
+      return
+    }
+    
+    try {
+      // Fetch all data from IndexedDB
+      const categoryTx = db.transaction('categoryLabels', 'readonly')
+      const categoryLabels = await categoryTx.store.getAll()
+      await categoryTx.done
+      
+      const resultsTx = db.transaction('testResults', 'readonly')
+      const testResults = await resultsTx.store.getAll()
+      await resultsTx.done
+      
+      // Create label lookup map
+      const labelMap: { [id: number]: string } = {}
+      categoryLabels.forEach(cat => {
+        labelMap[cat.id] = cat.label
+      })
+      
+      // Generate CSV content
+      let csv = 'cellId,categoryLabel\n'
+      
+      testResults.forEach(result => {
+        const label = result.categoryId >= 0 ? labelMap[result.categoryId] || 'Unknown' : 'Unknown'
+        csv += `"${result.vectorId}","${label}"\n`
+      })
+      
+      // Create blob and download
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `labeler_results_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      console.log(`Exported ${testResults.length} results to CSV`)
+    } catch (error) {
+      console.error('Failed to export results:', error)
+    }
   }
 
   const handleDrawerToggle = () => {
@@ -830,16 +981,24 @@ function App() {
                     mb: 2,
                   }}
                 >
-                  <Typography variant="h6">{selectedCategory && `${selectedCategory}`}</Typography>
+                  <Typography variant="h6" sx={{ flexGrow: 1 }}>{selectedCategory && `${selectedCategory}`}</Typography>
                   <Button
-                    variant="outlined"
+                    sx={{ mr: -4 }}
+                    variant="text"
+                    size="small"
+                    startIcon={<DownloadIcon />}
+                    onClick={exportResultsToCSV}
+                    disabled={Object.keys(labelCounts).length === 0 || isRunning}
+                    title="Download results as CSV"
+                  ></Button>
+                  <Button
+                    sx={{ mr: -3 }}
+                    variant="text"
                     size="small"
                     startIcon={<ShareIcon />}
                     onClick={() => setShareModalOpen(true)}
-                    disabled={Object.keys(labelCounts).length === 0}
-                  >
-                    Share
-                  </Button>
+                    disabled={Object.keys(labelCounts).length === 0 || isRunning}
+                  ></Button>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body1">Total:</Typography>
