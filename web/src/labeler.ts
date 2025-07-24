@@ -185,8 +185,14 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         }
       }
 
+      if (bestTrainVectorId === -1) {
+        console.log(
+          "❌ No nearest neighbor found for test vector ${i} in batch. Selected partitions: ${selectedPartitions.join(', ')}"
+        )
+      }
+
       trainVectorIds.push(bestTrainVectorId)
-      
+
       // Release reconstructed vector memory
       reconstructed.fill(0)
     } catch (vectorError) {
