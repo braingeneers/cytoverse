@@ -186,6 +186,9 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       }
 
       trainVectorIds.push(bestTrainVectorId)
+      
+      // Release reconstructed vector memory
+      reconstructed.fill(0)
     } catch (vectorError) {
       console.error(`Error processing vector ${i}:`, vectorError)
       trainVectorIds.push(-1) // Use -1 to indicate failure

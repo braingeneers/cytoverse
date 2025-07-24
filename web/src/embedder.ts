@@ -747,6 +747,9 @@ async function start(
 
       const mappings = await mappingPromise
 
+      // Release the output tensor data
+      results.output.dispose()
+
       // Reshape into an array of 2D for the plotting packages
       const coordinates: number[][] = []
       for (let i = 0; i < mappings.output.dims[0]; i++) {
@@ -774,6 +777,12 @@ async function start(
         umap_coordinates: coordinates,
         totalToProcess: cellNames.length,
       })
+
+      // Release the mappings output tensor
+      mappings.output.dispose()
+
+      // Clear the current buffer data to release memory
+      buffers[activeBuffer].data.fill(0)
 
       // Swap buffers
       activeBuffer = nextBuffer

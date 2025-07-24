@@ -106,7 +106,7 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
 
-  // Test data state - incremental mappings
+  // Test data state - pre-allocated arrays for correct positioning
   const [xTestData, setXTestData] = useState<number[]>([])
   const [yTestData, setYTestData] = useState<number[]>([])
   const [testDataLabels, setTestDataLabels] = useState<number[]>([])
@@ -161,8 +161,11 @@ function App() {
   // Assign pending batches to available labelers
   const assignBatchToLabeler = useCallback(() => {
     if (pendingBatches.current.length === 0 || labelerWorkers.current.length === 0) {
+      console.log(`No batches to assign: pending=${pendingBatches.current.length}, workers=${labelerWorkers.current.length}`)
       return
     }
+
+    console.log(`Assigning batches: ${pendingBatches.current.length} pending, labelers busy: ${labelerBusy.current.map((b, i) => `${i}:${b}`).join(', ')}`)
 
     // Find an available labeler
     for (let i = 0; i < numLabelers; i++) {
@@ -173,7 +176,7 @@ function App() {
           continue
         }
 
-        console.log(`Assigning batch to labeler ${i}`)
+        console.log(`Assigning batch [${batch.start_index}-${batch.end_index}] to labeler ${i}`)
         labelerWorkers.current[i].postMessage({
           type: 'embedding',
           test_vector_id: batch.test_vector_id,
@@ -238,71 +241,64 @@ function App() {
             break
           case 'labeled':
             console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
+            console.log(`Labeled batch indices: ${evt.data.start_index} to ${evt.data.end_index}`)
             labelerBusy.current[i] = false
+
+            // Clear PQ embeddings from the batch to free memory
+            delete evt.data.pq_embedding
 
             // Process labeling results
             if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
               const newLabelCounts: { [label: string]: number } = {}
-              const newTestLabels: number[] = []
               let validLabels = 0
 
-              // Store results in IndexedDB
-              if (db && evt.data.test_vector_id && evt.data.umap_coordinates) {
-                const tx = db.transaction('results', 'readwrite')
-                const promises: Promise<any>[] = []
+              // First, calculate counts and prepare label updates
+              const labelUpdates: { index: number; categoryIndex: number }[] = []
+              
+              for (let idx = 0; idx < evt.data.train_vector_id.length; idx++) {
+                const trainVectorId = evt.data.train_vector_id[idx]
+                let categoryIndex = -1
 
-                for (let idx = 0; idx < evt.data.train_vector_id.length; idx++) {
-                  const trainVectorId = evt.data.train_vector_id[idx]
-                  let categoryIndex = -1
-
-                  if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-                    categoryIndex = categoryData.get(trainVectorId)
-                    if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
-                      const label = categoryLabels[categoryIndex]
-                      newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
-                      validLabels++
-                    }
-                  }
-
-                  newTestLabels.push(categoryIndex)
-
-                  // Store in IndexedDB
-                  if (evt.data.test_vector_id[idx] && evt.data.umap_coordinates[idx]) {
-                    promises.push(
-                      tx.store.put(
-                        {
-                          labelId: categoryIndex,
-                          x: evt.data.umap_coordinates[idx][0],
-                          y: evt.data.umap_coordinates[idx][1],
-                        },
-                        evt.data.test_vector_id[idx]
-                      )
-                    )
+                if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
+                  categoryIndex = categoryData.get(trainVectorId)
+                  if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
+                    const label = categoryLabels[categoryIndex]
+                    newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
+                    validLabels++
                   }
                 }
 
-                // Wait for all database operations to complete
-                Promise.all(promises).catch((error) => {
-                  console.error('Failed to store test results:', error)
-                })
-              } else {
-                // Fallback: process without storing
-                for (const trainVectorId of evt.data.train_vector_id) {
-                  let categoryIndex = -1
-                  if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-                    categoryIndex = categoryData.get(trainVectorId)
-                    if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
-                      const label = categoryLabels[categoryIndex]
-                      newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
-                      validLabels++
-                    }
-                  }
-                  newTestLabels.push(categoryIndex)
+                labelUpdates.push({ index: evt.data.start_index + idx, categoryIndex })
+
+                // Store in IndexedDB if available
+                if (db && evt.data.test_vector_id && evt.data.umap_coordinates && 
+                    evt.data.test_vector_id[idx] && evt.data.umap_coordinates[idx]) {
+                  const tx = db.transaction('results', 'readwrite')
+                  tx.store.put(
+                    {
+                      labelId: categoryIndex,
+                      x: evt.data.umap_coordinates[idx][0],
+                      y: evt.data.umap_coordinates[idx][1],
+                    },
+                    evt.data.test_vector_id[idx]
+                  ).catch((error) => {
+                    console.error('Failed to store test result:', error)
+                  })
                 }
               }
 
-              // Update state
-              setTestDataLabels((prev) => [...prev, ...newTestLabels])
+              // Batch update test labels
+              setTestDataLabels((prev) => {
+                const updated = [...prev]
+                for (const { index, categoryIndex } of labelUpdates) {
+                  if (index < updated.length) {
+                    updated[index] = categoryIndex
+                  }
+                }
+                return updated
+              })
+
+              // Update counts and progress
               setLabelCounts((prev) => {
                 const updated = { ...prev }
                 for (const [label, count] of Object.entries(newLabelCounts)) {
@@ -312,7 +308,7 @@ function App() {
               })
 
               setTotalLabeled((prevLabeled) => prevLabeled + validLabels)
-              totalProcessed.current += validLabels
+              totalProcessed.current += evt.data.train_vector_id.length
 
               const progressPercent = Math.min(
                 100,
@@ -323,7 +319,7 @@ function App() {
                 `Processed ${totalProcessed.current} of ${totalNumCells.current} cells...`
               )
 
-              if (totalProcessed.current >= totalNumCells.current) {
+              if (totalProcessed.current >= totalNumCells.current && pendingBatches.current.length === 0) {
                 setIsRunning(false)
                 if (startTime.current) {
                   const endTime = Date.now()
@@ -377,24 +373,50 @@ function App() {
           console.log(`Received embeddings: ${evt.data.start_index} to ${evt.data.end_index}`)
           totalNumCells.current = evt.data.totalToProcess
 
-          // Plot coordinates immediately
-          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
-            const newXPoints: number[] = []
-            const newYPoints: number[] = []
-
-            for (const coordinate of evt.data.umap_coordinates) {
-              if (coordinate && coordinate.length >= 2) {
-                const [normalizedX, normalizedY] = normalizeCoordinates(
-                  coordinate[0],
-                  coordinate[1]
-                )
-                newXPoints.push(normalizedX)
-                newYPoints.push(normalizedY)
-              }
+          // Initialize arrays if needed
+          setXTestData((prev) => {
+            if (prev.length < evt.data.totalToProcess) {
+              return new Array(evt.data.totalToProcess).fill(0)
             }
+            return prev
+          })
+          setYTestData((prev) => {
+            if (prev.length < evt.data.totalToProcess) {
+              return new Array(evt.data.totalToProcess).fill(0)
+            }
+            return prev
+          })
+          setTestDataLabels((prev) => {
+            if (prev.length < evt.data.totalToProcess) {
+              return new Array(evt.data.totalToProcess).fill(-1)
+            }
+            return prev
+          })
 
-            setXTestData((prev) => [...prev, ...newXPoints])
-            setYTestData((prev) => [...prev, ...newYPoints])
+          // Plot coordinates at correct indices
+          if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
+            setXTestData((prev) => {
+              const updated = [...prev]
+              for (let i = 0; i < evt.data.umap_coordinates.length; i++) {
+                const coordinate = evt.data.umap_coordinates[i]
+                if (coordinate && coordinate.length >= 2) {
+                  const [normalizedX] = normalizeCoordinates(coordinate[0], coordinate[1])
+                  updated[evt.data.start_index + i] = normalizedX
+                }
+              }
+              return updated
+            })
+            setYTestData((prev) => {
+              const updated = [...prev]
+              for (let i = 0; i < evt.data.umap_coordinates.length; i++) {
+                const coordinate = evt.data.umap_coordinates[i]
+                if (coordinate && coordinate.length >= 2) {
+                  const [, normalizedY] = normalizeCoordinates(coordinate[0], coordinate[1])
+                  updated[evt.data.start_index + i] = normalizedY
+                }
+              }
+              return updated
+            })
           }
 
           // Add to pending queue and try to assign to labeler
@@ -411,6 +433,13 @@ function App() {
         }
         case 'finished':
           console.log('Embedder finished processing')
+          console.log(`Pending batches: ${pendingBatches.current.length}`)
+          // Try to assign any remaining pending batches
+          for (let j = 0; j < numLabelers; j++) {
+            if (pendingBatches.current.length > 0) {
+              assignBatchToLabeler()
+            }
+          }
           break
         case 'error':
           console.error('Embedder error:', evt.data.error)

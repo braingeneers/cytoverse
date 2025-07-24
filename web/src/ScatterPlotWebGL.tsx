@@ -107,7 +107,7 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
       canvas: canvasRef.current,
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
-      pointSize: [1, 10, 5], // Use a range for point sizes: training, unlabeled test, labeled test
+      pointSize: [1, 6, 4], // Use a range for point sizes: training, unlabeled test, labeled test
       // performanceMode: true, // Enable performance mode for better rendering
     })
 
