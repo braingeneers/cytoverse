@@ -767,6 +767,8 @@ async function start(
       // Send embedding data: (test_vector_id, pq_embedding, umap_coordinates)
       self.postMessage({
         type: 'embedding',
+        start_index: batchStart,
+        end_index: batchStart + buffers[activeBuffer].size,
         test_vector_id: testVectorIds,
         pq_embedding: pqCodes,
         umap_coordinates: coordinates,

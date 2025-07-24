@@ -25,6 +25,8 @@ interface EmbeddingMessage {
   test_vector_id: string[]
   pq_embedding: Uint8Array
   umap_coordinates: number[][]
+  start_index: number
+  end_index: number
 }
 
 interface LabelerResultMessage {
@@ -204,6 +206,8 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
     pq_embedding,
     umap_coordinates,
     train_vector_id: trainVectorIds,
+    start_index: message.start_index,
+    end_index: message.end_index,
   } as LabelerResultMessage)
 
   console.log(

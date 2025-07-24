@@ -63,6 +63,8 @@ interface EmbeddingBatch {
   test_vector_id: string[]
   pq_embedding: Uint8Array
   umap_coordinates: number[][]
+  start_index: number
+  end_index: number
 }
 
 // IndexedDB schema
@@ -177,6 +179,8 @@ function App() {
           test_vector_id: batch.test_vector_id,
           pq_embedding: batch.pq_embedding,
           umap_coordinates: batch.umap_coordinates,
+          start_index: batch.start_index,
+          end_index: batch.end_index,
         })
         labelerBusy.current[i] = true
         break
@@ -370,6 +374,7 @@ function App() {
           break
         case 'embedding': {
           console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
+          console.log(`Received embeddings: ${evt.data.start_index} to ${evt.data.end_index}`)
           totalNumCells.current = evt.data.totalToProcess
 
           // Plot coordinates immediately
@@ -397,6 +402,8 @@ function App() {
             test_vector_id: evt.data.test_vector_id,
             pq_embedding: evt.data.pq_embedding,
             umap_coordinates: evt.data.umap_coordinates,
+            start_index: evt.data.start_index,
+            end_index: evt.data.end_index,
           }
           pendingBatches.current.push(batch)
           assignBatchToLabeler()
