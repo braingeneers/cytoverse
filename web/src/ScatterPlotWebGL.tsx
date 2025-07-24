@@ -356,7 +356,13 @@ const ScatterPlotWebGL: React.FC<ScatterPlotWebGLProps> = ({
 
     // Redraw all points (training + test)
     const redrawAllData = async () => {
-      if (isDrawingRef.current) return
+      if (isDrawingRef.current) {
+        console.log(
+          '❌ Skipping redraw - already drawing. Current test labels count:',
+          testDataLabels.filter((l) => l >= 0).length
+        )
+        return
+      }
       isDrawingRef.current = true
       try {
         await scatterplot.draw(columnData)
