@@ -97,5 +97,8 @@ ivfpq: pq-train ivf-train ivfpq-export
 # Testing
 update-validations:
 	python src/cytoverse/scripts/label.py \
-	      tests/GSE136831_subsample_10.h5ad \
-	      tests/GSE136831_subsample_10.labels.csv
+	      tests/GSE136831_subsample_100.h5ad \
+	      web/tests/GSE136831_subsample_100.labels.csv
+	python src/cytoverse/scripts/label.py \
+	      web/public/sample.h5ad \
+	      web/tests/sample.labels.csv
