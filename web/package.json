@@ -17,6 +17,7 @@
     "@mui/icons-material": "^7.1.2",
     "@mui/material": "^7.1.2",
     "apache-arrow": "^20.0.0",
+    "csv-parse": "^6.1.0",
     "h5wasm": "^0.8.1",
     "idb": "^8.0.3",
     "mui-file-input": "^7.0.0",

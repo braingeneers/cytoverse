@@ -161,11 +161,17 @@ function App() {
   // Assign pending batches to available labelers
   const assignBatchToLabeler = useCallback(() => {
     if (pendingBatches.current.length === 0 || labelerWorkers.current.length === 0) {
-      console.log(`No batches to assign: pending=${pendingBatches.current.length}, workers=${labelerWorkers.current.length}`)
+      console.log(
+        `No batches to assign: pending=${pendingBatches.current.length}, workers=${labelerWorkers.current.length}`
+      )
       return
     }
 
-    console.log(`Assigning batches: ${pendingBatches.current.length} pending, labelers busy: ${labelerBusy.current.map((b, i) => `${i}:${b}`).join(', ')}`)
+    console.log(
+      `Assigning batches: ${
+        pendingBatches.current.length
+      } pending, labelers busy: ${labelerBusy.current.map((b, i) => `${i}:${b}`).join(', ')}`
+    )
 
     // Find an available labeler
     for (let i = 0; i < numLabelers; i++) {
@@ -254,7 +260,7 @@ function App() {
 
               // First, calculate counts and prepare label updates
               const labelUpdates: { index: number; categoryIndex: number }[] = []
-              
+
               for (let idx = 0; idx < evt.data.train_vector_id.length; idx++) {
                 const trainVectorId = evt.data.train_vector_id[idx]
                 let categoryIndex = -1
@@ -271,19 +277,26 @@ function App() {
                 labelUpdates.push({ index: evt.data.start_index + idx, categoryIndex })
 
                 // Store in IndexedDB if available
-                if (db && evt.data.test_vector_id && evt.data.umap_coordinates && 
-                    evt.data.test_vector_id[idx] && evt.data.umap_coordinates[idx]) {
+                if (
+                  db &&
+                  evt.data.test_vector_id &&
+                  evt.data.umap_coordinates &&
+                  evt.data.test_vector_id[idx] &&
+                  evt.data.umap_coordinates[idx]
+                ) {
                   const tx = db.transaction('results', 'readwrite')
-                  tx.store.put(
-                    {
-                      labelId: categoryIndex,
-                      x: evt.data.umap_coordinates[idx][0],
-                      y: evt.data.umap_coordinates[idx][1],
-                    },
-                    evt.data.test_vector_id[idx]
-                  ).catch((error) => {
-                    console.error('Failed to store test result:', error)
-                  })
+                  tx.store
+                    .put(
+                      {
+                        labelId: categoryIndex,
+                        x: evt.data.umap_coordinates[idx][0],
+                        y: evt.data.umap_coordinates[idx][1],
+                      },
+                      evt.data.test_vector_id[idx]
+                    )
+                    .catch((error) => {
+                      console.error('Failed to store test result:', error)
+                    })
                 }
               }
 
@@ -319,7 +332,10 @@ function App() {
                 `Processed ${totalProcessed.current} of ${totalNumCells.current} cells...`
               )
 
-              if (totalProcessed.current >= totalNumCells.current && pendingBatches.current.length === 0) {
+              if (
+                totalProcessed.current >= totalNumCells.current &&
+                pendingBatches.current.length === 0
+              ) {
                 setIsRunning(false)
                 if (startTime.current) {
                   const endTime = Date.now()
@@ -1018,6 +1034,7 @@ function App() {
                     {selectedCategory && `${selectedCategory}`}
                   </Typography>
                   <IconButton
+                    data-testid="download-button"
                     sx={{ mr: 1 }}
                     size="small"
                     onClick={exportResultsToCSV}
