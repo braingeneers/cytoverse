@@ -273,3 +273,75 @@ class ProductQuantizer(nn.Module):
         quantizer.is_trained = save_dict["is_trained"]
 
         return quantizer
+    
+    def compute_asymmetric_distances(
+        self, query: torch.Tensor, codes: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute asymmetric distances between query vectors and PQ codes.
+        
+        This is more efficient than decoding codes and computing full distances,
+        as it precomputes a lookup table of distances from query subvectors to
+        all centroids in each subspace.
+        
+        Args:
+            query: Query vectors of shape [N, d] or [d]
+            codes: PQ codes of shape [M, m] with integer values in [0, k-1]
+            
+        Returns:
+            Distances of shape [N, M] if query is 2D, or [M] if query is 1D
+        """
+        if not self.is_trained:
+            raise RuntimeError("ProductQuantizer must be trained before computing distances")
+        
+        # Handle both single query and batch of queries
+        if query.dim() == 1:
+            query = query.unsqueeze(0)
+            squeeze_output = True
+        else:
+            squeeze_output = False
+            
+        n_queries = query.shape[0]
+        n_codes = codes.shape[0]
+        
+        # Reshape query for broadcasting: [N, m, d_sub]
+        query_reshaped = query.view(n_queries, self.m, self.d_sub)
+        
+        # Compute distance tables: [N, m, k]
+        # For each query and each subspace, compute distances to all k centroids
+        # codebooks shape: [m, k, d_sub]
+        # query_reshaped shape: [N, m, d_sub] -> unsqueeze to [N, m, 1, d_sub]
+        # Result: [N, m, k]
+        distance_tables = torch.sum(
+            (self.codebooks.unsqueeze(0) - query_reshaped.unsqueeze(2)) ** 2,
+            dim=-1
+        )
+        
+        # Now look up distances using the codes
+        # codes shape: [M, m]
+        # We need to gather from distance_tables[n, i, codes[j, i]] for all n, i, j
+        
+        # Gather distances: for each query n, code j, subspace i: distance_tables[n, i, codes[j, i]]
+        distances = torch.zeros(n_queries, n_codes, self.m, device=query.device)
+        
+        for i in range(self.m):
+            # For subspace i, get distances from all queries to all codes
+            subspace_dists = distance_tables[:, i, :]  # [N, k]
+            code_indices = codes[:, i]  # [M]
+            
+            # Expand dimensions for broadcasting
+            # subspace_dists: [N, k]
+            # code_indices: [M] -> [1, M]
+            code_indices_expanded = code_indices.unsqueeze(0).expand(n_queries, -1)
+            
+            # Gather: [N, M]
+            gathered = torch.gather(subspace_dists, 1, code_indices_expanded)
+            distances[:, :, i] = gathered
+        
+        # Sum across subspaces: [N, M]
+        total_distances = distances.sum(dim=2)
+        
+        if squeeze_output:
+            total_distances = total_distances.squeeze(0)
+            
+        return total_distances
