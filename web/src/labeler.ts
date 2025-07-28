@@ -6,24 +6,29 @@
  * type labeling during embedding processing.
  *
  * Data Flow:
- * embedder.ts → (test_vector_id, pq_embedding, umap_coordinates) → labeler.ts
- * labeler.ts → (test_vector_id, pq_embedding, umap_coordinates, train_vector_id) → App.tsx
+ * embedder.ts → (test_vector_ids, pq_embeddings, umap_coordinates) → labeler.ts
+ * labeler.ts → (test_vector_ids, pq_embeddings, umap_coordinates, train_vector_ids) → App.tsx
  */
 
 import { InvertedFileIndex } from './ivfpq/ivf'
 import { ProductQuantizer } from './ivfpq/pq'
+
+const NUM_NEAREST_NEIGHBORS = 50 // Number of nearest neighbors to return for each query
+const NUM_PARTITIONS_TO_SEARCH = 2 // Number of partitions to probe for each query
 
 // Message types
 interface StartLabelerMessage {
   type: 'start'
   modelsURL: string
   modelID: string
+  categoryData: Int32Array
+  categoryDataLength: number
 }
 
 interface EmbeddingMessage {
   type: 'embedding'
-  test_vector_id: string[]
-  pq_embedding: Uint8Array
+  test_vector_ids: string[]
+  pq_embeddings: Uint8Array
   umap_coordinates: number[][]
   start_index: number
   end_index: number
@@ -31,10 +36,13 @@ interface EmbeddingMessage {
 
 interface LabelerResultMessage {
   type: 'labeled'
-  test_vector_id: string[]
-  pq_embedding: Uint8Array
+  test_vector_ids: string[]
   umap_coordinates: number[][]
-  train_vector_id: number[]
+  train_vector_ids: number[]
+  label_ids: number[]
+  confidences: number[]
+  start_index: number
+  end_index: number
 }
 
 interface StatusMessage {
@@ -50,6 +58,8 @@ interface ErrorMessage {
 // Global state
 let ivf: InvertedFileIndex | null = null
 let pq: ProductQuantizer | null = null
+let categoryData: Int32Array | null = null
+let categoryDataLength = 0
 let isInitialized = false
 
 // Handle messages from main thread
@@ -86,6 +96,10 @@ async function handleStart(message: StartLabelerMessage): Promise<void> {
   } as StatusMessage)
 
   try {
+    // Store category data
+    categoryData = message.categoryData
+    categoryDataLength = message.categoryDataLength
+
     // Initialize IVF index
     const ivfBasePath = `${message.modelsURL}/${message.modelID}/ivfpq`
     ivf = new InvertedFileIndex(ivfBasePath)
@@ -113,22 +127,25 @@ async function handleStart(message: StartLabelerMessage): Promise<void> {
  * Process embedding batch and find closest training vector IDs
  */
 async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
-  if (!isInitialized || !ivf || !pq) {
+  if (!isInitialized || !ivf || !pq || !categoryData) {
     throw new Error('Labeler not initialized')
   }
 
-  const { test_vector_id, pq_embedding, umap_coordinates } = message
-  const batchSize = test_vector_id.length
+  const { test_vector_ids, pq_embeddings, umap_coordinates } = message
+  const batchSize = test_vector_ids.length
 
   console.log(`Processing batch of ${batchSize} embeddings for labeling`)
-  console.log(`PQ embedding length: ${pq_embedding.length}`)
+  console.log(`PQ embedding length: ${pq_embeddings.length}`)
 
   // For each PQ embedding, find the closest training vector
   const trainVectorIds: number[] = []
+  const labelIds: number[] = []
+  const confidences: number[] = []
+  const k = NUM_NEAREST_NEIGHBORS // Number of nearest neighbors to find
 
-  // Reshape PQ codes for processing (assuming pq_embedding contains codes for all vectors in batch)
+  // Reshape PQ codes for processing (assuming pq_embeddings contains codes for all vectors in batch)
   const codesPerVector = pq.m // number of subquantizers
-  const totalCodes = pq_embedding.length
+  const totalCodes = pq_embeddings.length
   const expectedCodes = batchSize * codesPerVector
 
   console.log(
@@ -150,19 +167,18 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       const vectorCodes = new Uint8Array(codesPerVector)
       const offset = i * codesPerVector
       for (let j = 0; j < codesPerVector; j++) {
-        vectorCodes[j] = pq_embedding[offset + j]
+        vectorCodes[j] = pq_embeddings[offset + j]
       }
 
       // Decode PQ codes to approximate vector for IVF search
       const reconstructed = pq.decode(vectorCodes)
 
       // Search for relevant partitions
-      const nProbe = 2 // Configurable parameter for search quality vs speed
+      const nProbe = NUM_PARTITIONS_TO_SEARCH
       const selectedPartitions = ivf.searchPartitions(reconstructed, nProbe)
 
-      // Search within selected partitions
-      let bestDistance = Infinity
-      let bestTrainVectorId = -1
+      // Collect all candidates from all selected partitions
+      const candidates: Array<[number, number]> = [] // [trainVectorId, distance] pairs
 
       for (const partitionId of selectedPartitions) {
         const partitionData = await ivf.loadPartition(partitionId)
@@ -175,35 +191,80 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         // Compute asymmetric distances for all vectors in partition
         const distances = pq.asymmetricDistance(reconstructed, partitionCodes)
 
-        // Find best match in this partition
-        for (let k = 0; k < partitionData.size; k++) {
-          const distance = Math.sqrt(distances[k]) // asymmetricDistance returns squared distances
-          if (distance < bestDistance) {
-            bestDistance = distance
-            bestTrainVectorId = partitionData.vector_ids[k]
+        // Collect all candidates from this partition
+        // REMIND: Can't we just use the squared distance directly?
+        for (let j = 0; j < partitionData.size; j++) {
+          const distance = Math.sqrt(distances[j]) // asymmetricDistance returns squared distances
+          candidates.push([partitionData.vector_ids[j], distance])
+        }
+      }
+
+      // Sort all candidates by distance and take top k
+      candidates.sort((a, b) => a[1] - b[1])
+      const topK = candidates.slice(0, k)
+
+      // Store the nearest neighbor ID for backward compatibility
+      const bestTrainVectorId = topK.length > 0 ? topK[0][0] : -1
+
+      // Convert k nearest neighbor IDs to label IDs and compute consensus
+      let consensusLabelId = -1
+      let consensusConfidence = 0
+
+      if (topK.length > 0) {
+        const labelVotes: { [labelId: number]: number } = {}
+
+        // Convert each neighbor ID to label ID and count votes
+        for (const [trainVectorId] of topK) {
+          if (trainVectorId !== -1 && trainVectorId < categoryDataLength) {
+            const labelId = categoryData[0].values[trainVectorId]
+            if (labelId >= 0) {
+              labelVotes[labelId] = (labelVotes[labelId] || 0) + 1
+            }
           }
+        }
+
+        // Find label with most votes
+        let maxVotes = 0
+        for (const [labelId, votes] of Object.entries(labelVotes)) {
+          if (votes > maxVotes) {
+            maxVotes = votes
+            consensusLabelId = parseInt(labelId)
+          }
+        }
+
+        // Calculate confidence as count of consensus label / k
+        if (maxVotes > 0) {
+          consensusConfidence = maxVotes / k
         }
       }
 
       if (bestTrainVectorId === -1) {
         console.log(
-          "❌ No nearest neighbor found for test vector ${i} in batch. Selected partitions: ${selectedPartitions.join(', ')}"
+          `❌ No nearest neighbor found for test vector ${i} in batch. Selected partitions: ${selectedPartitions.join(
+            ', '
+          )}`
         )
       }
 
       trainVectorIds.push(bestTrainVectorId)
+      labelIds.push(consensusLabelId)
+      confidences.push(consensusConfidence)
 
       // Release reconstructed vector memory
       reconstructed.fill(0)
     } catch (vectorError) {
       console.error(`Error processing vector ${i}:`, vectorError)
       trainVectorIds.push(-1) // Use -1 to indicate failure
+      labelIds.push(-1)
+      confidences.push(0)
     }
   }
 
   // Fill remaining slots with -1 if we couldn't process all vectors
   while (trainVectorIds.length < batchSize) {
     trainVectorIds.push(-1)
+    labelIds.push(-1)
+    confidences.push(0)
   }
 
   console.log(`Processed ${actualBatchSize} vectors, returning ${trainVectorIds.length} results`)
@@ -211,10 +272,11 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
   // Send results back to main thread
   self.postMessage({
     type: 'labeled',
-    test_vector_id,
-    pq_embedding,
+    test_vector_ids,
     umap_coordinates,
-    train_vector_id: trainVectorIds,
+    train_vector_ids: trainVectorIds,
+    label_ids: labelIds,
+    confidences: confidences,
     start_index: message.start_index,
     end_index: message.end_index,
   } as LabelerResultMessage)

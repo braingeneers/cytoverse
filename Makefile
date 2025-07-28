@@ -1,5 +1,7 @@
 # Default to scimilarity model and reference dataaset
 export model_id=scimilarity
+export pq_m=16
+export n_partitions=256
 
 test:
 	python -m pytest tests/ -v
@@ -9,6 +11,8 @@ notice:
 	@echo "⚙️ Populating $(model_id)"
 	@echo "- Embeddings & metadata to data/$(model_id)"
 	@echo "- Web Artificats to web/public/models/$(model_id)"
+	@echo "- PQ M=$(pq_m)"
+	@echo "- N Partitions=$(n_partitions)"
 
 brain: model_id=brain
 brain: notice brain-embeddings embedding-model pumap ivfpq
@@ -16,11 +20,16 @@ brain: notice brain-embeddings embedding-model pumap ivfpq
 scimilarity: model_id=scimilarity
 scimilarity: notice scimilarity-embeddings embedding-model pumap ivfpq
 
+sc_32_256: model_id=sc_32_256
+sc_32_256: pq_m=32
+sc_32_256: n_partitions=256
+sc_32_256: notice scimilarity-embeddings embedding-model pumap ivfp
+
 # Embeddings
 scimilarity-embeddings:
 	python src/cytoverse/scripts/scimilarity_export_embeddings.py \
 	data/scimilarity/model_v1.1/cellsearch \
-	data/scimilarity/ \
+	data/$(model_id)/ \
 	--labels prediction \
 	--labels tissue \
 	--labels author_label \
@@ -47,7 +56,7 @@ pumap-train:
 	data/$(model_id)/vectors.npy \
 	data/$(model_id)/labels.parquet \
 	web/public/models/$(model_id)/pumap \
-	--stratify-label CellType \
+	--stratify-label prediction \
 	--num-vectors 250000
 
 pumap-map:
@@ -70,8 +79,8 @@ pq-train:
 	python src/cytoverse/scripts/ivfpq_train.py pq-train \
 	data/$(model_id)/vectors.npy \
 	web/public/models/$(model_id)/pq/ \
-	--m 16 \
-	--k 256 \
+	--m $(pq_m) \
+	--k $(n_partitions) \
 	--max-vectors 100000 \
 	--n-iterations 30
 	

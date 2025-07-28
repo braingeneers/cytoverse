@@ -60,8 +60,8 @@ const theme = createTheme({
 
 // Types for embedding batches
 interface EmbeddingBatch {
-  test_vector_id: string[]
-  pq_embedding: Uint8Array
+  test_vector_ids: string[]
+  pq_embeddings: Uint8Array
   umap_coordinates: number[][]
   start_index: number
   end_index: number
@@ -79,6 +79,7 @@ interface ResultsDB extends DBSchema {
       labelId: number
       x: number
       y: number
+      confidence: number
     }
   }
 }
@@ -177,7 +178,7 @@ function App() {
     for (let i = 0; i < numLabelers; i++) {
       if (!labelerBusy.current[i] && labelerWorkers.current[i]) {
         const batch = pendingBatches.current.shift()
-        if (!batch || !batch.test_vector_id || !batch.pq_embedding) {
+        if (!batch || !batch.test_vector_ids || !batch.pq_embeddings) {
           console.error('Invalid batch data:', batch)
           continue
         }
@@ -185,8 +186,8 @@ function App() {
         console.log(`Assigning batch [${batch.start_index}-${batch.end_index}] to labeler ${i}`)
         labelerWorkers.current[i].postMessage({
           type: 'embedding',
-          test_vector_id: batch.test_vector_id,
-          pq_embedding: batch.pq_embedding,
+          test_vector_ids: batch.test_vector_ids,
+          pq_embeddings: batch.pq_embeddings,
           umap_coordinates: batch.umap_coordinates,
           start_index: batch.start_index,
           end_index: batch.end_index,
@@ -228,6 +229,8 @@ function App() {
         type: 'start',
         modelsURL: `${sitePath}/models`,
         modelID: selectedModel,
+        categoryData: categoryData?.data || new Int32Array(0),
+        categoryDataLength: categoryData?.length || 0,
       })
 
       // Mark as busy until initialized
@@ -250,38 +253,38 @@ function App() {
             console.log(`Labeled batch indices: ${evt.data.start_index} to ${evt.data.end_index}`)
             labelerBusy.current[i] = false
 
-            // Clear PQ embeddings from the batch to free memory
-            delete evt.data.pq_embedding
-
             // Process labeling results
-            if (evt.data.train_vector_id && categoryData && categoryLabels.length > 0) {
+            if (
+              evt.data.train_vector_ids &&
+              evt.data.label_ids &&
+              evt.data.confidences &&
+              categoryLabels.length > 0
+            ) {
               const newLabelCounts: { [label: string]: number } = {}
               let validLabels = 0
 
               // First, calculate counts and prepare label updates
-              const labelUpdates: { index: number; categoryIndex: number }[] = []
+              const labelUpdates: { index: number; categoryIndex: number; confidence: number }[] =
+                []
 
-              for (let idx = 0; idx < evt.data.train_vector_id.length; idx++) {
-                const trainVectorId = evt.data.train_vector_id[idx]
-                let categoryIndex = -1
+              for (let idx = 0; idx < evt.data.train_vector_ids.length; idx++) {
+                const categoryIndex = evt.data.label_ids[idx]
+                const confidence = evt.data.confidences[idx]
 
-                if (trainVectorId !== -1 && trainVectorId < categoryData.length) {
-                  categoryIndex = categoryData.get(trainVectorId)
-                  if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
-                    const label = categoryLabels[categoryIndex]
-                    newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
-                    validLabels++
-                  }
+                if (categoryIndex >= 0 && categoryIndex < categoryLabels.length) {
+                  const label = categoryLabels[categoryIndex]
+                  newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
+                  validLabels++
                 }
 
-                labelUpdates.push({ index: evt.data.start_index + idx, categoryIndex })
+                labelUpdates.push({ index: evt.data.start_index + idx, categoryIndex, confidence })
 
                 // Store in IndexedDB if available
                 if (
                   db &&
-                  evt.data.test_vector_id &&
+                  evt.data.test_vector_ids &&
                   evt.data.umap_coordinates &&
-                  evt.data.test_vector_id[idx] &&
+                  evt.data.test_vector_ids[idx] &&
                   evt.data.umap_coordinates[idx]
                 ) {
                   const tx = db.transaction('results', 'readwrite')
@@ -291,8 +294,9 @@ function App() {
                         labelId: categoryIndex,
                         x: evt.data.umap_coordinates[idx][0],
                         y: evt.data.umap_coordinates[idx][1],
+                        confidence: confidence,
                       },
-                      evt.data.test_vector_id[idx]
+                      evt.data.test_vector_ids[idx]
                     )
                     .catch((error) => {
                       console.error('Failed to store test result:', error)
@@ -321,7 +325,7 @@ function App() {
               })
 
               setTotalLabeled((prevLabeled) => prevLabeled + validLabels)
-              totalProcessed.current += evt.data.train_vector_id.length
+              totalProcessed.current += evt.data.train_vector_ids.length
 
               const progressPercent = Math.min(
                 100,
@@ -437,8 +441,8 @@ function App() {
 
           // Add to pending queue and try to assign to labeler
           const batch: EmbeddingBatch = {
-            test_vector_id: evt.data.test_vector_id,
-            pq_embedding: evt.data.pq_embedding,
+            test_vector_ids: evt.data.test_vector_ids,
+            pq_embeddings: evt.data.pq_embeddings,
             umap_coordinates: evt.data.umap_coordinates,
             start_index: evt.data.start_index,
             end_index: evt.data.end_index,
@@ -763,12 +767,13 @@ function App() {
       })
 
       // Generate CSV content
-      let csv = 'cell_id,category_label\n'
+      let csv = 'cell_id,category_label,confidence\n'
 
       testResults.forEach((result, index) => {
         const vectorId = testResultKeys[index]
         const label = result.labelId >= 0 ? labelMap[result.labelId] || 'Unknown' : 'Unknown'
-        csv += `"${vectorId}","${label}"\n`
+        const confidence = result.confidence !== undefined ? result.confidence.toFixed(3) : '1.000'
+        csv += `"${vectorId}","${label}",${confidence}\n`
       })
 
       // Create blob and download
@@ -1009,7 +1014,7 @@ function App() {
             {/* Progress and Status */}
             {(progress > 0 || statusMessage) && (
               <Box sx={{ mb: 3 }}>
-                <Typography data-cy="status" variant="body2" sx={{ mb: 1 }}>
+                <Typography data-testid="status" variant="body2" sx={{ mb: 1 }}>
                   {statusMessage}
                 </Typography>
                 <LinearProgress variant="determinate" value={progress} />
@@ -1184,7 +1189,7 @@ function App() {
         <Dialog open={errorModalOpen} onClose={() => setErrorModalOpen(false)}>
           <DialogTitle>Error</DialogTitle>
           <DialogContent>
-            <Typography data-cy="error-title">{errorMessage}</Typography>
+            <Typography data-testid="error-title">{errorMessage}</Typography>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setErrorModalOpen(false)}>Close</Button>

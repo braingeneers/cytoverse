@@ -767,13 +767,13 @@ async function start(
         testVectorIds.push(cellNames[cellIndex])
       }
 
-      // Send embedding data: (test_vector_id, pq_embedding, umap_coordinates)
+      // Send embedding data: (test_vector_ids, pq_embeddings, umap_coordinates)
       self.postMessage({
         type: 'embedding',
         start_index: batchStart,
         end_index: batchStart + buffers[activeBuffer].size,
-        test_vector_id: testVectorIds,
-        pq_embedding: pqCodes,
+        test_vector_ids: testVectorIds,
+        pq_embeddings: pqCodes,
         umap_coordinates: coordinates,
         totalToProcess: cellNames.length,
       })
