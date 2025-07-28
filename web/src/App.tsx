@@ -229,7 +229,7 @@ function App() {
         type: 'start',
         modelsURL: `${sitePath}/models`,
         modelID: selectedModel,
-        categoryData: categoryData?.data || new Int32Array(0),
+        categoryData: categoryData?.data[0].values || new Int32Array(0),
         categoryDataLength: categoryData?.length || 0,
       })
 

@@ -192,10 +192,11 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         const distances = pq.asymmetricDistance(reconstructed, partitionCodes)
 
         // Collect all candidates from this partition
-        // REMIND: Can't we just use the squared distance directly?
         for (let j = 0; j < partitionData.size; j++) {
-          const distance = Math.sqrt(distances[j]) // asymmetricDistance returns squared distances
-          candidates.push([partitionData.vector_ids[j], distance])
+          // const distance = Math.sqrt(distances[j]) 
+          // // asymmetricDistance returns squared distances but we just use to rank
+          // candidates.push([partitionData.vector_ids[j], distance])
+          candidates.push([partitionData.vector_ids[j], distances[j]])
         }
       }
 
@@ -204,7 +205,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       const topK = candidates.slice(0, k)
 
       // Store the nearest neighbor ID for backward compatibility
-      const bestTrainVectorId = topK.length > 0 ? topK[0][0] : -1
+      const nearestTrainVectorId = topK.length > 0 ? topK[0][0] : -1
 
       // Convert k nearest neighbor IDs to label IDs and compute consensus
       let consensusLabelId = -1
@@ -216,7 +217,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         // Convert each neighbor ID to label ID and count votes
         for (const [trainVectorId] of topK) {
           if (trainVectorId !== -1 && trainVectorId < categoryDataLength) {
-            const labelId = categoryData[0].values[trainVectorId]
+            const labelId = categoryData[trainVectorId]
             if (labelId >= 0) {
               labelVotes[labelId] = (labelVotes[labelId] || 0) + 1
             }
@@ -238,7 +239,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         }
       }
 
-      if (bestTrainVectorId === -1) {
+      if (nearestTrainVectorId === -1) {
         console.log(
           `❌ No nearest neighbor found for test vector ${i} in batch. Selected partitions: ${selectedPartitions.join(
             ', '
@@ -246,7 +247,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         )
       }
 
-      trainVectorIds.push(bestTrainVectorId)
+      trainVectorIds.push(nearestTrainVectorId)
       labelIds.push(consensusLabelId)
       confidences.push(consensusConfidence)
 
