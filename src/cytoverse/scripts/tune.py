@@ -145,7 +145,8 @@ def train_ivfpq(
     pq_codes = pq(embeddings_tensor)
 
     # Build IVF index with PQ codes
-    ivf.train_ivf(embeddings_tensor, vector_ids, n_iterations=20)
+    # ivf.train_ivf(embeddings_tensor, vector_ids, n_iterations=20)
+    ivf.train_ivf(embeddings_tensor, vector_ids, n_iterations=4)
 
     # Add PQ codes to partitions
     # partitions = ivf.search_partitions(embeddings_tensor, n_probe=1)
@@ -174,7 +175,7 @@ def objective(
     for batch in val_ds.iter_batches(batch_size=None):
         # REMIND: Undo for real datasets
         # val_embeddings = torch.from_numpy(batch["embeddings"]).float()
-        val_embeddings = torch.from_numpy(batch["data"]).float()
+        val_embeddings = torch.from_numpy(batch["data"].copy()).float()
 
         for query in val_embeddings:
             # IVFPQ search
@@ -247,13 +248,14 @@ def objective(
 def main(
     h5ad_path: str,
     model_path: str = "data/scimilarity/model_v1.1",
-    num_samples: int = 10,
+    num_samples: int = 1,
     max_concurrent_trials: int = 2,
 ):
     """Run hyperparameter tuning for IVFPQ."""
 
     # Initialize Ray
     ray.init(num_cpus=1, local_mode=True)
+    # ray.init()
 
     # Create datasets
     # dataset_builder = H5ADEmbeddingDataset(h5ad_path, model_path)
@@ -261,17 +263,17 @@ def main(
 
     # Create dataset from existing vector files
     # embeddings = np.load("data/scimilarity/vectors.npy")
-    # np.save("data/scimilarity/train.npy", embeddings[0:1000])
-    # np.save("data/scimilarity/val.npy", embeddings[1000:1100])
+    # np.save("data/scimilarity/train.npy", embeddings[0:100000])
+    # np.save("data/scimilarity/val.npy", embeddings[100000:110000])
     train_ds = ray.data.from_numpy(np.load("data/scimilarity/train.npy"))
     val_ds = ray.data.from_numpy(np.load("data/scimilarity/val.npy"))
 
     # Define search space
     search_space = {
-        "pq_m": tune.choice([16, 32]),
-        "pq_k": tune.choice([128, 256]),
-        "num_partitions": tune.choice([8, 16]),
-        "n_probe": tune.choice([1, 2]),
+        "pq_m": tune.choice([4, 8]),
+        "pq_k": tune.choice([64]),
+        "num_partitions": tune.choice([8]),
+        "n_probe": tune.choice([2]),
         "probe_top_k": tune.choice([10]),
     }
 
@@ -281,7 +283,7 @@ def main(
             objective, train_ds=train_ds, val_ds=val_ds, model_path=model_path
         ),
         param_space=search_space,
-        run_config=RunConfig(verbose=1),
+        # run_config=RunConfig(verbose=1),
         tune_config=TuneConfig(
             num_samples=num_samples,
             max_concurrent_trials=max_concurrent_trials,

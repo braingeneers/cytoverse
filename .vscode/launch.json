@@ -11,7 +11,11 @@
       "request": "launch",
       "program": "${workspaceFolder}/src/cytoverse/scripts/tune.py",
       "console": "integratedTerminal",
-      "args": ["${workspaceFolder}/../sims-web/data/allen-celltypes+human-cortex+m1.h5ad"]
+      "args": [
+        "${workspaceFolder}/../sims-web/data/allen-celltypes+human-cortex+m1.h5ad",
+        "--num-samples",
+        "2"
+      ]
     },
     {
       "name": "ingest h5ad as reference",
