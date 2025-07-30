@@ -46,6 +46,14 @@ brain-embeddings:
 	--labels CellType \
 	--labels tissue_type
 
+# IVFPQ tune
+ivfpq-tune:
+	python src/cytoverse/scripts/tune_ivfpq.py \
+        data/scimilarity/embeddings.parquet \
+        data/scimilarity/labels.parquet \
+        --num-samples 8 \
+        --max-concurrent-trials 4 \
+        --max-embeddings 10000
 
 # PUMAP
 pumap-train:

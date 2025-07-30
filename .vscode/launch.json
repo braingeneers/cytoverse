@@ -53,23 +53,24 @@
       ]
     },
     {
-      "name": "tune embed",
+      "name": "tune",
       "type": "debugpy",
       "justMyCode": false,
       "request": "launch",
       "env": {
         "AWS_PROFILE": "braingeneers"
       },
-      "program": "${workspaceFolder}/src/cytoverse/scripts/tune.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/tune_ivfpq.py",
       "console": "integratedTerminal",
       "args": [
-        "embed",
-        "~/data/h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad",
-        "data/allen-celltypes+human-cortex+various-cortical-areas.embeddings.parquet",
-        "--batch-size",
-        "10",
+        "${workspaceFolder}/data/scimilarity/embeddings.parquet",
+        "${workspaceFolder}/data/scimilarity/labels.parquet",
         "--num-samples",
-        "100"
+        "4",
+        "--max-concurrent-trials",
+        "1",
+        "--max-embeddings",
+        "1000"
       ]
     },
     {
