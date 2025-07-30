@@ -3,21 +3,18 @@ name = "cytoverse"
 version = "0.1.0"
 description = "Search, display and label cells in foundation model embedding space"
 readme = "README.md"
-requires-python = ">=3.10, <3.12"
+requires-python = ">=3.12, <3.13"
 dependencies = [
     "typer>=0.16.0",
     "onnx>=1.18.0",
     "onnxruntime>=1.15.0",
     "torch>=2.7.1",
     "torchvision>=0.22.1",
-    "torchaudio>=2.7.1",
-    "anndata>=0.11.4",
-    "zarr<3.0",
+    "anndata>=0.12.1",
     "pytorch-lightning>=2.5.2",
-    "pyarrow>=20.0.0",
-    "sclblonnx>=0.3.0",
     "scimilarity",
     "umap-pytorch",
+    "ray[data,train,tune]>=2.48.0",
 ]
 
 [dependency-groups]
@@ -28,7 +25,6 @@ dev = [
     "jupyter>=1.1.1",
     "jupyter-console>=6.6.3",
     "netron>=8.3.9",
-    "parquet-tools>=0.2.16",
     "pytest>=8.0.0",
 ]
 

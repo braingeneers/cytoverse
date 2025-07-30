@@ -46,6 +46,8 @@ Install python dependencies and create a virtual env:
 uv venv
 source .venv/bin/activate
 uv sync
+
+brew install go-parquet-tools
 ```
 
 Export SCimilarity embeddings and labels, train a parametric umap model on a stratified subset of cells, train IVFPQ, populate partitions and export models to ONNX:

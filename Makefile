@@ -1,4 +1,4 @@
-# Default to scimilarity model and reference dataaset
+# Default ivfpq parameters
 export model_id=scimilarity
 export pq_m=16
 export n_partitions=256
@@ -14,21 +14,23 @@ notice:
 	@echo "- PQ M=$(pq_m)"
 	@echo "- N Partitions=$(n_partitions)"
 
-brain: model_id=brain
-brain: notice brain-embeddings embedding-model pumap ivfpq
-
 scimilarity: model_id=scimilarity
 scimilarity: notice scimilarity-embeddings embedding-model pumap ivfpq
 
-sc_32_256: model_id=sc_32_256
-sc_32_256: pq_m=32
-sc_32_256: n_partitions=256
-sc_32_256: notice scimilarity-embeddings embedding-model pumap ivfp
+brain: model_id=brain
+brain: notice brain-embeddings embedding-model pumap ivfpq
+
+# Embedding Model
+embedding-model:
+	python src/cytoverse/scripts/scimilarity_export_model.py \
+	~/data/scimilarity/model_v1.1 \
+	web/public/models/$(model_id)/embedding
+
 
 # Embeddings
 scimilarity-embeddings:
-	python src/cytoverse/scripts/scimilarity_export_embeddings.py \
-	data/scimilarity/model_v1.1/cellsearch \
+	python src/cytoverse/scripts/scimilarity_to_embeddings.py \
+	~/data/scimilarity/model_v1.1/cellsearch \
 	data/$(model_id)/ \
 	--labels prediction \
 	--labels tissue \
@@ -44,11 +46,6 @@ brain-embeddings:
 	--labels CellType \
 	--labels tissue_type
 
-# Embedding Model
-embedding-model:
-	python src/cytoverse/scripts/scimilarity_export_model.py \
-	data/scimilarity/model_v1.1 \
-	web/public/models/$(model_id)/embedding
 
 # PUMAP
 pumap-train:
@@ -103,6 +100,7 @@ ivfpq-export:
 
 ivfpq: pq-train ivf-train ivfpq-export
 
+
 # Testing
 update-validations:
 	python src/cytoverse/scripts/label.py \
@@ -111,3 +109,17 @@ update-validations:
 	python src/cytoverse/scripts/label.py \
 	      web/public/sample.h5ad \
 	      web/tests/sample.labels.csv
+
+# Ray
+rclone-run:
+	@echo "Starting local s3 server on port 9000..."
+	AWS_PROFILE=local-s3 rclone \
+		serve s3 local-s3:~/data \
+		--addr :9000 \
+		--vfs-cache-mode off \
+		-v
+	@echo "Local s3 server is running. You can access it at http://localhost:9000"
+
+# Generate embeddings from local h5ad file
+embed:
+	python -m cytoverse.scripts.tune embed data/input.h5ad data/embeddings.parquet

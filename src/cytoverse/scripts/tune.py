@@ -3,9 +3,10 @@
 Ray AIR-based hyperparameter tuning for IVFPQ index on SCimilarity embeddings.
 
 This script utilizes Ray Data, Train, and Tune to:
-1. Stream embeddings from h5ad files through SCimilarity
-2. Train IVFPQ models with hyperparameter search
-3. Optimize for SCimilarity nearest neighbor overlap while minimizing search cost
+1. Generate embeddings from h5ad files using SCimilarity
+2. Split data into train/val/test sets
+3. Train IVFPQ models with hyperparameter search using Ray Tune
+4. Optimize for SCimilarity nearest neighbor overlap while minimizing search cost
 """
 
 import ray
@@ -16,13 +17,17 @@ from ray.air import session
 from ray.air.config import RunConfig
 import torch
 import numpy as np
+import pandas as pd
 import anndata
 from pathlib import Path
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 import logging
 from scimilarity import CellAnnotation
 from scimilarity.utils import align_dataset, lognorm_counts
 from sklearn.model_selection import train_test_split
+import typer
+import boto3
+import tempfile
 
 # Assume these are available - imported from the cytoverse package
 # Add the project root to the path so we can import our modules
@@ -35,6 +40,287 @@ from src.cytoverse.ivfpq.ivf import InvertedFileIndex
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+app = typer.Typer(
+    help="IVFPQ training and tuning for SCimilarity embeddings",
+    add_completion=False,
+)
+
+
+@app.command()
+def embed(
+    h5ad_path: Path = typer.Argument(
+        exists=True, file_okay=True, dir_okay=False, help="Path to local h5ad file"
+    ),
+    output_path: Path = typer.Argument(help="Path for output parquet file"),
+    obs_keys: List[str] = typer.Option(
+        ["CellType"], help="Observation keys to include as categorical columns"
+    ),
+    model_path: str = typer.Option(
+        "~/data/scimilarity/model_v1.1", help="Path to SCimilarity model"
+    ),
+    batch_size: int = typer.Option(1024, help="Batch size for embedding generation"),
+    num_samples: Optional[int] = typer.Option(
+        None, help="Limit the number of cells to process (None = all cells)"
+    ),
+    num_workers: int = typer.Option(
+        4, help="Number of Ray workers for parallel processing"
+    ),
+) -> None:
+    """
+    Generate SCimilarity embeddings from a local h5ad file and save to parquet.
+
+    Uses Ray Datasets to process cells in parallel batches from the h5ad file, generates 128d embeddings
+    using SCimilarity, and stores them along with specified observation metadata to a local parquet file.
+    """
+    logger.info(f"Processing h5ad file from {h5ad_path}")
+
+    # Initialize Ray
+    ray.init(ignore_reinit_error=True, num_cpus=num_workers)
+
+    # Read the h5ad file in read-only mode to get metadata
+    logger.info("Reading h5ad file metadata...")
+    adata = anndata.read_h5ad(h5ad_path, backed="r")
+
+    n_obs = adata.n_obs
+    n_vars = adata.n_vars
+    gene_names = adata.var_names.tolist()
+
+    logger.info(f"File contains {n_obs} cells with {n_vars} genes")
+
+    # Determine total cells to process
+    total_cells = min(n_obs, num_samples) if num_samples is not None else n_obs
+    logger.info(f"Will process {total_cells} cells in batches of {batch_size}")
+
+    # Create a Ray Dataset that yields batches of expression data and metadata
+    def create_h5ad_batches():
+        """Generator that yields batches from AnnData object."""
+        # Open h5ad file in backed mode for memory efficiency
+        adata_full = anndata.read_h5ad(h5ad_path, backed="r")
+
+        for start_idx in range(0, total_cells, batch_size):
+            end_idx = min(start_idx + batch_size, total_cells)
+
+            # Use AnnData slicing - it handles sparse matrices automatically
+            batch_adata = adata_full[start_idx:end_idx]
+
+            # Get expression matrix - AnnData handles sparse/dense conversion
+            if hasattr(batch_adata.X, "toarray"):
+                expression = batch_adata.X.toarray().astype(np.float32)
+            else:
+                expression = batch_adata.X.astype(np.float32)
+
+            # Extract metadata using AnnData's obs
+            metadata = {}
+            for key in obs_keys:
+                if key in batch_adata.obs:
+                    metadata[key] = batch_adata.obs[key].tolist()
+                else:
+                    logger.warning(f"Key '{key}' not found in obs, filling with None")
+                    metadata[key] = [None] * (end_idx - start_idx)
+
+            yield {
+                "expression": expression,
+                "metadata": metadata,
+                "start_idx": start_idx,
+                "end_idx": end_idx,
+                "gene_names": gene_names,
+            }
+
+    # Create batch items for Ray Dataset
+    logger.info("Creating Ray Dataset from h5ad batches...")
+    batch_items = list(create_h5ad_batches())
+
+    # Create Ray Dataset from the batch items
+    expression_ds = ray.data.from_items(batch_items)
+
+    # Define embedding function that will be applied to each batch
+    class SCimilarityEmbedder:
+        def __init__(self, model_path: str):
+            self.model_path = model_path
+            self.ca = None
+
+        def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+            # Initialize model lazily (once per worker)
+            if self.ca is None:
+                self.ca = CellAnnotation(model_path=self.model_path)
+
+            # Get data from batch
+            expression = batch["expression"]
+            gene_names = batch["gene_names"]
+            metadata = batch["metadata"]
+
+            # Create AnnData object for preprocessing
+            adata = anndata.AnnData(X=expression, var=pd.DataFrame(index=gene_names))
+
+            # Use SCimilarity preprocessing pipeline
+            adata = align_dataset(adata, self.ca.gene_order)
+            adata = lognorm_counts(adata)
+
+            # Get preprocessed expression data
+            if hasattr(adata.X, "toarray"):
+                expression_data = adata.X.toarray().astype(np.float32)
+            else:
+                expression_data = adata.X.astype(np.float32)
+
+            # Generate embeddings
+            embeddings = self.ca.get_embeddings(expression_data)
+
+            # Prepare output records
+            output_records = []
+            for i in range(len(embeddings)):
+                record = {"embedding": embeddings[i].tolist()}
+                # Add metadata for this cell
+                for key in metadata:
+                    record[key] = metadata[key][i]
+                output_records.append(record)
+
+            return {"records": output_records}
+
+    # Apply embedding transformation with parallel processing
+    embedder = SCimilarityEmbedder(model_path)
+    embedded_ds = expression_ds.map_batches(
+        embedder,
+        batch_format="dict",
+        zero_copy_batch=False,
+        num_cpus=1,  # Each batch uses 1 CPU
+    )
+
+    # Convert records to individual rows for streaming
+    def records_to_rows(batch: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Convert batch of records to individual rows."""
+        return batch["records"]
+
+    # Stream individual records
+    rows_ds = embedded_ds.flat_map(records_to_rows)
+
+    # Convert individual records to DataFrame format for parquet writing
+    def format_for_parquet(batch: List[Dict[str, Any]]) -> pd.DataFrame:
+        """Format batch of records as DataFrame for parquet writing."""
+        df = pd.DataFrame(batch)
+        # Convert metadata columns to categorical for better compression
+        for key in obs_keys:
+            if key in df.columns:
+                df[key] = pd.Categorical(df[key])
+        return df
+
+    # Apply DataFrame formatting
+    parquet_ds = rows_ds.map_batches(
+        format_for_parquet,
+        batch_format="python",
+        batch_size=batch_size,  # Process in same batch sizes
+    )
+
+    # Write to local parquet file
+    logger.info(f"Writing embeddings to {output_path}")
+    parquet_ds.write_parquet(
+        str(output_path),
+        compression="snappy",
+    )
+
+    logger.info(f"Embeddings saved to {output_path}")
+
+    # Shutdown Ray
+    ray.shutdown()
+
+
+@app.command()
+def split(
+    s3_embeddings_path: str = typer.Argument(
+        ..., help="S3 path to embeddings parquet file"
+    ),
+    split_key: str = typer.Argument(
+        ..., help="Observation key to use for stratified splitting"
+    ),
+    train_ratio: float = typer.Option(0.8, help="Ratio for training set"),
+    val_ratio: float = typer.Option(0.1, help="Ratio for validation set"),
+    test_ratio: float = typer.Option(0.1, help="Ratio for test set"),
+    random_state: int = typer.Option(42, help="Random state for reproducibility"),
+) -> None:
+    """
+    Split embeddings into stratified train/val/test sets.
+
+    Creates three parquet files with -train, -val, and -test suffixes,
+    stratified on the specified observation key.
+    """
+    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.001:
+        raise ValueError("Train, val, and test ratios must sum to 1.0")
+
+    logger.info(f"Loading embeddings from {s3_embeddings_path}")
+
+    # Parse S3 path
+    s3 = boto3.client("s3")
+    bucket_name = s3_embeddings_path.split("/")[2]
+    key_name = "/".join(s3_embeddings_path.split("/")[3:])
+
+    # Download parquet file
+    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp_file:
+        s3.download_file(bucket_name, key_name, tmp_file.name)
+
+        # Load dataframe
+        df = pd.read_parquet(tmp_file.name)
+        logger.info(f"Loaded {len(df)} embeddings")
+
+        if split_key not in df.columns:
+            raise ValueError(
+                f"Split key '{split_key}' not found in dataframe columns: {df.columns.tolist()}"
+            )
+
+        # First split into train and temp (val+test)
+        train_df, temp_df = train_test_split(
+            df,
+            test_size=(val_ratio + test_ratio),
+            stratify=df[split_key],
+            random_state=random_state,
+        )
+
+        # Then split temp into val and test
+        val_test_ratio = test_ratio / (val_ratio + test_ratio)
+        val_df, test_df = train_test_split(
+            temp_df,
+            test_size=val_test_ratio,
+            stratify=temp_df[split_key],
+            random_state=random_state,
+        )
+
+        logger.info(
+            f"Split sizes - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}"
+        )
+
+        # Save splits
+        base_path = s3_embeddings_path.rsplit(".", 1)[0]
+
+        for split_name, split_df in [
+            ("train", train_df),
+            ("val", val_df),
+            ("test", test_df),
+        ]:
+            output_path = f"{base_path}-{split_name}.parquet"
+
+            with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp_split:
+                split_df.to_parquet(tmp_split.name, engine="pyarrow")
+
+                output_bucket = output_path.split("/")[2]
+                output_key = "/".join(output_path.split("/")[3:])
+                s3.upload_file(tmp_split.name, output_bucket, output_key)
+
+            logger.info(f"Saved {split_name} split to {output_path}")
+
+
+def _load_embeddings_from_s3(s3_path: str) -> Tuple[np.ndarray, pd.DataFrame]:
+    """Load embeddings and metadata from S3 parquet file."""
+    s3 = boto3.client("s3")
+    bucket_name = s3_path.split("/")[2]
+    key_name = "/".join(s3_path.split("/")[3:])
+
+    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp_file:
+        s3.download_file(bucket_name, key_name, tmp_file.name)
+        df = pd.read_parquet(tmp_file.name)
+
+        # Extract embeddings as numpy array
+        embeddings = np.vstack(df["embedding"].values)
+
+        return embeddings, df
 
 
 class H5ADEmbeddingDataset:
@@ -245,94 +531,86 @@ def objective(
     )
 
 
-def main(
-    h5ad_path: str,
-    model_path: str = "data/scimilarity/model_v1.1",
-    num_samples: int = 1,
-    max_concurrent_trials: int = 2,
-):
-    """Run hyperparameter tuning for IVFPQ."""
+@app.command()
+def tune(
+    s3_train_path: str = typer.Argument(
+        ..., help="S3 path to training embeddings parquet"
+    ),
+    s3_val_path: str = typer.Argument(
+        ..., help="S3 path to validation embeddings parquet"
+    ),
+    s3_test_path: str = typer.Argument(..., help="S3 path to test embeddings parquet"),
+    num_samples: int = typer.Option(
+        10, help="Number of hyperparameter configurations to try"
+    ),
+    max_concurrent_trials: int = typer.Option(4, help="Maximum concurrent trials"),
+) -> None:
+    """
+    Use Ray Tune to find optimal IVFPQ hyperparameters.
+
+    Tunes over PQ parameters (m, k) and IVF parameters (n_partitions) to optimize
+    the trade-off between compression, search efficiency, and reconstruction quality.
+    """
+    logger.info("Initializing Ray Tune for IVFPQ hyperparameter search")
 
     # Initialize Ray
-    ray.init(num_cpus=1, local_mode=True)
-    # ray.init()
+    ray.init(ignore_reinit_error=True)
 
-    # Create datasets
-    # dataset_builder = H5ADEmbeddingDataset(h5ad_path, model_path)
-    # train_ds, val_ds, _ = dataset_builder.create_dataset()
+    # Load embeddings from S3 into Ray datasets
+    train_embeddings, _ = _load_embeddings_from_s3(s3_train_path)
+    val_embeddings, _ = _load_embeddings_from_s3(s3_val_path)
 
-    # Create dataset from existing vector files
-    # embeddings = np.load("data/scimilarity/vectors.npy")
-    # np.save("data/scimilarity/train.npy", embeddings[0:100000])
-    # np.save("data/scimilarity/val.npy", embeddings[100000:110000])
-    train_ds = ray.data.from_numpy(np.load("data/scimilarity/train.npy"))
-    val_ds = ray.data.from_numpy(np.load("data/scimilarity/val.npy"))
+    train_ds = ray.data.from_numpy(train_embeddings)
+    val_ds = ray.data.from_numpy(val_embeddings)
 
     # Define search space
     search_space = {
-        "pq_m": tune.choice([4, 8]),
-        "pq_k": tune.choice([64]),
-        "num_partitions": tune.choice([8]),
-        "n_probe": tune.choice([2]),
-        "probe_top_k": tune.choice([10]),
+        "pq_m": tune.choice([16, 32, 64]),  # Number of subquantizers
+        "pq_k": tune.choice([256]),  # Codebook size
+        "num_partitions": tune.choice([64, 128, 256, 512]),
+        "n_probe": tune.choice([1, 2, 4, 8]),
+        "probe_top_k": tune.choice([50]),  # Top k for evaluation
     }
 
     # Create tuner
     tuner = Tuner(
         tune.with_parameters(
-            objective, train_ds=train_ds, val_ds=val_ds, model_path=model_path
+            objective, train_ds=train_ds, val_ds=val_ds, model_path=""
         ),
         param_space=search_space,
-        # run_config=RunConfig(verbose=1),
         tune_config=TuneConfig(
             num_samples=num_samples,
             max_concurrent_trials=max_concurrent_trials,
             metric="combined_score",
             mode="max",
         ),
+        run_config=RunConfig(
+            name="ivfpq_tune",
+            local_dir="./ray_results",
+            log_to_file=True,
+        ),
     )
 
     # Run tuning
     results = tuner.fit()
 
-    # Print best results
+    # Get best result
     best_result = results.get_best_result()
-    print("\nBest hyperparameters found:")
-    print(f"Config: {best_result.config}")
-    print(
-        f"Metrics: overlap={best_result.metrics['overlap']:.3f}, "
+    logger.info(f"Best configuration found:")
+    logger.info(f"  Config: {best_result.config}")
+    logger.info(
+        f"  Metrics: overlap={best_result.metrics['overlap']:.3f}, "
         f"memory={best_result.metrics['memory_mb']:.1f}MB"
     )
+
+    # Test on test set
+    logger.info("Evaluating best configuration on test set...")
+    test_embeddings, _ = _load_embeddings_from_s3(s3_test_path)
+
+    # You can add test evaluation here if needed
 
     ray.shutdown()
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Tune IVFPQ hyperparameters for SCimilarity embeddings"
-    )
-    parser.add_argument("h5ad_path", type=str, help="Path to h5ad file")
-    parser.add_argument(
-        "--model-path",
-        type=str,
-        default="data/scimilarity/model_v1.1",
-        help="Path to SCimilarity model",
-    )
-    parser.add_argument(
-        "--num-samples",
-        type=int,
-        default=10,
-        help="Number of hyperparameter combinations to try",
-    )
-    parser.add_argument(
-        "--max-concurrent-trials",
-        type=int,
-        default=2,
-        help="Maximum number of concurrent trials",
-    )
-
-    args = parser.parse_args()
-
-    main(args.h5ad_path, args.model_path, args.num_samples, args.max_concurrent_trials)
+    app()

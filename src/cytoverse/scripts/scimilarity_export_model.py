@@ -166,6 +166,10 @@ def model(
     output_path: Path = typer.Argument(
         help="Path to save the ONNX model",
     ),
+    validation_h5ad: Path = typer.Option(
+        "tests/GSE136831_subsample_100.h5ad",
+        help="Path to h5ad file for validation - should be out of distribution",
+    ),
 ) -> None:
     """
     Convert a scimilarity encoder model checkpoint to ONNX format.
@@ -255,7 +259,7 @@ def model(
     print("\n5. Validating individual components...")
 
     # Load test data and use align_dataset for consistent input
-    adata = sc.read_h5ad("data/GSE136831_subsample.h5ad")
+    adata = sc.read_h5ad(str(validation_h5ad))
     adata = adata[0:10, :].copy()
     adata = align_dataset(adata, ce.gene_order)
 
@@ -284,7 +288,7 @@ def model(
     print("  Testing embedding step...")
 
     # Use the same preprocessing that SCimilarity uses for fair comparison
-    adata_for_embedding = sc.read_h5ad("data/GSE136831_subsample.h5ad")
+    adata_for_embedding = sc.read_h5ad(str(validation_h5ad))
     adata_for_embedding = adata_for_embedding[0:10, :].copy()
     adata_for_embedding = align_dataset(adata_for_embedding, ce.gene_order)
     adata_for_embedding = lognorm_counts(adata_for_embedding)
@@ -316,15 +320,15 @@ def model(
 
     # Run the ONNX model
     ort_session_combined = ort.InferenceSession(combined_path)
-    combined_onnx_output = ort_session_combined.run(None, {"input": raw_aligned_counts})[
-        0
-    ]
+    combined_onnx_output = ort_session_combined.run(
+        None, {"input": raw_aligned_counts}
+    )[0]
 
     # Run the original SCimilarity get_embeddings function
     # The get_embeddings function expects log-normalized data.
     # Our ONNX model does this internally, but for a fair comparison,
     # we must manually preprocess for get_embeddings.
-    adata_for_embedding = sc.read_h5ad("data/GSE136831_subsample.h5ad")
+    adata_for_embedding = sc.read_h5ad(str(validation_h5ad))
     adata_for_embedding = adata_for_embedding[0:10, :].copy()
     adata_for_embedding = align_dataset(adata_for_embedding, ce.gene_order)
     adata_for_embedding = lognorm_counts(adata_for_embedding)
