@@ -411,7 +411,7 @@ wheels = [
 [[package]]
 name = "cytoverse"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "anndata" },
     { name = "onnx" },
@@ -428,6 +428,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "black" },
+    { name = "cytoverse" },
     { name = "debugpy" },
     { name = "flake8" },
     { name = "ipython" },
@@ -454,6 +455,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=25.1.0" },
+    { name = "cytoverse", editable = "." },
     { name = "debugpy", specifier = ">=1.8.15" },
     { name = "flake8", specifier = ">=7.2.0" },
     { name = "ipython", specifier = ">=8.37.0" },

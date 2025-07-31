@@ -258,7 +258,9 @@ def _test_ivf_search(
         total_vectors_searched = 0
         for query_partitions in partitions:
             for partition_id in query_partitions:
-                total_vectors_searched += len(ivf.get_partition_vectors(partition_id))
+                total_vectors_searched += len(
+                    ivf.get_partition_vector_ids(partition_id)
+                )
 
         avg_vectors_per_query = total_vectors_searched / len(partitions)
         search_fraction = avg_vectors_per_query / stats["total_vectors"]

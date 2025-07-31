@@ -24,6 +24,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "black>=25.1.0",
+    "cytoverse",
     "debugpy>=1.8.15",
     "flake8>=7.2.0",
     "ipython>=8.37.0",
@@ -36,3 +37,9 @@ dev = [
 [tool.uv.sources]
 scimilarity = { git = "https://github.com/Genentech/scimilarity.git" }
 umap-pytorch = { git = "https://github.com/rcurrie/umap_pytorch.git" }
+cytoverse = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    ".",
+]

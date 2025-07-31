@@ -53,14 +53,14 @@
       ]
     },
     {
-      "name": "tune",
+      "name": "ivfpq tune",
       "type": "debugpy",
       "justMyCode": false,
       "request": "launch",
       "env": {
         "AWS_PROFILE": "braingeneers"
       },
-      "program": "${workspaceFolder}/src/cytoverse/scripts/tune_ivfpq.py",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_tune.py",
       "console": "integratedTerminal",
       "args": [
         "${workspaceFolder}/data/scimilarity/embeddings.parquet",

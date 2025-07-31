@@ -54,9 +54,7 @@ class InvertedFileIndex(nn.Module):
         self.n_partitions = n_partitions  # Number of partitions
 
         # Centroids: [n_partitions, d]
-        self.centroids = nn.Parameter(
-            torch.randn(n_partitions, d), requires_grad=False
-        )
+        self.centroids = nn.Parameter(torch.randn(n_partitions, d), requires_grad=False)
 
         # Inverted lists: partition_id -> list of vector indices
         # This will be populated during training
@@ -194,7 +192,9 @@ class InvertedFileIndex(nn.Module):
 
     def _print_partition_stats(self) -> None:
         """Print statistics about partition sizes."""
-        partition_sizes = [len(self.inverted_lists[i]) for i in range(self.n_partitions)]
+        partition_sizes = [
+            len(self.inverted_lists[i]) for i in range(self.n_partitions)
+        ]
 
         logger.info(f"Partition size statistics:")
         logger.info(f"  Min: {min(partition_sizes)}")
@@ -205,7 +205,9 @@ class InvertedFileIndex(nn.Module):
         # Check for empty partitions
         empty_partitions = sum(1 for size in partition_sizes if size == 0)
         if empty_partitions > 0:
-            logger.warning(f"Found {empty_partitions} empty partitions  (out of {self.n_partitions})")
+            logger.warning(
+                f"Found {empty_partitions} empty partitions  (out of {self.n_partitions})"
+            )
 
     def search_partitions(
         self, query_vectors: torch.Tensor, n_probe: int = 1
@@ -243,7 +245,7 @@ class InvertedFileIndex(nn.Module):
 
         return partition_lists
 
-    def get_partition_vectors(self, partition_id: int) -> List[int]:
+    def get_partition_vector_ids(self, partition_id: int) -> List[int]:
         """
         Get vector IDs in a specific partition.
 
@@ -268,7 +270,9 @@ class InvertedFileIndex(nn.Module):
         if not self.is_trained:
             raise RuntimeError("IVF index must be trained to get statistics")
 
-        partition_sizes = [len(self.inverted_lists[i]) for i in range(self.n_partitions)]
+        partition_sizes = [
+            len(self.inverted_lists[i]) for i in range(self.n_partitions)
+        ]
 
         return {
             "n_partitions": self.n_partitions,

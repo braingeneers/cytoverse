@@ -78,14 +78,14 @@ class TestIVFBasic:
         )
         assert total_assigned == self.n_vectors
 
-    def test_get_partition_vectors(self):
+    def test_get_partition_vector_ids(self):
         """Test getting vectors from specific partitions."""
         ivf = InvertedFileIndex(self.d, self.n_partitions)
         ivf.train_ivf(self.vectors, self.vector_ids, n_iterations=10)
 
         # Test getting vectors from each partition
         for partition_id in range(self.n_partitions):
-            vector_ids = ivf.get_partition_vectors(partition_id)
+            vector_ids = ivf.get_partition_vector_ids(partition_id)
             assert isinstance(vector_ids, list)
             assert all(isinstance(vid, int) for vid in vector_ids)
             assert all(0 <= vid < self.n_vectors for vid in vector_ids)
@@ -148,7 +148,7 @@ class TestIVFBasic:
             ivf.search_partitions(self.vectors[:1])
 
         with pytest.raises(RuntimeError):
-            ivf.get_partition_vectors(0)
+            ivf.get_partition_vector_ids(0)
 
         with pytest.raises(RuntimeError):
             ivf.get_partition_stats()
@@ -163,10 +163,10 @@ class TestIVFBasic:
         ivf.train_ivf(self.vectors, self.vector_ids, n_iterations=5)
 
         with pytest.raises(ValueError):
-            ivf.get_partition_vectors(-1)
+            ivf.get_partition_vector_ids(-1)
 
         with pytest.raises(ValueError):
-            ivf.get_partition_vectors(self.n_partitions)
+            ivf.get_partition_vector_ids(self.n_partitions)
 
     def test_mismatched_vector_ids(self):
         """Test error handling for mismatched vector IDs."""

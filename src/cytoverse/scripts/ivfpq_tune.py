@@ -50,8 +50,8 @@ def load_embeddings_and_labels(
 
     train_indices, test_indices = train_test_split(
         stratify_labels_df.index.values,
-        train_size=int(num_embeddings * (99 / 100)),
-        test_size=int(num_embeddings * (1 / 100)),
+        train_size=int(num_embeddings * (98 / 100)),
+        test_size=int(num_embeddings * (2 / 100)),
         stratify=stratify_label_indices,
         random_state=42,
     )
@@ -201,7 +201,7 @@ class IVFPQTrainable(tune.Trainable):
 
             candidate_indices = set()
             for partition_id in selected_partitions:
-                partition_vectors = ivf.get_partition_vectors(partition_id)
+                partition_vectors = ivf.get_partition_vector_ids(partition_id)
                 if len(partition_vectors) > 0:
                     candidate_indices.update(partition_vectors)
 
@@ -329,6 +329,7 @@ def tune_ivfpq(
             "pq_k": tune.choice([128, 256, 512]),
             "num_partitions": tune.choice([128, 256, 512]),
             "n_probe": tune.choice([1, 2, 3]),
+            "total_num_embeddings": total_num_embeddings,
             "train_embeddings_ref": train_embeddings_ref,
             "test_embeddings_ref": test_embeddings_ref,
             "y_train_ref": y_train_ref,
