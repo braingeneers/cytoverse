@@ -15,14 +15,8 @@ from pathlib import Path
 import tempfile
 import random
 import json
-from typing import List, Tuple
 
-import sys
-
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from src.cytoverse.ivfpq import ProductQuantizer, InvertedFileIndex, IVFPQ
+from cytoverse.ivfpq import ProductQuantizer, InvertedFileIndex, IVFPQ
 
 
 class TestIVFPQComplete:

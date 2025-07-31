@@ -22,18 +22,11 @@ from pathlib import Path
 import logging
 from typing import Optional
 import json
-
-import sys
-import os
 from pathlib import Path
 
-# Add the project root to the path so we can import our modules
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from src.cytoverse.ivfpq.pq import ProductQuantizer
-from src.cytoverse.ivfpq.ivf import InvertedFileIndex
-from src.cytoverse.ivfpq.ivfpq import IVFPQ
+from cytoverse.ivfpq.pq import ProductQuantizer
+from cytoverse.ivfpq.ivf import InvertedFileIndex
+from cytoverse.ivfpq.ivfpq import IVFPQ
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

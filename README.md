@@ -47,6 +47,8 @@ uv venv
 source .venv/bin/activate
 uv sync
 
+pip install -e .
+
 brew install go-parquet-tools
 ```
 

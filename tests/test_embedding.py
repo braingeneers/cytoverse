@@ -11,12 +11,10 @@ import torch
 from pathlib import Path
 
 # Add SCimilarity imports for embedding computation
-import scimilarity
 from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
-import scanpy as sc
 
-from src.cytoverse.ivfpq import IVFPQ
+from cytoverse.ivfpq import IVFPQ
 
 
 @pytest.fixture

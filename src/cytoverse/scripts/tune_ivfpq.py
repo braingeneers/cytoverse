@@ -19,13 +19,6 @@ import logging
 import typer
 from sklearn.model_selection import train_test_split
 
-# Note: Consider installing src.cytoverse as a package or setting PYTHONPATH
-# to avoid runtime sys.path modifications, which can bloat serialized environment.
-import sys
-
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -40,7 +33,7 @@ def load_embeddings_and_labels(
     labels_path: str,
     stratify_by: str,
     size_to_sample_from: int = 2_000_000,
-    num_embeddings: int = 10_000,
+    num_embeddings: int = 100_000,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load embeddings and labels from parquet files with stratified sampling.
@@ -57,8 +50,8 @@ def load_embeddings_and_labels(
 
     train_indices, test_indices = train_test_split(
         stratify_labels_df.index.values,
-        train_size=int(num_embeddings * (98 / 100)),
-        test_size=int(num_embeddings * (2 / 100)),
+        train_size=int(num_embeddings * (99 / 100)),
+        test_size=int(num_embeddings * (1 / 100)),
         stratify=stratify_label_indices,
         random_state=42,
     )
@@ -150,8 +143,8 @@ def train_ivfpq(
     vector_ids = torch.arange(len(train_embeddings), dtype=torch.int32)
     d = train_embeddings.shape[1]
 
-    from src.cytoverse.ivfpq.pq import ProductQuantizer
-    from src.cytoverse.ivfpq.ivf import InvertedFileIndex
+    from cytoverse.ivfpq.pq import ProductQuantizer
+    from cytoverse.ivfpq.ivf import InvertedFileIndex
 
     # Train PQ
     logger.info(f"Training PQ with m={config['pq_m']}, k={config['pq_k']}")
@@ -176,14 +169,15 @@ class IVFPQTrainable(tune.Trainable):
         # Retrieve data from object store
         self.train_embeddings = ray.get(config["train_embeddings_ref"])
         self.test_embeddings = ray.get(config["test_embeddings_ref"])
+        self.total_num_embeddings = config["total_num_embeddings"]
         self.y_train = ray.get(config["y_train_ref"])
         self.y_test = ray.get(config["y_test_ref"])
         self.config = config
 
     def step(self):
         from collections import Counter
-        from src.cytoverse.ivfpq.pq import ProductQuantizer
-        from src.cytoverse.ivfpq.ivf import InvertedFileIndex
+        from cytoverse.ivfpq.pq import ProductQuantizer
+        from cytoverse.ivfpq.ivf import InvertedFileIndex
 
         pq, ivf, _, train_pq_codes = train_ivfpq(self.train_embeddings, self.config)
 
@@ -197,67 +191,39 @@ class IVFPQTrainable(tune.Trainable):
             f"pq_m={self.config['pq_m']}, pq_k={self.config['pq_k']}"
         )
 
-        # Batch process all queries for partition search
-        all_selected_partitions = ivf.search_partitions(
-            self.test_embeddings, n_probe=self.config["n_probe"]
-        )
-
-        # Collect all unique candidates and their PQ codes
-        candidate_indices = set()
-        for selected_partitions in all_selected_partitions:
+        for i in range(total_samples):
+            query = self.test_embeddings[i : i + 1]  # [1, d]
+            selected_partitions_list = ivf.search_partitions(
+                query, n_probe=self.config["n_probe"]
+            )
+            selected_partitions = selected_partitions_list[0]
             unique_partitions.update(selected_partitions)
+
+            candidate_indices = set()
             for partition_id in selected_partitions:
                 partition_vectors = ivf.get_partition_vectors(partition_id)
                 if len(partition_vectors) > 0:
                     candidate_indices.update(partition_vectors)
 
-        candidate_indices = sorted(list(candidate_indices))  # Sort for reproducibility
-        if not candidate_indices:
-            logger.warning("No candidates found; returning zero accuracy")
-            return {
-                "accuracy": 0.0,
-                "total_wire_mb": 0.0,
-                "unique_partitions": 0,
-                "combined_score": 0.0,
-                "done": True,
-            }
-
-        # Map global indices to local indices in candidate list
-        global_to_local = {idx: i for i, idx in enumerate(candidate_indices)}
-        candidate_codes = train_pq_codes[candidate_indices]  # [num_candidates, m]
-
-        # Compute distances for all queries to all candidates at once
-        distances = pq.compute_asymmetric_distances(
-            self.test_embeddings, candidate_codes
-        )  # [num_queries, num_candidates]
-
-        # Process each query to get top-50 consensus
-        for i, selected_partitions in enumerate(all_selected_partitions):
-            # Get candidate indices for this query's partitions
-            query_candidate_indices = []
-            for partition_id in selected_partitions:
-                partition_vectors = ivf.get_partition_vectors(partition_id)
-                query_candidate_indices.extend(
-                    [
-                        global_to_local[idx]
-                        for idx in partition_vectors
-                        if idx in global_to_local
-                    ]
-                )
-
-            if not query_candidate_indices:
+            if not candidate_indices:
                 continue  # No candidates for this query; counts as incorrect
 
-            # Extract distances for this query's candidates
-            query_distances = distances[
-                i, query_candidate_indices
-            ]  # [num_query_candidates]
+            candidate_indices = sorted(
+                list(candidate_indices)
+            )  # Sort for reproducibility
+            candidate_codes = train_pq_codes[candidate_indices]  # [num_candidates, m]
+
+            # Compute distances for this query to its candidates
+            distances = pq.compute_asymmetric_distances(
+                query, candidate_codes
+            )  # [1, num_candidates]
+            query_distances = distances[0]  # [num_candidates]
+
             top_k = min(50, len(query_distances))
             top_50_mask = torch.topk(query_distances, top_k, largest=False)
             top_50_local_indices = top_50_mask.indices
             top_50_indices = [
-                candidate_indices[query_candidate_indices[idx.item()]]
-                for idx in top_50_local_indices
+                candidate_indices[idx.item()] for idx in top_50_local_indices
             ]
 
             # Consensus prediction
@@ -271,8 +237,9 @@ class IVFPQTrainable(tune.Trainable):
         accuracy = correct_predictions / total_samples if total_samples > 0 else 0
 
         # Bandwidth estimation (assuming caching: unique partitions loaded once)
-        N_full = 23_000_000  # TODO: Make configurable if full dataset size varies
-        avg_vectors_per_partition = N_full / self.config["num_partitions"]
+        avg_vectors_per_partition = (
+            self.total_num_embeddings / self.config["num_partitions"]
+        )
         bytes_per_vector = 4 + self.config["pq_m"]  # ID + codes
         total_wire_bytes = (
             len(unique_partitions) * avg_vectors_per_partition * bytes_per_vector
@@ -302,6 +269,9 @@ class IVFPQTrainable(tune.Trainable):
 def tune_ivfpq(
     embeddings_path: str = typer.Argument(help="Path to embeddings parquet file"),
     labels_path: str = typer.Argument(help="Path to labels parquet file"),
+    total_num_embeddings: int = typer.Option(
+        23_000_000, help="Total number of embeddings in the overall dataset"
+    ),
     stratify_by: str = typer.Option("prediction", help="Column to stratify by"),
     num_samples: int = typer.Option(
         20, help="Number of hyperparameter configurations to try"
@@ -346,7 +316,8 @@ def tune_ivfpq(
             "pq_m": tune.choice([4]),
             "pq_k": tune.choice([64]),
             "num_partitions": tune.choice([64]),
-            "n_probe": tune.choice([1]),
+            "n_probe": tune.choice([2]),
+            "total_num_embeddings": total_num_embeddings,
             "train_embeddings_ref": train_embeddings_ref,
             "test_embeddings_ref": test_embeddings_ref,
             "y_train_ref": y_train_ref,

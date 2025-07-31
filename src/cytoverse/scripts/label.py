@@ -12,7 +12,6 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import anndata
-import scimilarity
 from scimilarity import CellAnnotation
 from scimilarity.utils import align_dataset, lognorm_counts
 
