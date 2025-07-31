@@ -66,11 +66,10 @@
         "${workspaceFolder}/data/scimilarity/embeddings.parquet",
         "${workspaceFolder}/data/scimilarity/labels.parquet",
         "--num-samples",
-        "4",
+        "1",
         "--max-concurrent-trials",
         "1",
-        "--max-embeddings",
-        "1000"
+        "--debug"
       ]
     },
     {

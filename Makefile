@@ -53,7 +53,7 @@ ivfpq-tune:
         data/scimilarity/labels.parquet \
         --num-samples 2 \
         --max-concurrent-trials 2 \
-        --max-embeddings 100000
+        --max-embeddings 1000000
 
 # PUMAP
 pumap-train:
