@@ -51,9 +51,8 @@ ivfpq-tune:
 	python src/cytoverse/scripts/tune_ivfpq.py \
         data/scimilarity/embeddings.parquet \
         data/scimilarity/labels.parquet \
-        --num-samples 2 \
-        --max-concurrent-trials 2 \
-        --max-embeddings 1000000
+        --num-samples 1 \
+        --max-concurrent-trials 1
 
 # PUMAP
 pumap-train:

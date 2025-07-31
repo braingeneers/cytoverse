@@ -40,7 +40,7 @@ def load_embeddings_and_labels(
     labels_path: str,
     stratify_by: str,
     size_to_sample_from: int = 2_000_000,
-    num_embeddings: int = 100_000,
+    num_embeddings: int = 10_000,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load embeddings and labels from parquet files with stratified sampling.
@@ -57,8 +57,8 @@ def load_embeddings_and_labels(
 
     train_indices, test_indices = train_test_split(
         stratify_labels_df.index.values,
-        train_size=int(num_embeddings * (80 / 100)),
-        test_size=int(num_embeddings * (20 / 100)),
+        train_size=int(num_embeddings * (98 / 100)),
+        test_size=int(num_embeddings * (2 / 100)),
         stratify=stratify_label_indices,
         random_state=42,
     )
@@ -132,7 +132,9 @@ def load_embeddings_and_labels(
     X_train = np.vstack(train_embeddings)
     X_test = np.vstack(test_embeddings)
     y_train = np.array(train_labels, dtype=np.int32)
-    y_test = np.array(train_labels, dtype=np.int32)
+    y_test = np.array(
+        test_labels, dtype=np.int32
+    )  # FIXED: Use test_labels, not train_labels
 
     logger.info(
         f"Loaded embeddings - Train shape: {X_train.shape}, Test shape: {X_test.shape}"
@@ -194,61 +196,98 @@ class IVFPQTrainable(tune.Trainable):
             f"num_partitions={self.config['num_partitions']}, "
             f"pq_m={self.config['pq_m']}, pq_k={self.config['pq_k']}"
         )
-        
-        # Batch process all queries
+
+        # Batch process all queries for partition search
         all_selected_partitions = ivf.search_partitions(
             self.test_embeddings, n_probe=self.config["n_probe"]
         )
-        
-        # Process each query's results
-        for i, (query, selected_partitions) in enumerate(zip(self.test_embeddings, all_selected_partitions)):
+
+        # Collect all unique candidates and their PQ codes
+        candidate_indices = set()
+        for selected_partitions in all_selected_partitions:
             unique_partitions.update(selected_partitions)
-            
-            # Collect all codes from selected partitions
-            all_partition_vectors = []
-            all_partition_codes = []
-            partition_offsets = [0]
-            
             for partition_id in selected_partitions:
                 partition_vectors = ivf.get_partition_vectors(partition_id)
                 if len(partition_vectors) > 0:
-                    all_partition_vectors.extend(partition_vectors)
-                    all_partition_codes.append(train_pq_codes[partition_vectors])
-                    partition_offsets.append(len(all_partition_vectors))
-            
-            if len(all_partition_vectors) > 0:
-                # Compute distances for all candidates at once
-                all_codes = torch.cat(all_partition_codes)
-                distances = pq.compute_asymmetric_distances(query, all_codes)
-                
-                # Find top 50
-                top_50_mask = torch.topk(distances, min(50, len(distances)), largest=False)
-                top_50_local_indices = top_50_mask.indices
-                top_50_indices = [all_partition_vectors[idx] for idx in top_50_local_indices]
-                
-                # Consensus prediction
-                top_50_labels = self.y_train[top_50_indices]
-                label_counts = Counter(top_50_labels)
-                consensus_label = label_counts.most_common(1)[0][0]
-                actual_label = self.y_test[i]
-                if consensus_label == actual_label:
-                    correct_predictions += 1
+                    candidate_indices.update(partition_vectors)
+
+        candidate_indices = sorted(list(candidate_indices))  # Sort for reproducibility
+        if not candidate_indices:
+            logger.warning("No candidates found; returning zero accuracy")
+            return {
+                "accuracy": 0.0,
+                "total_wire_mb": 0.0,
+                "unique_partitions": 0,
+                "combined_score": 0.0,
+                "done": True,
+            }
+
+        # Map global indices to local indices in candidate list
+        global_to_local = {idx: i for i, idx in enumerate(candidate_indices)}
+        candidate_codes = train_pq_codes[candidate_indices]  # [num_candidates, m]
+
+        # Compute distances for all queries to all candidates at once
+        distances = pq.compute_asymmetric_distances(
+            self.test_embeddings, candidate_codes
+        )  # [num_queries, num_candidates]
+
+        # Process each query to get top-50 consensus
+        for i, selected_partitions in enumerate(all_selected_partitions):
+            # Get candidate indices for this query's partitions
+            query_candidate_indices = []
+            for partition_id in selected_partitions:
+                partition_vectors = ivf.get_partition_vectors(partition_id)
+                query_candidate_indices.extend(
+                    [
+                        global_to_local[idx]
+                        for idx in partition_vectors
+                        if idx in global_to_local
+                    ]
+                )
+
+            if not query_candidate_indices:
+                continue  # No candidates for this query; counts as incorrect
+
+            # Extract distances for this query's candidates
+            query_distances = distances[
+                i, query_candidate_indices
+            ]  # [num_query_candidates]
+            top_k = min(50, len(query_distances))
+            top_50_mask = torch.topk(query_distances, top_k, largest=False)
+            top_50_local_indices = top_50_mask.indices
+            top_50_indices = [
+                candidate_indices[query_candidate_indices[idx.item()]]
+                for idx in top_50_local_indices
+            ]
+
+            # Consensus prediction
+            top_50_labels = self.y_train[top_50_indices]
+            label_counts = Counter(top_50_labels)
+            consensus_label = label_counts.most_common(1)[0][0]
+            actual_label = self.y_test[i]
+            if consensus_label == actual_label:
+                correct_predictions += 1
 
         accuracy = correct_predictions / total_samples if total_samples > 0 else 0
 
-        N_full = 23000000
+        # Bandwidth estimation (assuming caching: unique partitions loaded once)
+        N_full = 23_000_000  # TODO: Make configurable if full dataset size varies
         avg_vectors_per_partition = N_full / self.config["num_partitions"]
-        bytes_per_vector = 4 + self.config["pq_m"]
+        bytes_per_vector = 4 + self.config["pq_m"]  # ID + codes
         total_wire_bytes = (
             len(unique_partitions) * avg_vectors_per_partition * bytes_per_vector
         )
         total_wire_mb = total_wire_bytes / (1024 * 1024)
 
+        # Combined score: Promote accuracy, penalize bandwidth
+        bandwidth_penalty_scale = 1000  # TODO: Add to config for tuning
+        combined_score = accuracy - (total_wire_mb / bandwidth_penalty_scale)
+
         return {
             "accuracy": accuracy,
             "total_wire_mb": total_wire_mb,
             "unique_partitions": len(unique_partitions),
-            "combined_score": accuracy - (total_wire_mb / 1000),
+            "combined_score": combined_score,
             "done": True,
         }
 
@@ -290,7 +329,7 @@ def tune_ivfpq(
     if debug:
         ray.init(ignore_reinit_error=True, local_mode=True)
     else:
-        ray.init(ignore_reinit_error=True, logging_level="ERROR")
+        ray.init(ignore_reinit_error=True, log_to_driver=False, logging_level="ERROR")
 
     logging.getLogger("ray.train").setLevel(logging.CRITICAL)
     logging.getLogger("ray.tune").setLevel(logging.CRITICAL)
@@ -315,10 +354,10 @@ def tune_ivfpq(
         }
     else:
         search_space = {
-            "pq_m": tune.choice([16, 32, 64]),
+            "pq_m": tune.choice([8, 16, 32]),
             "pq_k": tune.choice([128, 256, 512]),
             "num_partitions": tune.choice([128, 256, 512]),
-            "n_probe": tune.choice([1, 2, 4]),
+            "n_probe": tune.choice([1, 2, 3]),
             "train_embeddings_ref": train_embeddings_ref,
             "test_embeddings_ref": test_embeddings_ref,
             "y_train_ref": y_train_ref,
