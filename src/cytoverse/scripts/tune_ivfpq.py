@@ -154,7 +154,7 @@ def objective(
     correct_predictions = 0
     total_samples = 0
 
-    test_embeddings_tensor = torch.from_numpy(test_embeddings).float()
+    test_embeddings_tensor = torch.from_numpy(test_embeddings.copy()).float()
 
     for i, query in enumerate(test_embeddings_tensor):
         # IVFPQ search
@@ -196,18 +196,21 @@ def objective(
     # Calculate accuracy
     accuracy = correct_predictions / total_samples if total_samples > 0 else 0
 
-    # Calculate memory usage (approximate)
-    d = train_embeddings.shape[1]
-    pq_memory = config["pq_m"] * config["pq_k"] * (d // config["pq_m"]) * 4
-    ivf_memory = config["num_partitions"] * d * 4
-    total_memory_mb = (pq_memory + ivf_memory) / (1024 * 1024)
+    # Calculate estimated wire memory for full dataset (MB per query)
+    N_full = 23000000
+    avg_vectors_per_partition = N_full / config["num_partitions"]
+    bytes_per_vector = 4 + config["pq_m"]  # ID (4 bytes) + PQ codes (m bytes)
+    wire_bytes_per_query = (
+        config["n_probe"] * avg_vectors_per_partition * bytes_per_vector
+    )
+    wire_mb = wire_bytes_per_query / (1024 * 1024)
 
     # Report metrics to Ray Tune
     session.report(
         {
             "accuracy": accuracy,
-            "memory_mb": total_memory_mb,
-            "combined_score": accuracy - (total_memory_mb / 1000),
+            "wire_mb": wire_mb,
+            "combined_score": accuracy - (wire_mb / 1000),
         }
     )
 
@@ -219,11 +222,11 @@ def tune_ivfpq(
     stratify_by: str = typer.Option("prediction", help="Column to stratify by"),
     test_size: float = typer.Option(0.2, help="Ratio for test set"),
     num_samples: int = typer.Option(
-        4, help="Number of hyperparameter configurations to try"
+        20, help="Number of hyperparameter configurations to try"
     ),
     max_concurrent_trials: int = typer.Option(4, help="Maximum concurrent trials"),
     max_embeddings: Optional[int] = typer.Option(
-        None, help="Maximum number of embeddings to load (None for all)"
+        100000, help="Maximum number of embeddings to load (None for all)"
     ),
 ) -> None:
     """
@@ -250,7 +253,11 @@ def tune_ivfpq(
     logger.info(f"Data split - Train: {len(X_train)}, Test: {len(X_test)}")
 
     # Initialize Ray
-    ray.init(ignore_reinit_error=True, local_mode=True)
+    # ray.init(ignore_reinit_error=True, local_mode=True)
+    ray.init(ignore_reinit_error=True, logging_level="ERROR")
+
+    logging.getLogger("ray.train").setLevel(logging.CRITICAL)
+    logging.getLogger("ray.tune").setLevel(logging.CRITICAL)
 
     # Define search space
     search_space = {
@@ -292,7 +299,7 @@ def tune_ivfpq(
     logger.info(f"  Config: {best_result.config}")
     logger.info(
         f"  Metrics: accuracy={best_result.metrics['accuracy']:.3f}, "
-        f"memory={best_result.metrics['memory_mb']:.1f}MB"
+        f"wire_mb={best_result.metrics['wire_mb']:.1f}MB"
     )
 
     ray.shutdown()
