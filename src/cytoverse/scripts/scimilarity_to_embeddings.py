@@ -17,13 +17,13 @@ import scimilarity
 
 # Create Typer app
 app = typer.Typer(
-    help="Export SCimilarity TileDB embeddings and labels to parquet format",
+    help="Export SCimilarity embeddings and labels",
     add_completion=False,
 )
 
 
 @app.command()
-def export(
+def embeddings(
     model_path: Path = typer.Argument(
         exists=True,
         file_okay=False,
@@ -36,25 +36,26 @@ def export(
         help="Output directory path",
     ),
     labels: list[str] = typer.Option(
-        [],
-        help="Label columns from metadata to extract (e.g., --labels prediction --labels tissue)",
+        ["prediction", "tissue"],
+        help="Labels to export",
     ),
-    max_cells: int = typer.Option(
+    num_embeddings: int = typer.Option(
         None,
-        help="Maximum number of cells to export (default: export all cells, None means no limit)",
+        "--num-embeddings",
+        help="Number of embeddings to export (default: export all embeddings)",
     ),
     validate: bool = typer.Option(
-        True,
-        help="Validate the output files after processing (default: True)",
+        False,
+        "--validate",
+        help="Validate exported files by checking 10 random samples against TileDB",
     ),
 ) -> None:
     """
-    Export embeddings and labels from SCimilarity TileDB to parquet format.
+    Export embeddings and optionally associated expression data from a SCimilarity model.
 
-    This script:
-    1. Loads embeddings from TileDB
-    2. Extracts specified label columns from cell_metadata
-    3. Saves embeddings to embeddings.parquet and labels to labels.parquet
+    Export behavior:
+    - If --num-embeddings is not specified: export all cells
+    - If --num-embeddings is specified: export first N cells (indices 0 to N-1)
     """
 
     print("Opening metadata TileDB...")
@@ -62,8 +63,7 @@ def export(
 
         # Get all available schema fields for reference
         schema_fields = [f.name for f in metadata_db.schema]
-        available_labels = [f for f in schema_fields if f != "index"]
-        print(f"  Available label columns: {available_labels}")
+        print("Available fields:", schema_fields)
 
         # Get total number of cells without loading data
         total_cells = (
@@ -71,274 +71,219 @@ def export(
         )  # TileDB uses 0-based indexing
         print(f"Total cells in TileDB: {total_cells}")
 
-    # Validate label columns
-    if labels:
-        print(f"\nValidating label columns: {labels}")
-        valid_labels = []
-        for label in labels:
-            if label not in available_labels:
-                print(f"  ❌ Warning: Column '{label}' not found in metadata")
-                continue
-            valid_labels.append(label)
-        labels = valid_labels
-        print(f"  ✅ Valid label columns: {labels}")
+        # Step 1: Determine how many embeddings to export
+        if num_embeddings is None:
+            # Export all cells
+            print("Exporting ALL cells...")
+            num_to_export = total_cells
+        else:
+            # Export first num_embeddings cells (indices 0 to num_embeddings-1)
+            print(f"Exporting first {num_embeddings} embeddings...")
+            num_to_export = min(num_embeddings, total_cells)
 
-    if not labels:
-        print(
-            "  ⚠️ No valid label columns specified or found. Only embeddings will be exported."
-        )
-
-    # Determine how many cells to export
-    if max_cells is None:
-        print("\nExporting ALL cells...")
-        num_to_export = total_cells
-    else:
-        print(f"\nSubsetting to first {max_cells} cells (from {total_cells} total)")
-        num_to_export = min(max_cells, total_cells)
-
-    # Create output directory
-    print(f"\nCreating output directory: {output_path}")
+    print(f"Outputting {num_to_export} embeddings to {output_path}...")
     os.makedirs(output_path, exist_ok=True)
 
-    # Load embeddings
-    print("\nLoading embeddings from TileDB...")
-    embeddings_list = []
-    batch_size = 100_000
-    num_batches = (num_to_export + batch_size - 1) // batch_size
+    # Step 2: Load metadata and embeddings for first num_to_export indices
+    print("Loading metadata...")
+    with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
+        metadata_df = metadata_db.query(attrs=labels).df[0 : num_to_export - 1]
+    print(f"  Loaded metadata shape: {metadata_df.shape}")
 
-    with tiledb.open(str(model_path / "cell_embedding"), "r") as embedding_array:
-        with tqdm(total=num_to_export, desc="Loading embeddings", unit="cells") as pbar:
-            for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, num_to_export)
+    # Ensure we have exactly the number of rows we expect
+    if len(metadata_df) > num_to_export:
+        metadata_df = metadata_df.iloc[:num_to_export]
+        print(f"  Trimmed metadata to {num_to_export} rows")
 
-                try:
-                    # Query the specific range using direct TileDB
-                    embeddings_result = embedding_array[start_idx:end_idx]
+    for label in labels:
+        metadata_df[label] = metadata_df[label].astype("category")
 
-                    # Extract the actual embeddings from OrderedDict
-                    if embeddings_result is None or "vals" not in embeddings_result:
-                        print(
-                            f"Warning: No embeddings found for indices {start_idx} to {end_idx-1}"
-                        )
-                    else:
-                        embeddings = embeddings_result["vals"]
-                        embeddings_list.append(embeddings)
-
-                    # Update progress
-                    pbar.update(end_idx - start_idx)
-
-                except Exception as e:
-                    print(f"❌ Error loading batch {start_idx}:{end_idx} - {e}")
-                    raise
-
-    # Concatenate all embeddings
-    embeddings = np.vstack(embeddings_list)
-    print(f"  Embeddings shape: {embeddings.shape}")
-
-    # Save embeddings to embeddings.parquet
-    embeddings_path = output_path / "embeddings.parquet"
-    print(f"Saving embeddings to: {embeddings_path}")
-
-    # Convert embeddings to DataFrame
-    embeddings_df = pd.DataFrame(embeddings.astype(np.float32))
-
-    # Save to parquet without index
-    embeddings_df.to_parquet(
-        embeddings_path,
-        compression=None,
+    # Export metadata as Parquet file with compression
+    labels_path = output_path / "labels.parquet"
+    metadata_df.to_parquet(
+        labels_path,
+        compression="snappy",
         index=None,
     )
 
-    # Extract and save labels if specified
-    if labels:
-        print(f"\nExtracting labels: {labels}")
+    print("Loading embeddings...")
 
-        # Load metadata
-        with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-            # Create labels dataframe
-            labels_df = pd.DataFrame()
+    # Get embedding dimensions by loading a small sample first using direct TileDB
+    with tiledb.open(str(model_path / "cell_embedding"), "r") as embedding_array:
+        sample_result = embedding_array[0:1]
+        if sample_result is None or "vals" not in sample_result:
+            raise ValueError("Could not determine embedding dimensions")
+        embedding_dim = sample_result["vals"].shape[1]
+        print(f"  Embedding dimensions: {embedding_dim}")
 
-            # Load each label column
-            for label in labels:
-                print(f"  Loading '{label}'...")
-                label_data = metadata_db.query(attrs=[label]).df[0 : num_to_export - 1]
-                labels_df[label] = label_data[label].values
+    # Create proper numpy file with header
+    embeddings_path = output_path / "embeddings.npy"
 
-                # Check unique values
-                unique_count = labels_df[label].nunique()
-                print(f"  Column '{label}': {unique_count} unique values")
+    # Create full-size array and save it to establish proper .npy format
+    print(f"Creating embeddings file with shape ({num_to_export}, {embedding_dim})")
+    full_array = np.empty((num_to_export, embedding_dim), dtype=np.float32)
+    np.save(embeddings_path, full_array)
+    del full_array
 
-                if unique_count > 1000:
-                    print(
-                        f"  ❌ Warning: Column '{label}' has {unique_count} unique values, exceeding limit of 1000. Skipping."
-                    )
-                    labels_df = labels_df.drop(columns=[label])
-                    labels.remove(label)
-                    continue
+    # Now open as memory-mapped for writing
+    embeddings_mmap = np.load(embeddings_path, mmap_mode="r+")
 
-                # Convert to categorical for efficient storage
-                labels_df[label] = labels_df[label].astype("category")
+    # Load embeddings in batches using direct TileDB access
+    batch_size = 100_000
+    num_batches = (num_to_export + batch_size - 1) // batch_size
+    successful_count = 0
 
-        if labels:
-            # Save labels to parquet without index
-            labels_path = output_path / "labels.parquet"
-            print(f"Saving labels to: {labels_path}")
-            labels_df.to_parquet(
-                labels_path,
-                compression="snappy",
-                index=None,
-            )
-            print(f"Labels saved with shape: {labels_df.shape}")
+    try:
+        with tiledb.open(str(model_path / "cell_embedding"), "r") as embedding_array:
+            with tqdm(
+                total=num_to_export, desc="Loading embeddings", unit="cells"
+            ) as pbar:
+                for batch_idx in range(num_batches):
+                    start_idx = batch_idx * batch_size
+                    end_idx = min(start_idx + batch_size, num_to_export)
 
-    print(f"\n✅ Processing complete!")
-    print(f"   Embeddings: {embeddings_path} (shape: {embeddings.shape})")
-    if labels:
-        print(f"   Labels: {labels_path} (shape: {labels_df.shape})")
-    print(f"   Output directory: {output_path}")
+                    try:
+                        # Query the specific range using direct TileDB
+                        embeddings_result = embedding_array[start_idx:end_idx]
 
-    # Run validation if requested
-    if validate:
-        print("\n" + "=" * 60)
-        print("Running validation...")
-        print("=" * 60)
-        try:
-            _validate_outputs(
-                model_path=model_path,
-                parquet_dir=output_path,
-                n_samples=10,
-                max_cells=num_to_export,
-            )
-        except Exception as e:
-            print(f"\n❌ Validation failed: {e}")
-            raise typer.Exit(1)
+                        # Extract the actual embeddings from OrderedDict
+                        if embeddings_result is None or "vals" not in embeddings_result:
+                            print(
+                                f"Warning: No embeddings found for indices {start_idx} to {end_idx-1}"
+                            )
+                        else:
+                            embeddings = embeddings_result["vals"]
+                            batch_size_actual = embeddings.shape[0]
 
+                            # Write batch to memory-mapped array at the correct position
+                            embeddings_mmap[
+                                start_idx : start_idx + batch_size_actual
+                            ] = embeddings
+                            successful_count += batch_size_actual
 
-def _validate_outputs(
-    model_path: Path,
-    parquet_dir: Path,
-    n_samples: int = 10,
-    max_cells: int = None,
-) -> None:
-    """
-    Validate that parquet files match data in TileDB.
+                        # Update progress
+                        pbar.update(end_idx - start_idx)
 
-    This function:
-    1. Selects random indices from the exported data
-    2. Verifies labels match at those indices between TileDB and labels.parquet
-    3. Verifies embeddings match between TileDB and embeddings.parquet
-    """
+                    except Exception as e:
+                        print(f"❌ Error loading batch {start_idx}:{end_idx} - {e}")
+                        # Continue with next batch
+                        pbar.update(end_idx - start_idx)
 
-    print(f"Validating parquet files against TileDB: {model_path}")
+        # Flush all changes to disk
+        embeddings_mmap.flush()
+        print(f"  Successfully loaded embeddings: {successful_count}/{num_to_export}")
 
-    # Load parquet files
-    embeddings_path = parquet_dir / "embeddings.parquet"
-    labels_path = parquet_dir / "labels.parquet"
+    finally:
+        # Clean up memory map
+        del embeddings_mmap
 
-    if not embeddings_path.exists():
-        print(f"❌ Error: {embeddings_path} not found")
-        raise typer.Exit(1)
-
-    print(f"\nLoading embeddings from: {embeddings_path}")
-    embeddings_df = pd.read_parquet(embeddings_path)
-    print(f"  Embeddings shape: {embeddings_df.shape}")
-
-    # Check if labels file exists
-    has_labels = labels_path.exists()
-    if has_labels:
-        print(f"\nLoading labels from: {labels_path}")
-        labels_df = pd.read_parquet(labels_path)
-        print(f"  Labels shape: {labels_df.shape}")
-        print(f"  Label columns: {list(labels_df.columns)}")
-
-    # Select random indices to validate
-    n_cells = embeddings_df.shape[0]
-    if max_cells:
-        n_cells = min(n_cells, max_cells)
-    n_samples = min(n_samples, n_cells)
-    random_indices = np.random.choice(n_cells, size=n_samples, replace=False)
-    random_indices.sort()
-
-    print(f"\nValidating {n_samples} random samples: {random_indices}")
-
-    # Validate labels (if present)
-    if has_labels:
-        print("\n=== Validating Labels ===")
-        all_labels_match = True
-
-        # Load original labels from TileDB for validation indices
-        with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
-            # Get label columns from parquet file
-            label_cols = list(labels_df.columns)
-
-            for idx in random_indices:
-                print(f"\nRow {idx}:")
-
-                # Load this specific row from TileDB
-                tiledb_row = metadata_db.query(attrs=label_cols).df[idx : idx + 1]
-
-                # Check each label column
-                for col in label_cols:
-                    tiledb_value = tiledb_row[col].values[0]
-                    parquet_value = labels_df.iloc[idx][col]
-
-                    match = str(tiledb_value) == str(parquet_value)
-                    status = "✅" if match else "❌"
-                    print(
-                        f"  {col}: {status} tiledb='{tiledb_value}' parquet='{parquet_value}'"
-                    )
-
-                    if not match:
-                        all_labels_match = False
-
-        if all_labels_match:
-            print("\n✅ All labels match!")
-        else:
-            print("\n❌ Some labels do not match!")
-
-    # Validate embeddings
-    print("\n=== Validating Embeddings ===")
-    all_embeddings_match = True
-    tolerance = 1e-5
-
-    # Load embeddings from TileDB for validation indices
-    original_embeddings = scimilarity.utils.embedding_from_tiledb(
-        random_indices.tolist(), str(model_path / "cell_embedding")
+    print(f"Labels saved to {labels_path} (shape: {metadata_df.shape})")
+    print(
+        f"Embeddings saved to {embeddings_path} (shape: ({successful_count}, {embedding_dim}))"
+    )
+    print(
+        f"Exported indices: 0 to {num_to_export-1} (requested {num_to_export}, successful {successful_count})"
     )
 
-    for i, idx in enumerate(random_indices):
-        tiledb_embedding = original_embeddings[i]
-        parquet_embedding = embeddings_df.iloc[idx].values
+    # Validation if requested
+    if validate:
+        print("\n🔍 Validating exported files...")
+        # Select random sample for validation
+        validation_count = min(10, num_to_export)
+        validation_indices = np.random.choice(
+            num_to_export, size=validation_count, replace=False
+        ).tolist() + [
+            0,
+            num_to_export - 1,
+        ]  # Include first and last indices
+        validation_indices.sort()  # Sort for cleaner display
+        print(
+            f"  Validating random sample of {validation_count} indices: {validation_indices}"
+        )
 
-        # Calculate max absolute difference
-        max_diff = np.max(np.abs(tiledb_embedding - parquet_embedding))
-        match = max_diff < tolerance
+        _validate_exports(
+            model_path,
+            labels_path,
+            embeddings_path,
+            labels,
+            validation_indices,
+        )
 
-        status = "✅" if match else "❌"
-        print(f"\nRow {idx}: {status} max_diff={max_diff:.2e}")
+    print(f"Exported {num_to_export} cells to {output_path}")
 
-        if not match:
-            all_embeddings_match = False
-            # Show first few values for debugging
-            print(f"  TileDB[:5]: {tiledb_embedding[:5]}")
-            print(f"  Parquet[:5]: {parquet_embedding[:5]}")
 
-    if all_embeddings_match:
-        print(f"\n✅ All embeddings match within tolerance ({tolerance})!")
+def _validate_exports(
+    model_path: Path,
+    labels_path: Path,
+    embeddings_path: Path,
+    labels: list[str],
+    validation_indices: list[int],
+) -> None:
+    """Validate exported Parquet and numpy files against original TileDB data."""
+
+    # Read exported files - select rows at validation_indices positions
+    print("  Reading from exported files...")
+    labels_df_exported = pd.read_parquet(labels_path)
+    embeddings_exported = np.load(embeddings_path, mmap_mode="r")
+
+    # Select the specific rows we want to validate
+    labels_df_validation = labels_df_exported.iloc[validation_indices]
+    embeddings_validation = embeddings_exported[validation_indices]
+
+    # Get embedding IDs from the labels file index for the validation rows
+    embedding_ids_exported = labels_df_validation.index.values
+
+    # Read validation samples from original TileDB using the same indices
+    print("  Reading from original TileDB...")
+    with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
+        original_metadata = metadata_db.query(attrs=["index"] + labels).df[
+            validation_indices
+        ]
+        # Set the "index" column as the dataframe index with int32 dtype
+        original_metadata = original_metadata.set_index("index", drop=True)
+
+    original_embeddings = scimilarity.utils.embedding_from_tiledb(
+        validation_indices, str(model_path / "cell_embedding")
+    )
+
+    # Validate labels using DataFrame comparison
+    print("  Validating labels...")
+
+    if labels_df_validation.astype(str).equals(original_metadata.astype(str)):
+        labels_match = True
+        print("    ✅ All label values match")
     else:
-        print(f"\n❌ Some embeddings do not match within tolerance ({tolerance})!")
+        labels_match = False
+        print(f"    ❌ Label mismatch")
 
-    # Summary
-    print("\n=== Validation Summary ===")
-    if has_labels:
-        print(f"Labels: {'✅ PASS' if all_labels_match else '❌ FAIL'}")
-    print(f"Embeddings: {'✅ PASS' if all_embeddings_match else '❌ FAIL'}")
+    # Validate embeddings
+    print("  Validating embeddings...")
+    embeddings_match = np.allclose(
+        embeddings_validation,
+        original_embeddings,
+        rtol=1e-10,
+        atol=1e-10,
+    )
 
-    if (not has_labels or all_labels_match) and all_embeddings_match:
-        print("\n✅ Validation PASSED!")
+    if embeddings_match:
+        print("    ✅ All embedding values match")
     else:
-        print("\n❌ Validation FAILED!")
-        raise typer.Exit(1)
+        max_diff = np.max(np.abs(embeddings_validation - original_embeddings))
+        print(f"    ❌ Embedding mismatch: max diff = {max_diff:.2e}")
+
+    # Validate embedding IDs
+    print("  Validating embedding IDs...")
+    embedding_ids_match = np.array_equal(embedding_ids_exported, validation_indices)
+
+    if embedding_ids_match:
+        print("    ✅ All embedding ID values match")
+    else:
+        print(f"    ❌ Embedding ID mismatch")
+
+    if labels_match and embeddings_match and embedding_ids_match:
+        print("  🎉 Validation passed! All exported data matches original TileDB.")
+    else:
+        print("  ⚠️ Validation found mismatches. Please check the export process.")
 
 
 if __name__ == "__main__":

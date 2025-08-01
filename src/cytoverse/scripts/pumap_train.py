@@ -28,7 +28,7 @@ app = typer.Typer(
 
 @app.command()
 def train(
-    vectors_path: Path = typer.Argument(..., help="Path to vectors.npy file"),
+    vectors_path: Path = typer.Argument(..., help="Path to embeddings.npy file"),
     labels_path: Path = typer.Argument(..., help="Path to labels.parquet file for stratified sampling"),
     output_path: Path = typer.Argument(..., help="Path to output the trained model"),
     num_vectors: Optional[int] = typer.Option(
@@ -170,7 +170,7 @@ def save_mappings_png(output_path: Path, mappings: np.ndarray) -> None:
 @app.command()
 def map(
     model_path: Path = typer.Argument(..., help="Path to model.onnx"),
-    vectors_path: Path = typer.Argument(..., help="Path to vectors.npy file"),
+    vectors_path: Path = typer.Argument(..., help="Path to embeddings.npy file"),
     output_path: Path = typer.Argument(
         ..., help="Path to output directory for the mapped data"
     ),

@@ -11,7 +11,7 @@
       "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export_model.py",
       "console": "integratedTerminal",
       "args": [
-        "~/data/scimilarity/model_v1.1",
+        "data/scimilarity/model_v1.1",
         "${workspaceFolder}/web/public/models/scimilarity/embedding"
       ]
     },
@@ -22,7 +22,7 @@
       "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_to_embeddings.py",
       "console": "integratedTerminal",
       "args": [
-        "~/data/scimilarity/model_v1.1/cellsearch",
+        "data/scimilarity/model_v1.1/cellsearch",
         "data/scimilarity",
         "--labels",
         "prediction",
@@ -32,8 +32,9 @@
         "author_label",
         "--labels",
         "study",
-        "--max-cells",
-        "100000"
+        "--num-embeddings",
+        "100000",
+        "--validate"
       ]
     },
     {
@@ -44,7 +45,7 @@
       "console": "integratedTerminal",
       "args": [
         "~/data/h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad",
-        "~/data/scimilarity/model_v1.1",
+        "data/scimilarity/model_v1.1",
         "data/allen",
         "--labels",
         "CellType",
@@ -63,8 +64,8 @@
       "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_tune.py",
       "console": "integratedTerminal",
       "args": [
-        "${workspaceFolder}/data/scimilarity/embeddings.parquet",
-        "${workspaceFolder}/data/scimilarity/labels.parquet",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.parquet",
+        "${workspaceFolder}/data/references/scimilarity/labels.parquet",
         "--num-samples",
         "1",
         "--max-concurrent-trials",
@@ -73,22 +74,22 @@
       ]
     },
     {
-      "name": "umap train",
+      "name": "pumap train",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
-        "${workspaceFolder}/data/scimilarity/vectors.npy",
-        "${workspaceFolder}/data/scimilarity/labels.parquet",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
+        "${workspaceFolder}/data/references/scimilarity/labels.parquet",
         "${workspaceFolder}/web/public/models/scimilarity/pumap",
         "--num-vectors",
         "10000"
       ]
     },
     {
-      "name": "umap map",
+      "name": "pumap map",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
@@ -96,15 +97,15 @@
       "args": [
         "map",
         "${workspaceFolder}/web/public/models/scimilarity/pumap/model.onnx",
-        "${workspaceFolder}/data/scimilarity/vectors.npy",
-        "${workspaceFolder}/data/scimilarity/",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
+        "${workspaceFolder}/data/references/scimilarity/",
         "--num-vectors",
         "10000",
         "--export-png"
       ]
     },
     {
-      "name": "umap export",
+      "name": "pumap export",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
@@ -123,7 +124,7 @@
       "console": "integratedTerminal",
       "args": [
         "pq-train",
-        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/web/public/models/scimilarity/pq",
         "--m",
         "16",
@@ -143,7 +144,7 @@
       "console": "integratedTerminal",
       "args": [
         "ivf-train",
-        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/web/public/models/scimilarity/ivf",
         "--n-partitions",
         "64",
@@ -162,7 +163,7 @@
       "args": [
         "ivfpq-export",
         "${workspaceFolder}/web/public/models/scimilarity",
-        "${workspaceFolder}/data/scimilarity/vectors.npy",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "--max-vectors",
         "250000"
       ]

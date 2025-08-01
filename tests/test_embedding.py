@@ -27,7 +27,7 @@ def adata():
 @pytest.fixture
 def metadata_db():
     """Fixture that opens the SCimilarity TileDB metadata database."""
-    db_path = "data/scimilarity/model_v1.1/cellsearch/cell_metadata"
+    db_path = "data/models/scimilarity/model_v1.1/cellsearch/cell_metadata"
     with tiledb.open(db_path, "r") as db:
         yield db
 
@@ -35,7 +35,7 @@ def metadata_db():
 @pytest.fixture
 def embeddings_db():
     """Fixture that opens the SCimilarity TileDB embeddings database."""
-    db_path = "data/scimilarity/model_v1.1/cellsearch/cell_embedding"
+    db_path = "data/models/scimilarity/model_v1.1/cellsearch/cell_embedding"
     with tiledb.open(db_path, "r") as db:
         yield db
 
@@ -43,14 +43,14 @@ def embeddings_db():
 @pytest.fixture
 def labels_df():
     """Fixture that loads the SCimilarity labels.parquet file."""
-    labels_path = Path("data/scimilarity/labels.parquet")
+    labels_path = Path("data/references/scimilarity/labels.parquet")
     return pd.read_parquet(labels_path)
 
 
 @pytest.fixture
 def scimilarity_model():
     """Fixture that loads the SCimilarity model for computing embeddings."""
-    model_path = Path("data/scimilarity/model_v1.1")
+    model_path = Path("data/models/scimilarity/model_v1.1")
     return CellEmbedding(model_path)
 
 
