@@ -1,5 +1,6 @@
 data
-lamin/
+
+tests/artifacts/
 
 lightning_logs/
 

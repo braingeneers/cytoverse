@@ -4,6 +4,9 @@ export model_id=scimilarity
 test:
 	python -m pytest tests/ -v
 
+test-no-capture:
+	python -m pytest tests/ -v --capture=no
+
 # Populate model artifacts for the selected model to web/public/models/<model_id>
 notice:
 	@echo "⚙️ Populating $(model_id)"

@@ -33,3 +33,19 @@ Then rewrite objective to:
 - Update the overlap calculation as the % of test samples where the consensus label index from pq is the same as the actual test label index from the ground truth (ie the respective index in y_test)
 
 The actual parquet files will be: ./data/scimilarity/embeddings.parquet and ./data/scimilarity/labels.parquet
+
+# PyTorch pq.py
+
+We have a kmeans pytorch implementation in kmeans.py with tests in test_kmeans.py and kmeans.test.tx. It is implimented using pytorch and exports onnx models.
+
+Generate a new file, src/pq.py, that implements ProductQuantization. It should have the following pytorch models:
+
+Encode: given an embeddings tensor and a code book it should output the pq encodings of the vectors.
+
+Decode: given a tensor of pq encoded embeddings and codebook it should decode them back into embeddings
+
+Distance: given a query tensor (a pq encoded embedding), a code book, and a reference tensor (a tensor of pq encoded embeddings), and an integer k, return the index of the closest k reference tensors to the query tensor sorted by distance. Calculate the asymetric distance between the query and each of the reference tensors using the codebook to create a distance table for the query. The resulting distances are not exposed and do not need to be any exact distance i.e. euclidean distance itself, it could be squared distance so we don't need to calculate a square root. We'll only be using the index of the top k for further processing.
+
+Also include a utility function that given a tensor of training vectors, PQ parameters m and k, uses the onnx models from kmeans.py to generate the PQ codebook that can be used above. This codebook should be binary as it will be used later in a web application. See web/src/embedding.ts for an example use of an existing implimentation that we're replacing. 
+
+Generate a new tests/test_pq_onnx.py file that tests all of this ala pytest. Assume defaults of 128d embedding vectors, m = 8 and k = 256 for the codebook training and k = 50 for the topk distance calculation.

@@ -43,7 +43,7 @@ test('Navigate to root, run analysis, download and validate CSV', async ({ page 
   )
 
   // Load reference CSV file
-  const referenceContent = readFileSync('web/tests/GSE136831_subsample_100.labels.csv', 'utf-8')
+  const referenceContent = readFileSync('web/tests/e2e/GSE136831_subsample_100.labels.csv', 'utf-8')
   const referenceRecords: Array<{ cell_id: string; category_label: string }> = parse(
     referenceContent,
     {
