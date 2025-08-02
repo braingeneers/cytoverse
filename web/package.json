@@ -9,6 +9,8 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
     "serve-dist-python": "python3 -m http.server 4173 -d dist/",
     "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/",
     "pull-model": "rsync -avh --delete rcurrie@hgwdev.gi.ucsc.edu:~/cytoverse/web/public/models/scimilarity/ public/models/scimilarity/"
@@ -40,6 +42,7 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
+    "@vitest/ui": "^3.2.4",
     "@webgpu/types": "^0.1.61",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
@@ -49,6 +52,7 @@
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.30.1",
     "vite": "^6.3.5",
-    "vite-plugin-static-copy": "^3.0.2"
+    "vite-plugin-static-copy": "^3.0.2",
+    "vitest": "^3.2.4"
   }
 }

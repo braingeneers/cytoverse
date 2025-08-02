@@ -345,6 +345,32 @@ def test_pytorch_onnx_equivalence():
         
         print("\n=== All equivalence tests passed! ===")
         print("PyTorch and ONNX models produce equivalent results.")
+        
+        # Export test data for TypeScript tests
+        test_data_dir = Path(tmpdir) / "test_data"
+        test_data_dir.mkdir(exist_ok=True)
+        
+        # Export sample embeddings and expected results
+        np.save(test_data_dir / "embeddings.npy", embeddings_np)
+        np.save(test_data_dir / "expected_initial_centroids.npy", pytorch_centroids)
+        np.save(test_data_dir / "expected_updated_centroids.npy", pytorch_updated_np)
+        np.save(test_data_dir / "expected_assignments.npy", pytorch_assignments_np)
+        
+        # Export metadata
+        metadata = {
+            "k": k,
+            "seed": seed,
+            "n_samples": embeddings_np.shape[0],
+            "n_features": embeddings_np.shape[1],
+            "converged": float(pytorch_converged_np)
+        }
+        
+        import json
+        with open(test_data_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        print(f"Test data exported to: {test_data_dir}")
+        return str(test_data_dir)
 
 
 def test_edge_cases():
@@ -516,6 +542,85 @@ def test_kmeans_comparison_with_sklearn():
     # Basic sanity checks
     assert torch_sklearn_sim > 0.7, "PyTorch and sklearn results are too different"
     assert torch_onnx_sim > 0.9, "PyTorch and ONNX results should be very similar"
+
+
+def export_test_data_for_typescript():
+    """Export ONNX models and test data for TypeScript tests."""
+    # Create output directory in web folder
+    output_dir = Path(__file__).parent.parent / "web" / "tests" / "fixtures" / "kmeans"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Exporting to: {output_dir}")
+    
+    # Export ONNX models
+    export_kmeans_models(output_dir)
+    
+    # Generate test data
+    np.random.seed(42)
+    torch.manual_seed(42)
+    
+    # Smaller dataset for TypeScript tests
+    embeddings_np = np.random.randn(100, 128).astype(np.float32)
+    embeddings_torch = torch.from_numpy(embeddings_np)
+    k = 10
+    seed = 42
+    
+    # Generate expected results
+    pytorch_init = KMeansInit()
+    pytorch_init.eval()
+    
+    with torch.no_grad():
+        initial_centroids = pytorch_init(
+            embeddings_torch, 
+            torch.tensor(k), 
+            torch.tensor(seed)
+        ).numpy()
+    
+    pytorch_iter = KMeansIteration()
+    pytorch_iter.eval()
+    
+    with torch.no_grad():
+        updated_centroids, assignments, converged = pytorch_iter(
+            embeddings_torch, 
+            torch.from_numpy(initial_centroids)
+        )
+        updated_centroids_np = updated_centroids.numpy()
+        assignments_np = assignments.numpy()
+        converged_np = converged.numpy()
+    
+    # Export test data as browser-ready binary files
+    # Embeddings: Float32Array
+    embeddings_np.astype(np.float32).tofile(output_dir / "test_embeddings.bin")
+    
+    # Initial centroids: Float32Array
+    initial_centroids.astype(np.float32).tofile(output_dir / "expected_initial_centroids.bin")
+    
+    # Updated centroids: Float32Array
+    updated_centroids_np.astype(np.float32).tofile(output_dir / "expected_updated_centroids.bin")
+    
+    # Assignments: Int32Array
+    assignments_np.astype(np.int32).tofile(output_dir / "expected_assignments.bin")
+    
+    # Export metadata
+    metadata = {
+        "k": k,
+        "seed": seed,
+        "n_samples": embeddings_np.shape[0],
+        "n_features": embeddings_np.shape[1],
+        "converged": float(converged_np),
+        "description": "Test data for TypeScript ONNX k-means tests"
+    }
+    
+    import json
+    with open(output_dir / "test_metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
+    
+    print("✅ Exported ONNX models and test data for TypeScript tests")
+    print(f"   - ONNX models: {output_dir}")
+    print(f"   - Test embeddings: {embeddings_np.shape}")
+    print(f"   - Expected centroids: {initial_centroids.shape}")
+    
+    return str(output_dir)
 
 
 if __name__ == "__main__":
