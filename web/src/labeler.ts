@@ -144,7 +144,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
   const k = NUM_NEAREST_NEIGHBORS // Number of nearest neighbors to find
 
   // Reshape PQ codes for processing (assuming pq_embeddings contains codes for all vectors in batch)
-  const codesPerVector = pq.m // number of subquantizers
+  const codesPerVector = pq.metadata.m // number of subquantizers
   const totalCodes = pq_embeddings.length
   const expectedCodes = batchSize * codesPerVector
 
@@ -171,7 +171,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       }
 
       // Decode PQ codes to approximate vector for IVF search
-      const reconstructed = pq.decode(vectorCodes)
+      const reconstructed = await pq.decode(vectorCodes)
 
       // Search for relevant partitions
       const nProbe = NUM_PARTITIONS_TO_SEARCH
@@ -189,12 +189,12 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
         const partitionCodes = partitionData.pq_codes
 
         // Compute asymmetric distances for all vectors in partition
-        const distances = pq.asymmetricDistance(reconstructed, partitionCodes)
+        const distances = await pq.computeDistances(reconstructed, partitionCodes)
 
         // Collect all candidates from this partition
         for (let j = 0; j < partitionData.size; j++) {
           // const distance = Math.sqrt(distances[j]) 
-          // // asymmetricDistance returns squared distances but we just use to rank
+          // // computeDistances returns squared distances but we just use to rank
           // candidates.push([partitionData.vector_ids[j], distance])
           candidates.push([partitionData.vector_ids[j], distances[j]])
         }
@@ -251,8 +251,7 @@ async function handleEmbedding(message: EmbeddingMessage): Promise<void> {
       labelIds.push(consensusLabelId)
       confidences.push(consensusConfidence)
 
-      // Release reconstructed vector memory
-      reconstructed.fill(0)
+      // Note: reconstructed is a Float32Array, memory will be automatically managed
     } catch (vectorError) {
       console.error(`Error processing vector ${i}:`, vectorError)
       trainVectorIds.push(-1) // Use -1 to indicate failure

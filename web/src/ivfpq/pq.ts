@@ -1,9 +1,9 @@
 /**
- * Product Quantization (PQ) implementation for browser-side inference.
+ * Product Quantization (PQ) implementation for browser-side inference using ONNX models.
  *
- * This module provides TypeScript implementations for Product Quantization
- * decoding and distance computation, designed to work with ONNX.js models
- * exported from the Python training pipeline.
+ * This module provides TypeScript bindings for Product Quantization ONNX models
+ * exported from the Python training pipeline. It focuses on using the trained
+ * ONNX models for encoding embeddings and computing asymmetric distances.
  *
  * Based on the paper "Product Quantization for Nearest Neighbor Search" by Jégou et al.
  */
@@ -11,31 +11,57 @@
 import * as ort from 'onnxruntime-web'
 
 /**
- * Product Quantization configuration and runtime.
+ * Product Quantization metadata structure.
+ */
+export interface PQMetadata {
+  d: number // Input vector dimension
+  m: number // Number of subquantizers
+  k: number // Number of centroids per subquantizer
+  d_sub: number // Dimension of each subspace (d/m)
+  compression_ratio: number
+  codebooks_shape: number[]
+  codebooks_size: number
+  training_samples: number
+  max_iterations: number
+  version: string
+}
+
+/**
+ * Product Quantization system using ONNX models.
  */
 export class ProductQuantizer {
-  public d: number // Input vector dimension
-  public m: number // Number of subquantizers
-  public k: number // Number of centroids per subquantizer
-  public d_sub: number // Dimension of each subspace (d/m)
+  public readonly metadata: PQMetadata
+  
+  private codebooks: Float32Array | null = null
+  private encodeSession: ort.InferenceSession | null = null
+  private decodeSession: ort.InferenceSession | null = null
+  private distanceSession: ort.InferenceSession | null = null
+  private distanceBaseSession: ort.InferenceSession | null = null
 
-  private codebooks: Float32Array | null = null // Codebooks: [m, k, d_sub]
-  private session: ort.InferenceSession | null = null
-
-  constructor(d: number, m: number, k: number) {
-    if (d % m !== 0) {
-      throw new Error(`Input dimension ${d} must be divisible by number of subquantizers ${m}`)
+  constructor(metadata: PQMetadata) {
+    this.metadata = metadata
+    
+    if (metadata.d % metadata.m !== 0) {
+      throw new Error(`Input dimension ${metadata.d} must be divisible by number of subquantizers ${metadata.m}`)
     }
 
-    this.d = d
-    this.m = m
-    this.k = k
-    this.d_sub = d / m
-
     console.log(
-      `Initialized ProductQuantizer: d=${this.d}, m=${this.m}, k=${this.k}, d_sub=${this.d_sub}`
+      `Initialized ProductQuantizer: d=${metadata.d}, m=${metadata.m}, k=${metadata.k}, d_sub=${metadata.d_sub}`
     )
-    console.log(`Compression ratio: ${(this.d * 32) / (this.m * 8)}x`)
+    console.log(`Compression ratio: ${metadata.compression_ratio}x`)
+  }
+
+  /**
+   * Load codebooks from a Float32Array.
+   * Expected format: Float32Array with shape [m, k, d_sub] flattened.
+   */
+  loadCodebooks(codebooks: Float32Array): void {
+    const expectedSize = this.metadata.codebooks_size
+    if (codebooks.length !== expectedSize) {
+      throw new Error(`Codebook size mismatch: expected ${expectedSize}, got ${codebooks.length}`)
+    }
+    this.codebooks = codebooks
+    console.log(`Loaded codebooks with shape [${this.metadata.m}, ${this.metadata.k}, ${this.metadata.d_sub}]`)
   }
 
   /**
@@ -43,7 +69,7 @@ export class ProductQuantizer {
    */
   async loadEncoder(modelPath: string): Promise<void> {
     try {
-      this.session = await ort.InferenceSession.create(modelPath, {
+      this.encodeSession = await ort.InferenceSession.create(modelPath, {
         executionProviders: ['wasm'],
         logSeverityLevel: 3, // Warning level
       })
@@ -55,42 +81,87 @@ export class ProductQuantizer {
   }
 
   /**
-   * Load codebooks from a binary file or typed array.
-   * Expected format: Float32Array with shape [m, k, d_sub] flattened.
+   * Load ONNX model for decoding PQ codes to vectors.
    */
-  loadCodebooks(codebooks: Float32Array): void {
-    const expectedSize = this.m * this.k * this.d_sub
-    if (codebooks.length !== expectedSize) {
-      throw new Error(`Codebook size mismatch: expected ${expectedSize}, got ${codebooks.length}`)
+  async loadDecoder(modelPath: string): Promise<void> {
+    try {
+      this.decodeSession = await ort.InferenceSession.create(modelPath, {
+        executionProviders: ['wasm'],
+        logSeverityLevel: 3,
+      })
+      console.log(`Loaded PQ decoder from ${modelPath}`)
+    } catch (error) {
+      console.error('Failed to load PQ decoder:', error)
+      throw error
     }
-    this.codebooks = codebooks
-    console.log(`Loaded codebooks with shape [${this.m}, ${this.k}, ${this.d_sub}]`)
   }
 
   /**
-   * Encode vectors using the ONNX model.
+   * Load ONNX model for distance computation with top-k.
+   */
+  async loadDistanceModel(modelPath: string): Promise<void> {
+    try {
+      this.distanceSession = await ort.InferenceSession.create(modelPath, {
+        executionProviders: ['wasm'],
+        logSeverityLevel: 3,
+      })
+      console.log(`Loaded PQ distance model from ${modelPath}`)
+    } catch (error) {
+      console.error('Failed to load PQ distance model:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Load ONNX model for distance computation without top-k.
+   */
+  async loadDistanceBaseModel(modelPath: string): Promise<void> {
+    try {
+      this.distanceBaseSession = await ort.InferenceSession.create(modelPath, {
+        executionProviders: ['wasm'],
+        logSeverityLevel: 3,
+      })
+      console.log(`Loaded PQ distance base model from ${modelPath}`)
+    } catch (error) {
+      console.error('Failed to load PQ distance base model:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Encode vectors using the ONNX encoder model.
    *
    * @param vectors - Input vectors as Float32Array with shape [N, d]
    * @returns PQ codes as Uint8Array with shape [N, m]
    */
   async encode(vectors: Float32Array): Promise<Uint8Array> {
-    if (!this.session) {
+    if (!this.encodeSession) {
       throw new Error('PQ encoder model not loaded. Call loadEncoder() first.')
     }
+    if (!this.codebooks) {
+      throw new Error('Codebooks not loaded. Call loadCodebooks() first.')
+    }
 
-    const batchSize = vectors.length / this.d
+    const batchSize = vectors.length / this.metadata.d
 
-    // Create input tensor
-    const inputTensor = new ort.Tensor('float32', vectors, [batchSize, this.d])
+    // Create input tensors
+    const embeddingsTensor = new ort.Tensor('float32', vectors, [batchSize, this.metadata.d])
+    const codebooksTensor = new ort.Tensor('float32', this.codebooks, [
+      this.metadata.m, 
+      this.metadata.k, 
+      this.metadata.d_sub
+    ])
 
     // Run inference
-    const feeds = { input: inputTensor }
-    const outputs = await this.session.run(feeds)
+    const outputs = await this.encodeSession.run({
+      embeddings: embeddingsTensor,
+      codebooks: codebooksTensor
+    })
 
-    // Extract codes (should be int64, but we'll convert to uint8)
-    const codes = outputs.output.data as BigInt64Array
+    // Extract codes (should be int64)
+    const codes = outputs.codes.data as BigInt64Array
 
-    // Convert to Uint8Array (assuming codes are in valid range [0, 255])
+    // Convert to Uint8Array (assuming codes are in valid range [0, k-1])
     const uint8Codes = new Uint8Array(codes.length)
     for (let i = 0; i < codes.length; i++) {
       uint8Codes[i] = Number(codes[i])
@@ -100,140 +171,151 @@ export class ProductQuantizer {
   }
 
   /**
-   * Decode PQ codes back to approximate vectors.
+   * Decode PQ codes using the ONNX decoder model.
    *
    * @param codes - PQ codes as Uint8Array with shape [N, m]
    * @returns Decoded vectors as Float32Array with shape [N, d]
    */
-  decode(codes: Uint8Array): Float32Array {
+  async decode(codes: Uint8Array): Promise<Float32Array> {
+    if (!this.decodeSession) {
+      throw new Error('PQ decoder model not loaded. Call loadDecoder() first.')
+    }
     if (!this.codebooks) {
       throw new Error('Codebooks not loaded. Call loadCodebooks() first.')
     }
 
-    const batchSize = codes.length / this.m
-    const decoded = new Float32Array(batchSize * this.d)
+    const batchSize = codes.length / this.metadata.m
 
-    for (let n = 0; n < batchSize; n++) {
-      for (let i = 0; i < this.m; i++) {
-        const codeIdx = codes[n * this.m + i]
-
-        // Copy centroid for this subspace
-        const startIdx = n * this.d + i * this.d_sub
-        const centroidStartIdx = (i * this.k + codeIdx) * this.d_sub
-
-        for (let j = 0; j < this.d_sub; j++) {
-          decoded[startIdx + j] = this.codebooks[centroidStartIdx + j]
-        }
-      }
+    // Convert codes to int64 array for ONNX
+    const int64Codes = new Array(codes.length)
+    for (let i = 0; i < codes.length; i++) {
+      int64Codes[i] = codes[i]
     }
 
-    return decoded
+    // Create input tensors
+    const codesTensor = new ort.Tensor('int64', int64Codes, [batchSize, this.metadata.m])
+    const codebooksTensor = new ort.Tensor('float32', this.codebooks, [
+      this.metadata.m, 
+      this.metadata.k, 
+      this.metadata.d_sub
+    ])
+
+    // Run inference
+    const outputs = await this.decodeSession.run({
+      codes: codesTensor,
+      codebooks: codebooksTensor
+    })
+
+    return outputs.embeddings.data as Float32Array
   }
 
   /**
-   * Compute squared Euclidean distance between two vectors.
-   */
-  static squaredDistance(a: Float32Array, b: Float32Array): number {
-    if (a.length !== b.length) {
-      throw new Error('Vector dimensions must match')
-    }
-
-    let sum = 0
-    for (let i = 0; i < a.length; i++) {
-      const diff = a[i] - b[i]
-      sum += diff * diff
-    }
-    return sum
-  }
-
-  /**
-   * Compute asymmetric distance between a query vector and PQ codes.
-   * This is more efficient than decoding and computing full distance.
+   * Find k nearest neighbors using the ONNX distance model with top-k.
    *
    * @param queryVector - Query vector as Float32Array with shape [d]
-   * @param codes - PQ codes as Uint8Array with shape [N, m]
-   * @returns Squared distances as Float32Array with shape [N]
+   * @param referenceCodes - PQ codes for reference vectors as Uint8Array with shape [N, m]
+   * @returns Indices of k nearest neighbors
    */
-  asymmetricDistance(queryVector: Float32Array, codes: Uint8Array): Float32Array {
+  async findNearestNeighbors(
+    queryVector: Float32Array,
+    referenceCodes: Uint8Array
+  ): Promise<number[]> {
+    if (!this.distanceSession) {
+      throw new Error('PQ distance model not loaded. Call loadDistanceModel() first.')
+    }
     if (!this.codebooks) {
       throw new Error('Codebooks not loaded. Call loadCodebooks() first.')
     }
 
-    if (queryVector.length !== this.d) {
+    if (queryVector.length !== this.metadata.d) {
       throw new Error(
-        `Query vector dimension ${queryVector.length} doesn't match expected ${this.d}`
+        `Query vector dimension ${queryVector.length} doesn't match expected ${this.metadata.d}`
       )
     }
 
-    const batchSize = codes.length / this.m
+    const numReferences = referenceCodes.length / this.metadata.m
 
-    // Precompute distance tables for each subspace
-    const distanceTables = new Float32Array(this.m * this.k)
-
-    for (let i = 0; i < this.m; i++) {
-      const querySubStart = i * this.d_sub
-      const codebookSubStart = i * this.k * this.d_sub
-
-      for (let j = 0; j < this.k; j++) {
-        let dist = 0
-        const centroidStart = codebookSubStart + j * this.d_sub
-
-        for (let l = 0; l < this.d_sub; l++) {
-          const diff = queryVector[querySubStart + l] - this.codebooks[centroidStart + l]
-          dist += diff * diff
-        }
-
-        distanceTables[i * this.k + j] = dist
-      }
+    // Convert reference codes to int64 array for ONNX
+    const int64RefCodes = new Array(referenceCodes.length)
+    for (let i = 0; i < referenceCodes.length; i++) {
+      int64RefCodes[i] = referenceCodes[i]
     }
 
-    // Compute distances for each code
-    const distances = new Float32Array(batchSize)
+    // Create input tensors
+    const queryTensor = new ort.Tensor('float32', queryVector, [this.metadata.d])
+    const refCodesTensor = new ort.Tensor('int64', int64RefCodes, [numReferences, this.metadata.m])
+    const codebooksTensor = new ort.Tensor('float32', this.codebooks, [
+      this.metadata.m, 
+      this.metadata.k, 
+      this.metadata.d_sub
+    ])
 
-    for (let n = 0; n < batchSize; n++) {
-      let totalDist = 0
+    // Run inference
+    const outputs = await this.distanceSession.run({
+      query: queryTensor,
+      reference_codes: refCodesTensor,
+      codebooks: codebooksTensor
+    })
 
-      for (let i = 0; i < this.m; i++) {
-        const codeIdx = codes[n * this.m + i]
-        totalDist += distanceTables[i * this.k + codeIdx]
-      }
-
-      distances[n] = totalDist
+    // Extract indices
+    const indices = outputs.indices.data as BigInt64Array
+    const result = new Array(indices.length)
+    for (let i = 0; i < indices.length; i++) {
+      result[i] = Number(indices[i])
     }
 
-    return distances
+    return result
   }
 
   /**
-   * Find k nearest neighbors using asymmetric distance.
+   * Compute distances using the ONNX distance base model (no top-k).
    *
    * @param queryVector - Query vector as Float32Array with shape [d]
-   * @param codes - PQ codes as Uint8Array with shape [N, m]
-   * @param k - Number of nearest neighbors to return
-   * @returns Object with indices and distances of k nearest neighbors
+   * @param referenceCodes - PQ codes for reference vectors as Uint8Array with shape [N, m]
+   * @returns Squared distances as Float32Array with shape [N]
    */
-  knnSearch(
+  async computeDistances(
     queryVector: Float32Array,
-    codes: Uint8Array,
-    k: number
-  ): { indices: number[]; distances: number[] } {
-    const distances = this.asymmetricDistance(queryVector, codes)
-    const batchSize = codes.length / this.m
-
-    // Create array of indices
-    const indices = Array.from({ length: batchSize }, (_, i) => i)
-
-    // Sort by distance and take top k
-    indices.sort((a, b) => distances[a] - distances[b])
-
-    const topK = Math.min(k, batchSize)
-    const resultIndices = indices.slice(0, topK)
-    const resultDistances = resultIndices.map((i) => distances[i])
-
-    return {
-      indices: resultIndices,
-      distances: resultDistances,
+    referenceCodes: Uint8Array
+  ): Promise<Float32Array> {
+    if (!this.distanceBaseSession) {
+      throw new Error('PQ distance base model not loaded. Call loadDistanceBaseModel() first.')
     }
+    if (!this.codebooks) {
+      throw new Error('Codebooks not loaded. Call loadCodebooks() first.')
+    }
+
+    if (queryVector.length !== this.metadata.d) {
+      throw new Error(
+        `Query vector dimension ${queryVector.length} doesn't match expected ${this.metadata.d}`
+      )
+    }
+
+    const numReferences = referenceCodes.length / this.metadata.m
+
+    // Convert reference codes to int64 array for ONNX
+    const int64RefCodes = new Array(referenceCodes.length)
+    for (let i = 0; i < referenceCodes.length; i++) {
+      int64RefCodes[i] = referenceCodes[i]
+    }
+
+    // Create input tensors
+    const queryTensor = new ort.Tensor('float32', queryVector, [this.metadata.d])
+    const refCodesTensor = new ort.Tensor('int64', int64RefCodes, [numReferences, this.metadata.m])
+    const codebooksTensor = new ort.Tensor('float32', this.codebooks, [
+      this.metadata.m, 
+      this.metadata.k, 
+      this.metadata.d_sub
+    ])
+
+    // Run inference
+    const outputs = await this.distanceBaseSession.run({
+      query: queryTensor,
+      reference_codes: refCodesTensor,
+      codebooks: codebooksTensor
+    })
+
+    return outputs.distances.data as Float32Array
   }
 
   /**
@@ -243,23 +325,23 @@ export class ProductQuantizer {
    * @param codes - PQ codes as Uint8Array with shape [N, m]
    * @returns Object with MSE and relative error statistics
    */
-  computeReconstructionError(
+  async computeReconstructionError(
     originalVectors: Float32Array,
     codes: Uint8Array
-  ): {
+  ): Promise<{
     mse: number
     relativeError: number
     compressionRatio: number
-  } {
-    const decoded = this.decode(codes)
-    const batchSize = codes.length / this.m
+  }> {
+    const decoded = await this.decode(codes)
+    const batchSize = codes.length / this.metadata.m
 
     let totalSquaredError = 0
     let totalOriginalSquaredNorm = 0
 
     for (let n = 0; n < batchSize; n++) {
-      for (let i = 0; i < this.d; i++) {
-        const idx = n * this.d + i
+      for (let i = 0; i < this.metadata.d; i++) {
+        const idx = n * this.metadata.d + i
         const original = originalVectors[idx]
         const reconstructed = decoded[idx]
         const error = original - reconstructed
@@ -269,14 +351,13 @@ export class ProductQuantizer {
       }
     }
 
-    const mse = totalSquaredError / (batchSize * this.d)
+    const mse = totalSquaredError / (batchSize * this.metadata.d)
     const relativeError = Math.sqrt(totalSquaredError / totalOriginalSquaredNorm)
-    const compressionRatio = (this.d * 32) / (this.m * 8)
 
     return {
       mse,
       relativeError,
-      compressionRatio,
+      compressionRatio: this.metadata.compression_ratio,
     }
   }
 }
@@ -296,18 +377,9 @@ export async function loadCodebooksFromFile(path: string): Promise<Float32Array>
 }
 
 /**
- * Load PQ model configuration from metadata JSON.
+ * Load PQ model metadata from JSON file.
  */
-export async function loadPQMetadata(metadataPath: string): Promise<{
-  d: number
-  m: number
-  k: number
-  d_sub: number
-  compression_ratio: number
-  codebooks_shape: number[]
-  codebooks_size: number
-  version: string
-}> {
+export async function loadPQMetadata(metadataPath: string): Promise<PQMetadata> {
   const response = await fetch(metadataPath)
   if (!response.ok) {
     throw new Error(`Failed to load metadata from ${metadataPath}: ${response.statusText}`)
@@ -317,34 +389,102 @@ export async function loadPQMetadata(metadataPath: string): Promise<{
 }
 
 /**
- * Load complete PQ model (metadata + codebooks + ONNX encoder).
+ * Load complete PQ model (metadata + codebooks + ONNX models).
  */
-export async function loadPQModel(basePath: string): Promise<ProductQuantizer> {
+export async function loadPQModel(
+  basePath: string, 
+  options: {
+    loadEncoder?: boolean
+    loadDecoder?: boolean
+    loadDistance?: boolean
+    loadDistanceBase?: boolean
+  } = {}
+): Promise<ProductQuantizer> {
+  // Default to loading all models
+  const {
+    loadEncoder = true,
+    loadDecoder = true,
+    loadDistance = true,
+    loadDistanceBase = true
+  } = options
+
   // Load metadata
-  const metadata = await loadPQMetadata(`${basePath}/metadata.json`)
+  const metadata = await loadPQMetadata(`${basePath}/pq_metadata.json`)
 
   // Create PQ instance
-  const pq = new ProductQuantizer(metadata.d, metadata.m, metadata.k)
+  const pq = new ProductQuantizer(metadata)
 
   // Load codebooks
-  const codebooks = await loadCodebooksFromFile(`${basePath}/codebooks.bin`)
+  const codebooks = await loadCodebooksFromFile(`${basePath}/pq_codebooks.bin`)
   pq.loadCodebooks(codebooks)
 
-  // Load ONNX encoder
-  await pq.loadEncoder(`${basePath}/model.onnx`)
+  // Load ONNX models as requested
+  if (loadEncoder) {
+    await pq.loadEncoder(`${basePath}/pq_encode.onnx`)
+  }
+
+  if (loadDecoder) {
+    await pq.loadDecoder(`${basePath}/pq_decode.onnx`)
+  }
+
+  if (loadDistance) {
+    await pq.loadDistanceModel(`${basePath}/pq_distance.onnx`)
+  }
+
+  if (loadDistanceBase) {
+    await pq.loadDistanceBaseModel(`${basePath}/pq_distance_base.onnx`)
+  }
 
   console.log(`Loaded PQ model from ${basePath}:`)
-  console.log(`  d=${pq.d}, m=${pq.m}, k=${pq.k}, d_sub=${pq.d_sub}`)
+  console.log(`  d=${metadata.d}, m=${metadata.m}, k=${metadata.k}, d_sub=${metadata.d_sub}`)
 
   return pq
 }
 
 /**
- * Utility function to reshape a flat array into [N, d] format.
+ * Utility function to validate vector dimensions.
  */
-export function reshapeVectors(flatArray: Float32Array, d: number): Float32Array {
-  if (flatArray.length % d !== 0) {
-    throw new Error(`Array length ${flatArray.length} is not divisible by dimension ${d}`)
+export function validateVectorDimensions(vectors: Float32Array, expectedDim: number): void {
+  if (vectors.length % expectedDim !== 0) {
+    throw new Error(`Array length ${vectors.length} is not divisible by dimension ${expectedDim}`)
   }
-  return flatArray // Already flat, just return as-is with shape understanding
+}
+
+/**
+ * Utility function to create test data for PQ models.
+ */
+export function generateTestVectors(numVectors: number, dimension: number, seed?: number): Float32Array {
+  // Simple deterministic random number generator if seed is provided
+  const rng = seed !== undefined ? (() => {
+    let currentSeed = seed
+    return () => {
+      currentSeed = (currentSeed * 9301 + 49297) % 233280
+      return currentSeed / 233280
+    }
+  })() : Math.random
+
+  const vectors = new Float32Array(numVectors * dimension)
+  for (let i = 0; i < vectors.length; i++) {
+    vectors[i] = (rng() - 0.5) * 2 // Random values between -1 and 1
+  }
+  return vectors
+}
+
+/**
+ * Utility function to create test PQ codes.
+ */
+export function generateTestCodes(numVectors: number, m: number, k: number, seed?: number): Uint8Array {
+  const rng = seed !== undefined ? (() => {
+    let currentSeed = seed
+    return () => {
+      currentSeed = (currentSeed * 9301 + 49297) % 233280
+      return currentSeed / 233280
+    }
+  })() : Math.random
+
+  const codes = new Uint8Array(numVectors * m)
+  for (let i = 0; i < codes.length; i++) {
+    codes[i] = Math.floor(rng() * k)
+  }
+  return codes
 }
