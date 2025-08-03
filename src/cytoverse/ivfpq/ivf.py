@@ -19,6 +19,9 @@ from typing import Optional, Tuple, List, Union
 from pathlib import Path
 import pickle
 import logging
+import onnxruntime as ort
+import tempfile
+from cytoverse.kmeans import export_kmeans_models
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +82,7 @@ class InvertedFileIndex(nn.Module):
         verbose: bool = True,
     ) -> None:
         """
-        Train the IVF index using k-means clustering.
+        Train the IVF index using ONNX k-means clustering.
 
         Args:
             vectors: Training vectors of shape [N, d]
@@ -96,35 +99,72 @@ class InvertedFileIndex(nn.Module):
 
         if verbose:
             logger.info(
-                f"Training IVF index on {n_vectors} vectors with {self.n_partitions} partitions"
+                f"Training IVF index on {n_vectors} vectors with {self.n_partitions} partitions using ONNX k-means"
             )
 
-        # Initialize centroids using k-means++
-        self._init_centroids_kmeans_plus_plus(vectors)
+        # Export k-means ONNX models to temporary directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_kmeans_models(tmpdir)
 
-        # K-means iterations
-        prev_assignments = None
+            # Load ONNX k-means models
+            init_session = ort.InferenceSession(str(Path(tmpdir) / "kmeans_init.onnx"))
+            iter_session = ort.InferenceSession(
+                str(Path(tmpdir) / "kmeans_iteration.onnx")
+            )
 
-        for iteration in range(n_iterations):
-            # Assign vectors to nearest centroids
-            assignments = self._assign_vectors(vectors)
+            # Convert to numpy for ONNX inference
+            vectors_np = vectors.numpy().astype(np.float32)
+            k_np = np.array(self.n_partitions, dtype=np.int64)
+            seed_np = np.array(42, dtype=np.int64)
 
-            # Check for convergence
-            if prev_assignments is not None:
-                n_changed = (assignments != prev_assignments).sum().item()
-                if verbose and iteration % 10 == 0:
-                    logger.info(
-                        f"Iteration {iteration}: {n_changed} vectors changed assignment"
-                    )
+            # Initialize centroids using ONNX model
+            if verbose:
+                logger.info("Initializing centroids with ONNX k-means++")
+            centroids_np = init_session.run(
+                None, {"embeddings": vectors_np, "k": k_np, "seed": seed_np}
+            )[0]
 
-                if n_changed == 0:
+            # Run k-means iterations using ONNX model
+            prev_assignments = None
+            converged_early = False
+
+            for iteration in range(n_iterations):
+                outputs = iter_session.run(
+                    None, {"embeddings": vectors_np, "centroids": centroids_np}
+                )
+                centroids_np, assignments_np, converged_np = outputs
+
+                # Check for convergence
+                if prev_assignments is not None:
+                    n_changed = (assignments_np != prev_assignments).sum()
+                    if verbose and iteration % 10 == 0:
+                        logger.info(
+                            f"Iteration {iteration}: {n_changed} vectors changed assignment"
+                        )
+
+                    if n_changed == 0:
+                        if verbose:
+                            logger.info(f"Converged after {iteration} iterations")
+                        converged_early = True
+                        break
+
+                # Check ONNX model convergence
+                if converged_np > 0.5:
                     if verbose:
-                        logger.info(f"Converged after {iteration} iterations")
+                        logger.info(
+                            f"ONNX k-means converged after {iteration + 1} iterations"
+                        )
+                    converged_early = True
                     break
 
-            # Update centroids
-            self._update_centroids(vectors, assignments)
-            prev_assignments = assignments
+                prev_assignments = assignments_np.copy()
+
+            if not converged_early and verbose:
+                logger.info(f"Completed {n_iterations} iterations")
+
+            # Convert back to torch tensors
+            self.centroids.data = torch.from_numpy(centroids_np)
+            assignments = torch.from_numpy(assignments_np).long()
 
         # Build inverted lists
         self._build_inverted_lists(vector_ids, assignments)
