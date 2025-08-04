@@ -15,8 +15,7 @@ References:
 """
 
 from .pq import ProductQuantizer
-from .ivf import InvertedFileIndex
-from .ivfpq import IVFPQ
+from .ivf import InvertedFileIndex, IVFPQ
 
 __version__ = "0.1.0"
 __all__ = ["ProductQuantizer", "InvertedFileIndex", "IVFPQ"]

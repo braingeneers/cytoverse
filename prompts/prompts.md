@@ -49,3 +49,25 @@ Distance: given a query tensor (a pq encoded embedding), a code book, and a refe
 Also include a utility function that given a tensor of training vectors, PQ parameters m and k, uses the onnx models from kmeans.py to generate the PQ codebook that can be used above. This codebook should be binary as it will be used later in a web application. See web/src/embedding.ts for an example use of an existing implimentation that we're replacing. 
 
 Generate a new tests/test_pq_onnx.py file that tests all of this ala pytest. Assume defaults of 128d embedding vectors, m = 8 and k = 256 for the codebook training and k = 50 for the topk distance calculation.
+
+# Cleanup PQ and support python and onnx kmeans
+
+We currently have two implementations if PQ:
+- src/pq.py utilizes src/cytoverse/kmeans.py for training, which is onnx based and has onnx optimized classes for encoding, decoding and importantly distance which we will use in the web application
+- src/cytoverse/pq.py is an older version which uses python for kmeans
+
+Related to this src/cytoverse/ivf.py uses the onnx kmeans.py, but as it needs to deal with the full embedding width (128d) vs. the sub-spaces of pq (16d) it takes a very long time.
+
+Finally there is some redundancy between ivfpq.py and ivf.py and the two pq.py
+
+With that as context:
+- With the python kmeans implementation in src/cytoverse/pq.py as an example, enhance kmeans.py to support computing using python OR onnx.
+- Replace src/cytoverse/pq.py with src/pq.py functionality i.e. the ONNX encode, decode and distance models which are used in the web application.
+- Elliminate src/cytoverse/ivfpq.py moving its functionality into ivf.py which then depends on pq.py and kmeans.py
+- Update ivfpq_train to use this now consolidated kmeans.py, pq.py and ivf.py. It should have a new command line option, onnx-kmeans, that defaults to false that determines which kmeans will be used. 
+- Fold any relevant tests from test_ivfpq.py into test_ivf.py
+- Make sure updates to web/src/pq.ts and web/src/ivf.ts from all of this, but there should not be any as all we're changing is the way kmeans is used to generate artifacts that both of these files use.
+
+At the end of this we should have a complete set of packages that:
+- Enable training pq on a set of embeddings and emitting a codebook, encode, decode and distance onnx models for use in the browser from typescript
+- Enable generating an ivf index leveraging a trained pq model also emitting browser artifacts

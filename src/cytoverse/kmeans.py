@@ -1,15 +1,20 @@
 """
-K-means clustering implementation for ONNX export.
+K-means clustering implementation with both Python and ONNX support.
 
-This module provides a k-means clustering implementation that can be exported to ONNX
-and run iteratively in the browser. Each iteration can be called separately, allowing
-the browser to provide feedback and progress updates during clustering.
+This module provides k-means clustering that can:
+1. Run natively in Python for training efficiency
+2. Export to ONNX for browser compatibility
+
+Each iteration can be called separately, allowing the browser to provide feedback
+and progress updates during clustering.
 """
 
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import Tuple, Optional
 from pathlib import Path
+import numpy as np
+from sklearn.cluster import KMeans
 
 
 class KMeansIteration(nn.Module):
@@ -182,6 +187,65 @@ class KMeansComplete(nn.Module):
                 break
 
         return centroids, assignments
+
+
+def run_python_kmeans(
+    embeddings: torch.Tensor,
+    k: int,
+    max_iterations: int = 100,
+    seed: int = 42,
+    verbose: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Run k-means clustering using scikit-learn implementation.
+    
+    This is more efficient and robust than the hand-rolled implementation.
+    
+    Args:
+        embeddings: Input embeddings of shape [N, D]
+        k: Number of clusters
+        max_iterations: Maximum iterations
+        seed: Random seed
+        verbose: Show progress (only affects display, sklearn handles iterations internally)
+        
+    Returns:
+        Tuple of:
+        - centroids: Final centroids [K, D]
+        - assignments: Final cluster assignments [N]
+    """
+    # Convert to numpy for sklearn
+    embeddings_np = embeddings.detach().cpu().numpy()
+    
+    if verbose:
+        print(f"Running scikit-learn K-means: n_samples={embeddings_np.shape[0]}, k={k}, max_iter={max_iterations}")
+    
+    # Use scikit-learn KMeans with k-means++ initialization
+    kmeans = KMeans(
+        n_clusters=k,
+        init='k-means++',
+        max_iter=max_iterations,
+        random_state=seed,
+        n_init=1,  # Only run once since we set the random state
+        verbose=1 if verbose else 0
+    )
+    
+    # Fit the model
+    assignments_np = kmeans.fit_predict(embeddings_np)
+    centroids_np = kmeans.cluster_centers_
+    
+    # Convert back to torch tensors
+    centroids = torch.from_numpy(centroids_np).to(embeddings.device).to(embeddings.dtype)
+    assignments = torch.from_numpy(assignments_np).to(embeddings.device).long()
+    
+    if verbose:
+        print(f"K-means completed in {kmeans.n_iter_} iterations")
+        
+        # Check cluster utilization
+        unique_assignments = np.unique(assignments_np)
+        utilization = len(unique_assignments)
+        print(f"Cluster utilization: {utilization}/{k} clusters used")
+    
+    return centroids, assignments
 
 
 def export_kmeans_models(output_dir: str | Path = "."):

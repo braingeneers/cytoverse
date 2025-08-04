@@ -20,6 +20,7 @@ import onnx
 from onnx import helper, numpy_helper
 import onnxruntime as ort
 import tempfile
+from tqdm import tqdm
 
 
 class PQEncode(nn.Module):
@@ -262,8 +263,11 @@ def train_pq_codebooks(
         # Train codebooks for each subspace
         codebooks = torch.zeros(m, k, d_sub)
 
-        for i in range(m):
-            print(f"Training subquantizer {i+1}/{m}")
+        # Progress bar for subquantizers
+        subquantizer_pbar = tqdm(range(m), desc="Training PQ subquantizers")
+
+        for i in subquantizer_pbar:
+            subquantizer_pbar.set_description(f"Training subquantizer {i+1}/{m}")
 
             # Extract subvectors for this subspace
             start_idx = i * d_sub
@@ -282,23 +286,45 @@ def train_pq_codebooks(
                 None, {"embeddings": subvectors_np, "k": k_np, "seed": seed_np}
             )[0]
 
+            # Progress bar for k-means iterations
+            iteration_pbar = tqdm(
+                range(max_iterations),
+                desc=f"K-means subspace {i+1}/{m}",
+                leave=False,
+            )
+
             # Run k-means iterations using ONNX model
-            for iteration in range(max_iterations):
+            for iteration in iteration_pbar:
                 outputs = iter_session.run(
                     None, {"embeddings": subvectors_np, "centroids": centroids_np}
                 )
                 centroids_np, assignments_np, converged_np = outputs
 
+                # Update progress bar with iteration info
+                iteration_pbar.set_postfix(
+                    iteration=f"{iteration + 1}/{max_iterations}"
+                )
+
                 if converged_np > 0.5:
+                    iteration_pbar.set_description(
+                        f"K-means subspace {i+1}/{m} (converged)"
+                    )
+                    iteration_pbar.close()
                     print(f"  Subspace {i}: converged after {iteration + 1} iterations")
                     break
+            else:
+                iteration_pbar.close()
 
             # Convert back to torch tensor
             codebooks[i] = torch.from_numpy(centroids_np)
 
             # Check cluster utilization
             unique_assignments = np.unique(assignments_np)
-            print(f"  Subspace {i}: {len(unique_assignments)}/{k} clusters used")
+            utilization = len(unique_assignments)
+            subquantizer_pbar.set_postfix(clusters_used=f"{utilization}/{k}")
+            print(f"  Subspace {i}: {utilization}/{k} clusters used")
+
+        subquantizer_pbar.close()
 
     # Save codebooks and metadata
     metadata = {

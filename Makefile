@@ -93,8 +93,8 @@ ivf-train:
 	data/references/$(model_id)/embeddings.npy \
 	web/public/models/$(model_id)/ivf/ \
 	--n-partitions 512 \
-	--max-vectors 100000 \
-	--n-iterations 30
+	--max-vectors 50000 \
+	--n-iterations 10
 
 # IVFPQ
 ivfpq-export:

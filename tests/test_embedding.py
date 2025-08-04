@@ -14,7 +14,7 @@ from pathlib import Path
 from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
 
-from cytoverse.ivfpq import IVFPQ
+from cytoverse.ivfpq.ivf import IVFPQ
 
 
 @pytest.fixture

@@ -5,13 +5,15 @@ Training script for IVFPQ (Inverted File Index Product Quantization) models.
 
 This script extends the PQ training functionality to include IVF index training,
 enabling the complete IVFPQ pipeline for approximate nearest neighbor search.
+Supports both Python and ONNX k-means implementations.
 
 Features:
-- Train PQ models on vectors
-- Train IVF index for dataset partitioning
+- Train PQ models on vectors using Python or ONNX k-means
+- Train IVF index for dataset partitioning using Python or ONNX k-means
 - Export models and indices for browser consumption
 - Performance testing and validation
 - Support for real vector datasets
+- Choice between Python k-means (faster training) and ONNX k-means (browser compatible)
 """
 
 import typer
@@ -22,11 +24,9 @@ from pathlib import Path
 import logging
 from typing import Optional
 import json
-from pathlib import Path
 
-from cytoverse.ivfpq.pq import ProductQuantizer
-from cytoverse.ivfpq.ivf import InvertedFileIndex
-from cytoverse.ivfpq.ivfpq import IVFPQ
+from cytoverse.ivfpq import ProductQuantizer, InvertedFileIndex, IVFPQ
+from cytoverse.ivfpq.pq import train_pq_codebooks, export_pq_models
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -72,81 +72,78 @@ def pq_train(
     n_iterations: int = typer.Option(
         50, help="Number of k-means iterations per subquantizer"
     ),
+    onnx_kmeans: bool = typer.Option(
+        False, help="Use ONNX k-means instead of Python k-means (default: False)"
+    ),
 ) -> None:
     """
-    Train a Product Quantization model on vectors.
+    Train a Product Quantization model on vectors using Python or ONNX k-means.
     """
     vectors = _load_vectors(vectors_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
     d = vectors_tensor.shape[1]
 
-    logger.info(f"Training PQ with parameters: d={d}, m={m}, k={k}")
+    kmeans_type = "ONNX" if onnx_kmeans else "Python"
+    logger.info(f"Training PQ with {kmeans_type} k-means: d={d}, m={m}, k={k}")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create and train PQ model
-    pq = ProductQuantizer(d=d, m=m, k=k)
-    pq.train_pq(vectors_tensor, n_iterations=n_iterations)
+    # Train PQ codebooks using specified k-means method
+    result = train_pq_codebooks(
+        vectors_tensor,
+        m=m,
+        k=k,
+        max_iterations=n_iterations,
+        output_dir=output_dir,
+        save_binary=True,
+        use_onnx_kmeans=onnx_kmeans,
+    )
+
+    codebooks = result["codebooks"]
+    metadata = result["metadata"]
 
     # Test reconstruction error
-    _test_pq_reconstruction(pq, vectors_tensor)
+    _test_pq_reconstruction_with_codebooks(codebooks, vectors_tensor, m, k)
 
-    # Save PQ model
-    pq_model_path = output_dir / "model.pkl"
-    pq.save(pq_model_path)
-    logger.info(f"Saved PQ model to {pq_model_path}")
+    # Export ONNX models
+    export_pq_models(codebooks, output_dir)
 
-    # Export ONNX model
-    onnx_path = output_dir / "model.onnx"
-    pq.eval()
-    torch.onnx.export(
-        pq,
-        torch.zeros(1, pq.d),
-        onnx_path,
-        export_params=True,
-        opset_version=14,
-        do_constant_folding=True,
-        input_names=["input"],
-        output_names=["output"],
-        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
-        verbose=False,
-    )
-    logger.info(f"PQ model exported to {onnx_path}")
-
-    # Export codebooks for browser decoding
-    codebooks_path = output_dir / "codebooks.bin"
-    codebooks_np = pq.codebooks.detach().cpu().numpy()
-    codebooks_np.astype(np.float32).tofile(codebooks_path)
-
-    # Export metadata as JSON
-    metadata = {
-        "d": pq.d,
-        "m": pq.m,
-        "k": pq.k,
-        "d_sub": pq.d_sub,
-        "codebooks_shape": list(codebooks_np.shape),
-        "is_trained": pq.is_trained,
-    }
-
-    metadata_path = output_dir / "metadata.json"
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    logger.info(f"Exported PQ browser assets:")
-    logger.info(f"  Codebooks: {codebooks_path}")
-    logger.info(f"  Metadata: {metadata_path}")
+    logger.info(f"PQ training completed with ONNX k-means")
+    logger.info(f"Exported PQ models and artifacts to {output_dir}")
 
 
-def _test_pq_reconstruction(pq: ProductQuantizer, vectors: torch.Tensor) -> None:
-    """Test PQ reconstruction error."""
+def _test_pq_reconstruction_with_codebooks(
+    codebooks: torch.Tensor, vectors: torch.Tensor, m: int, k: int
+) -> None:
+    """Test PQ reconstruction error using trained codebooks."""
     # Use a subset for testing
     n_test = min(1000, vectors.shape[0])
     test_vectors = vectors[:n_test]
 
-    # Encode and decode
-    codes = pq(test_vectors)
-    reconstructed = pq.decode(codes)
+    d = vectors.shape[1]
+    d_sub = d // m
+
+    # Encode vectors manually using codebooks
+    batch_size = test_vectors.shape[0]
+    test_vectors_split = test_vectors.view(batch_size, m, d_sub)
+
+    codes = torch.zeros(batch_size, m, dtype=torch.long)
+    reconstructed = torch.zeros_like(test_vectors)
+
+    for i in range(m):
+        # Compute distances to all centroids in this subspace
+        subvectors = test_vectors_split[:, i]  # [N, d_sub]
+        codebook = codebooks[i]  # [k, d_sub]
+
+        # Compute squared distances
+        distances = torch.cdist(subvectors, codebook, p=2.0) ** 2  # [N, k]
+
+        # Find nearest centroids
+        codes[:, i] = torch.argmin(distances, dim=1)
+
+        # Reconstruct using nearest centroids
+        reconstructed[:, i * d_sub : (i + 1) * d_sub] = codebook[codes[:, i]]
 
     # Calculate errors
     mse = torch.mean((test_vectors - reconstructed) ** 2).item()
@@ -170,21 +167,26 @@ def ivf_train(
     output_dir: Path = typer.Argument(..., help="Output directory for trained index"),
     n_partitions: int = typer.Option(256, help="Number of partitions for IVF index"),
     max_vectors: Optional[int] = typer.Option(
-        None, help="Maximum number of vectors to use for training (None = all)"
+        50000,
+        help="Maximum number of vectors to use for training (default: 50k for memory efficiency)",
     ),
     n_iterations: int = typer.Option(
-        50, help="Number of k-means iterations for coarse quantization"
+        30, help="Number of k-means iterations for coarse quantization"
+    ),
+    onnx_kmeans: bool = typer.Option(
+        False, help="Use ONNX k-means instead of Python k-means (default: False)"
     ),
 ) -> None:
     """
-    Train an Inverted File Index on vectors.
+    Train an Inverted File Index on vectors using Python or ONNX k-means.
     """
     vectors = _load_vectors(vectors_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
     vector_ids_tensor = torch.arange(vectors.shape[0], dtype=torch.int32)
     d = vectors_tensor.shape[1]
 
-    logger.info(f"Training IVF with parameters: d={d}, n_partitions={n_partitions}")
+    kmeans_type = "ONNX" if onnx_kmeans else "Python"
+    logger.info(f"Training IVF with {kmeans_type} k-means: d={d}, n_partitions={n_partitions}")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -192,7 +194,7 @@ def ivf_train(
     # Create and train IVF index
     ivf = InvertedFileIndex(d=d, n_partitions=n_partitions)
     ivf.train_ivf(
-        vectors_tensor, vector_ids_tensor, n_iterations=n_iterations, verbose=True
+        vectors_tensor, vector_ids_tensor, n_iterations=n_iterations, verbose=True, use_onnx_kmeans=onnx_kmeans
     )
 
     _test_ivf_search(ivf, vectors_tensor, n_probe_values=[1, 2, 4, 8])
@@ -209,24 +211,20 @@ def ivf_train(
         json.dump(metadata, f, indent=2)
     logger.info(f"Saved IVF metadata to {metadata_path}")
 
-    # Export centroids for browser use
-    centroids_path = output_dir / "centroids.arrow"
-    centroids_data = ivf.centroids.detach().cpu().numpy()
+    # Export centroids for browser use in binary format (expected by TypeScript)
+    centroids_path = output_dir / "centroids.bin"
+    centroids_data = ivf.centroids.detach().cpu().numpy().astype(np.float32)
 
-    # Create Arrow table with proper int32 types for IDs
-    import pyarrow as pa
+    # Write binary format: n_partitions (4 bytes), d (4 bytes), then centroids data
+    with open(centroids_path, "wb") as f:
+        # Write header: n_partitions and d as uint32
+        n_partitions, d = centroids_data.shape
+        f.write(np.array([n_partitions], dtype=np.uint32).tobytes())
+        f.write(np.array([d], dtype=np.uint32).tobytes())
+        # Write centroids data
+        f.write(centroids_data.tobytes())
 
-    table = pa.table(
-        {
-            "centroid_id": pa.array(range(centroids_data.shape[0]), type=pa.int32()),
-            "centroid_coords": pa.array([row.tolist() for row in centroids_data]),
-        }
-    )
-
-    with pa.OSFile(str(centroids_path), "wb") as sink:
-        with pa.RecordBatchFileWriter(sink, table.schema) as writer:
-            writer.write_table(table)
-    logger.info(f"Saved centroids to {centroids_path}")
+    logger.info(f"Saved centroids to {centroids_path} (binary format for TypeScript)")
 
 
 def _test_ivf_search(
