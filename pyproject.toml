@@ -1,29 +1,29 @@
-[project]
-name = "cytoverse"
-version = "0.1.0"
-description = "Search, display and label cells in foundation model embedding space"
-readme = "README.md"
-requires-python = ">=3.12, <3.13"
-dependencies = [
-    "typer>=0.16.0",
-    "onnx>=1.18.0",
-    "onnxruntime>=1.15.0",
-    "torch>=2.7.1",
-    "torchvision>=0.22.1",
-    "anndata>=0.12.1",
-    "pytorch-lightning>=2.5.2",
-    "scimilarity",
-    "umap-pytorch",
-    "ray[data,train,tune]>=2.48.0",
-]
+# [build-system]
+# requires = ["hatchling", "setuptools>=61.0", "wheel0"]
+# build-backend = "setuptools.build_meta"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["scripts"]
+
+[project]
+name = "cytoverse"
+version = "0.1.0"
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "typer>=0.16.0",
+    "anndata>=0.12.1",
+    "ivfpq",
+    "scimilarity",
+    "umap-pytorch",
+    "scanpy>=1.11.4",
+]
+
 [dependency-groups]
 dev = [
-    "cytoverse",
     "black>=25.1.0",
     "debugpy>=1.8.15",
     "flake8>=7.2.0",
@@ -37,7 +37,7 @@ dev = [
 [tool.uv.sources]
 scimilarity = { git = "https://github.com/Genentech/scimilarity.git" }
 umap-pytorch = { git = "https://github.com/rcurrie/umap_pytorch.git" }
-cytoverse = { workspace = true }
+ivfpq = { path = "ivfpq/python", editable = true }
 
-[tool.uv.workspace]
-members = ["."]
+[tool.uv]
+override-dependencies = ["umap-learn>=0.5.0", "numba>=0.60.0"]

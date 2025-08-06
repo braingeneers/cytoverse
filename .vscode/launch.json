@@ -12,7 +12,7 @@
       "console": "integratedTerminal",
       "args": [
         "data/scimilarity/model_v1.1",
-        "${workspaceFolder}/web/public/models/scimilarity/embedding"
+        "${workspaceFolder}/public/models/scimilarity/embedding"
       ]
     },
     {
@@ -74,6 +74,36 @@
       ]
     },
     {
+      "name": "ivfpq train",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "train",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
+        "${workspaceFolder}/public/models/scimilarity/ivf",
+        "--n-partitions",
+        "64",
+        "--max-vectors",
+        "100000",
+        "--n-iterations",
+        "30"
+      ]
+    },
+    {
+      "name": "ivfpq test",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/ivfpq_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "test",
+        "${workspaceFolder}/public/models/scimilarity",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
+      ]
+    },
+    {
       "name": "pumap train",
       "type": "debugpy",
       "request": "launch",
@@ -83,7 +113,7 @@
         "train",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/data/references/scimilarity/labels.parquet",
-        "${workspaceFolder}/web/public/models/scimilarity/pumap",
+        "${workspaceFolder}/public/models/scimilarity/pumap",
         "--num-vectors",
         "10000"
       ]
@@ -96,7 +126,7 @@
       "console": "integratedTerminal",
       "args": [
         "map",
-        "${workspaceFolder}/web/public/models/scimilarity/pumap/model.onnx",
+        "${workspaceFolder}/public/models/scimilarity/pumap/model.onnx",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/data/references/scimilarity/",
         "--num-vectors",
@@ -113,59 +143,7 @@
       "args": [
         "export",
         "${workspaceFolder}/data/scimilarity/",
-        "${workspaceFolder}/web/public/models/scimilarity/pumap"
-      ]
-    },
-    {
-      "name": "pq train",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
-      "console": "integratedTerminal",
-      "args": [
-        "pq-train",
-        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "${workspaceFolder}/web/public/models/scimilarity/pq",
-        "--m",
-        "16",
-        "--k",
-        "256",
-        "--max-vectors",
-        "100000",
-        "--n-iterations",
-        "30"
-      ]
-    },
-    {
-      "name": "ivf train",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
-      "console": "integratedTerminal",
-      "args": [
-        "ivf-train",
-        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "${workspaceFolder}/web/public/models/scimilarity/ivf",
-        "--n-partitions",
-        "64",
-        "--max-vectors",
-        "100000",
-        "--n-iterations",
-        "30"
-      ]
-    },
-    {
-      "name": "ivfpq export",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
-      "console": "integratedTerminal",
-      "args": [
-        "ivfpq-export",
-        "${workspaceFolder}/web/public/models/scimilarity",
-        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "--max-vectors",
-        "250000"
+        "${workspaceFolder}/public/models/scimilarity/pumap"
       ]
     },
     {
@@ -181,7 +159,7 @@
       "name": "Attach to Playwright Chrome",
       "port": 9222,
       "url": "http://localhost:5173/*",
-      "webRoot": "${workspaceFolder}/web",
+      "webRoot": "${workspaceFolder}",
       "timeout": 30000
     }
   ]

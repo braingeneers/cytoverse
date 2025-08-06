@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ivfpq"
+version = "0.1.0"
+requires-python = ">=3.12, <3.13"
+dependencies = [
+  "numpy>=1.24,<2.3",
+  "scipy>=1.16.1",
+  "scikit-learn>=1.7.1",
+  "pyarrow>=21.0.0",
+  "onnx>=1.18.0",
+  "onnxruntime>=1.22.1",
+  "torch>=2.7.1",
+  "torchvision>=0.22.1",
+  "anndata>=0.12.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ivfpq"]

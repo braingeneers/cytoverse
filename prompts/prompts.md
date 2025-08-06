@@ -71,3 +71,34 @@ With that as context:
 At the end of this we should have a complete set of packages that:
 - Enable training pq on a set of embeddings and emitting a codebook, encode, decode and distance onnx models for use in the browser from typescript
 - Enable generating an ivf index leveraging a trained pq model also emitting browser artifacts
+
+# Rewrite IVFPQ to use Residual Vectors
+
+Let's completely rewrite ivf.py and pq.py to use residual vectors:
+
+ivf train:
+- Take a tensor of N vectors, run kmeans to generate tensor of k centroids.
+- Allocate the residual of each vector to the closest centroid (where residual = vector minus centroid).
+- Train a pq model on the residual vectors and export a pq codebook as well as encode and distance onnx models.
+- Encode the residual vectors for each partition with the pq codebook and export k partition parquet files with pq residual vectors and the original vector index number (int32).
+
+pq 
+- The distance onnx model should take in a query residual (full-precision) and each pq encode residual in a partion and output a sorted list of (vector index, distance). 
+- See the current pq.py implementation and note usage of gather elements in onnx to optimize this operation and simplify the emitted distance onnx model.
+
+ivf search:
+- Take in a query vector and centroids and find the nearest n_probe partitions (all in full original precision i.e. exact presision)
+- For each partition using the pq distance onnx model find the top k closest pq encode residual vectors to the query residual.
+- Merge the n_probe distance lists and yield the top k distances and associated original vector index for each
+
+pq/ivf typescript:
+
+Update ivfpq/typescript/src ivf.ts and pq.ts to use the artifacts from all of this python code - as they do currently but potentially any changes to support the residual flow etc...
+
+These final vector index's will be used to lookup annotations associated with the original vectors as well as triage the distances further.
+
+Additional Notes
+- Use scikit-learn optimized kmeans for all of this (NOT kmeans.py in this repo) and include tqdm based progress.
+- All data artifacts (centroids, pq codebook, partitions) should raw binary .bin files so they can be efficiently pulled over http and loaded as Float32Array (for centroids/codebook), UInt8Array for PQ codes etc...
+- Update/replace test_pq.py and test_ivf.py to use the new residual flow.
+- Update ivfpq/typescript/tests/ vitest based unit tests to validate the above

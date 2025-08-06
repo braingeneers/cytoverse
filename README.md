@@ -107,14 +107,27 @@ Install web app dependencies and run local dev server:
 ```
 cd web
 npm install
+npx playwright install
 npm run dev
 ```
+
+## Benchmarks
+
+### KMeans ONNX Browser Benchmark
+
+public/kmeans-benchmark/ tests the feasibility of running K-means clustering with ONNX Runtime in the browser on large-scale vector datasets towards a future version enabling a user to create their own reference from a local h5ad file. Target is ~300k cells ideally up to 500k.
+
+- `index.html` - Main benchmark HTML page
+- `kmeans_init.onnx` - ONNX model for K-means initialization
+- `kmeans_iteration.onnx` - ONNX model for K-means iteration
 
 ## References
 
 SCimilarity [paper](https://doi.org/10.1038/s41586-024-08411-y), [repo](https://github.com/Genentech/scimilarity), [model and dataset](https://zenodo.org/records/10685499)
 
 SIMS Web [repo](https://github.com/braingeneers/sims-web) and [demo](https://cells-test.gi.ucsc.edu/sims/)
+
+[Vector similarity search methods](https://weaxsey.org/en/articles/2023-10-30/)
 
 [Product Quantization for Similarity Search](https://towardsdatascience.com/product-quantization-for-similarity-search-2f1f67c5fddd/)
 

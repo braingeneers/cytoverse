@@ -2,10 +2,12 @@
 export model_id=scimilarity
 
 test:
-	python -m pytest tests/ -v
+	python -m pytest ivfpq/python/tests
+	python -m pytest tests/unit
+	npx vitest run ivfpq
 
 test-no-capture:
-	python -m pytest tests/ -v --capture=no
+	python -m pytest ivfpq/python/tests --capture=no --log-cli-level=DEBUG
 
 # Populate model artifacts for the selected model to web/public/models/<model_id>
 notice:
@@ -14,21 +16,14 @@ notice:
 	@echo "- Web Artificats to web/public/models/$(model_id)"
 
 scimilarity: model_id=scimilarity
-scimilarity: notice scimilarity-embeddings embedding-model pumap ivfpq
+scimilarity: notice scimilarity-embeddings scimilarity-model ivfpq-train pumap
 
-brain: model_id=brain
-brain: notice brain-embeddings embedding-model pumap ivfpq
+# brain: model_id=brain
+# brain: notice brain-embeddings scimilarity-model pumap ivfpq
 
-# Embedding Model
-embedding-model:
-	python src/cytoverse/scripts/scimilarity_export_model.py \
-	data/models/scimilarity/model_v1.1 \
-	web/public/models/$(model_id)/embedding
-
-
-# Embeddings
+# Embeddings (Must be first as model uses these to validate the export)
 scimilarity-embeddings:
-	python src/cytoverse/scripts/scimilarity_to_embeddings.py \
+	python scripts/scimilarity_to_embeddings.py \
 	data/models/scimilarity/model_v1.1/cellsearch \
 	data/references/$(model_id)/ \
 	--labels prediction \
@@ -37,81 +32,74 @@ scimilarity-embeddings:
 	--labels study \
 	--validate
 
-brain-embeddings:
-	python src/cytoverse/scripts/ingest_h5ad_as_reference.py \
-	data/brain.h5ad \
+# brain-embeddings:
+# 	python scripts/ingest_h5ad_as_reference.py \
+# 	data/brain.h5ad \
+# 	data/models/scimilarity/model_v1.1 \
+# 	data/brain \
+# 	--labels CellType \
+# 	--labels tissue_type
+
+# Embedding Model
+scimilarity-model:
+	python scripts/scimilarity_export_model.py \
 	data/models/scimilarity/model_v1.1 \
-	data/brain \
-	--labels CellType \
-	--labels tissue_type
+	public/models/$(model_id)/embedding
+
 
 # IVFPQ tune
 ivfpq-tune:
-	python src/cytoverse/scripts/ivfpq_tune.py \
-        data/scimilarity/embeddings.parquet \
-        data/scimilarity/labels.parquet \
+	python scripts/ivfpq_tune.py \
+        data/references/scimilarity/embeddings.parquet \
+        data/references/scimilarity/labels.parquet \
         --num-samples 16 \
         --max-concurrent-trials 8
 
+# IVF
+ivfpq-train:
+	python scripts/ivfpq_train.py train \
+	data/references/$(model_id)/embeddings.npy \
+	public/models/$(model_id) \
+	--n-partitions 512 \
+	--max-vectors-for-training 100000 \
+	--n-iterations 30
+
+ivfpq-test:
+	python scripts/ivfpq_train.py test \
+	public/models/$(model_id) \
+	data/references/$(model_id)/embeddings.npy
+
 # PUMAP
 pumap-train:
-	python src/cytoverse/scripts/pumap_train.py train \
+	python scripts/pumap_train.py train \
 	data/references/$(model_id)/embeddings.npy \
 	data/references/$(model_id)/labels.parquet \
-	web/public/models/$(model_id)/pumap \
+	public/models/$(model_id)/pumap \
 	--stratify-label prediction \
 	--num-vectors 250000
 
 pumap-map:
-	python src/cytoverse/scripts/pumap_train.py map \
-	web/public/models/$(model_id)/pumap/model.onnx \
+	python scripts/pumap_train.py map \
+	public/models/$(model_id)/pumap/model.onnx \
 	data/references/$(model_id)/embeddings.npy \
 	data/references/$(model_id)/ \
 	--export-png \
 	--num-vectors 1000000
 
 pumap-export:
-	python src/cytoverse/scripts/pumap_train.py export \
+	python scripts/pumap_train.py export \
 	data/references/$(model_id)/ \
-	web/public/models/$(model_id)/pumap/
+	public/models/$(model_id)/pumap/
 
 pumap: pumap-train pumap-map pumap-export
 
-# PQ
-pq-train:
-	python src/cytoverse/scripts/ivfpq_train.py pq-train \
-	data/references/$(model_id)/embeddings.npy \
-	web/public/models/$(model_id)/pq/ \
-	--m 8 \
-	--k 256 \
-	--max-vectors 100000 \
-	--n-iterations 30
-	
-# IVF
-ivf-train:
-	python src/cytoverse/scripts/ivfpq_train.py ivf-train \
-	data/references/$(model_id)/embeddings.npy \
-	web/public/models/$(model_id)/ivf/ \
-	--n-partitions 512 \
-	--max-vectors 50000 \
-	--n-iterations 10
-
-# IVFPQ
-ivfpq-export:
-	python src/cytoverse/scripts/ivfpq_train.py ivfpq-export \
-	web/public/models/$(model_id)/ \
-	data/references/$(model_id)/embeddings.npy \
-	--max-vectors 100000 \
-	--test-performance
-
-ivfpq: pq-train ivf-train ivfpq-export
 
 
 # Testing
 update-validations:
-	python src/cytoverse/scripts/label.py \
-	      tests/GSE136831_subsample_100.h5ad \
-	      web/tests/GSE136831_subsample_100.labels.csv
-	python src/cytoverse/scripts/label.py \
-	      web/public/sample.h5ad \
-	      web/tests/sample.labels.csv
+	python scripts/label.py \
+	      ivfpq/python/tests/fixtures/GSE136831_subsample_100.h5ad \
+	      tests/e2e/GSE136831_subsample_100.labels.csv
+	python scripts/label.py \
+	      public/sample.h5ad \
+	      tests/e2e/sample.labels.csv
