@@ -44,7 +44,6 @@ export class ProductQuantizer {
   
   private codebooks: Float32Array | null = null
   private encodeSession: ort.InferenceSession | null = null
-  private decodeSession: ort.InferenceSession | null = null
   private distanceSession: ort.InferenceSession | null = null
 
   constructor(metadata: PQMetadata) {
@@ -89,21 +88,6 @@ export class ProductQuantizer {
     }
   }
 
-  /**
-   * Load ONNX model for decoding PQ codes to residual vectors.
-   */
-  async loadDecoder(modelPath: string): Promise<void> {
-    try {
-      this.decodeSession = await ort.InferenceSession.create(modelPath, {
-        executionProviders: ['wasm'],
-        logSeverityLevel: 3,
-      })
-      console.log(`Loaded PQ decoder for residual vectors from ${modelPath}`)
-    } catch (error) {
-      console.error('Failed to load PQ decoder:', error)
-      throw error
-    }
-  }
 
   /**
    * Load ONNX model for distance computation with top-k on residual vectors.
@@ -163,44 +147,6 @@ export class ProductQuantizer {
     return uint8Codes
   }
 
-  /**
-   * Decode PQ codes using the ONNX decoder model to reconstruct residual vectors.
-   *
-   * @param codes - PQ codes as Uint8Array with shape [N, m]
-   * @returns Decoded residual vectors as Float32Array with shape [N, d]
-   */
-  async decode(codes: Uint8Array): Promise<Float32Array> {
-    if (!this.decodeSession) {
-      throw new Error('PQ decoder model not loaded. Call loadDecoder() first.')
-    }
-    if (!this.codebooks) {
-      throw new Error('Codebooks not loaded. Call loadCodebooks() first.')
-    }
-
-    const batchSize = codes.length / this.metadata.m
-
-    // Convert codes to int64 array for ONNX
-    const int64Codes = new Array(codes.length)
-    for (let i = 0; i < codes.length; i++) {
-      int64Codes[i] = codes[i]
-    }
-
-    // Create input tensors
-    const codesTensor = new ort.Tensor('int64', int64Codes, [batchSize, this.metadata.m])
-    const codebooksTensor = new ort.Tensor('float32', this.codebooks, [
-      this.metadata.m, 
-      this.metadata.k, 
-      this.metadata.d_sub
-    ])
-
-    // Run inference
-    const outputs = await this.decodeSession.run({
-      codes: codesTensor,
-      codebooks: codebooksTensor
-    })
-
-    return outputs.embeddings.data as Float32Array
-  }
 
   /**
    * Find k nearest neighbors using the ONNX distance model with residual vectors.
@@ -292,48 +238,6 @@ export class ProductQuantizer {
     return results.indices
   }
 
-  /**
-   * Compute reconstruction error statistics for residual vectors.
-   *
-   * @param originalResiduals - Original residual vectors as Float32Array with shape [N, d]
-   * @param codes - PQ codes as Uint8Array with shape [N, m]
-   * @returns Object with MSE and relative error statistics
-   */
-  async computeReconstructionError(
-    originalResiduals: Float32Array,
-    codes: Uint8Array
-  ): Promise<{
-    mse: number
-    relativeError: number
-    compressionRatio: number
-  }> {
-    const decoded = await this.decode(codes)
-    const batchSize = codes.length / this.metadata.m
-
-    let totalSquaredError = 0
-    let totalOriginalSquaredNorm = 0
-
-    for (let n = 0; n < batchSize; n++) {
-      for (let i = 0; i < this.metadata.d; i++) {
-        const idx = n * this.metadata.d + i
-        const original = originalResiduals[idx]
-        const reconstructed = decoded[idx]
-        const error = original - reconstructed
-
-        totalSquaredError += error * error
-        totalOriginalSquaredNorm += original * original
-      }
-    }
-
-    const mse = totalSquaredError / (batchSize * this.metadata.d)
-    const relativeError = Math.sqrt(totalSquaredError / totalOriginalSquaredNorm)
-
-    return {
-      mse,
-      relativeError,
-      compressionRatio: this.metadata.compression_ratio,
-    }
-  }
 
   /**
    * Check if this PQ instance supports residual vectors
@@ -390,14 +294,12 @@ export async function loadPQModel(
   basePath: string, 
   options: {
     loadEncoder?: boolean
-    loadDecoder?: boolean
     loadDistance?: boolean
   } = {}
 ): Promise<ProductQuantizer> {
   // Default to loading all models
   const {
     loadEncoder = true,
-    loadDecoder = true,
     loadDistance = true
   } = options
 
@@ -414,10 +316,6 @@ export async function loadPQModel(
   // Load ONNX models as requested
   if (loadEncoder) {
     await pq.loadEncoder(`${basePath}/pq_encode.onnx`)
-  }
-
-  if (loadDecoder) {
-    await pq.loadDecoder(`${basePath}/pq_decode.onnx`)
   }
 
   if (loadDistance) {

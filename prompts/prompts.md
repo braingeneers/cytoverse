@@ -102,3 +102,11 @@ Additional Notes
 - All data artifacts (centroids, pq codebook, partitions) should raw binary .bin files so they can be efficiently pulled over http and loaded as Float32Array (for centroids/codebook), UInt8Array for PQ codes etc...
 - Update/replace test_pq.py and test_ivf.py to use the new residual flow.
 - Update ivfpq/typescript/tests/ vitest based unit tests to validate the above
+
+# Performance and Accuracy Test
+
+Develop a new unit test, test_performance.py, that tests the accuracy and performance of the IVFPQ system compared to SCimilarity. First let's start with just accuracy. 
+- Use tests/fixtures/GSE136831_subsample_100.h5ad as the query file
+- Use SCimilarity to generate a set of embeddings and labels (see ingest_h5ad_as_reference).
+- Use ivfpq/python/src/ivf.py and the exported artifacts from the entire SCimilarity reference set in public/models/scimilarity to generate labels for each of the cells in the query file.
+- Compare the predicted labels to the ground truth labels and report an accuracy figure failing if its less then 99% 

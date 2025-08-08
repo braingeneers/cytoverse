@@ -14,7 +14,7 @@ from pathlib import Path
 from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
 
-from ivfpq.ivf import InvertedFileIndex, load_centroids_binary
+from ivfpq.ivfpq import InvertedFileIndex, load_centroids_binary
 
 
 @pytest.fixture

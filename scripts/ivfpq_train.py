@@ -9,8 +9,8 @@ for improved accuracy, exporting browser-compatible artifacts.
 Features:
 - Train complete IVFPQ models with residual vectors
 - Export browser-compatible artifacts under public/models/<model_id>/
-- Performance testing with trained models
 - Integration with TypeScript browser implementation
+- Performance testing with trained models
 """
 
 import typer
@@ -20,7 +20,7 @@ from pathlib import Path
 import logging
 from typing import Optional
 
-from ivfpq.ivf import train_ivf_residual
+from ivfpq.ivf import train_ivf
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,7 +54,8 @@ def train(
     output_dir: Path = typer.Argument(
         ..., help="Output directory for IVFPQ model artifacts"
     ),
-    n_partitions: int = typer.Option(256, help="Number of partitions for IVF index"),
+    pq_m: int = typer.Option(16, help="Number of PQ subspaces"),
+    pq_k: int = typer.Option(256, help="Number of centroids per PQ subspace"),
     max_vectors: Optional[int] = typer.Option(
         None,
         help="Maximum number of vectors to store in the index (default: all vectors)",
@@ -78,29 +79,21 @@ def train(
     d = vectors_tensor.shape[1]
 
     logger.info(
-        f"Training IVFPQ with residual vectors: d={d}, n_partitions={n_partitions}"
+        f"Training IVFPQ with residual vectors: d={d}, pq_m={pq_m}, pq_k={pq_k}"
     )
     logger.info(f"Output directory: {output_dir}")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sample vectors for training if needed
-    if max_vectors_for_training and vectors_tensor.shape[0] > max_vectors_for_training:
-        logger.info(f"Randomly sampling {max_vectors_for_training} vectors for k-means training")
-        indices = torch.randperm(vectors_tensor.shape[0])[:max_vectors_for_training]
-        training_vectors = vectors_tensor[indices]
-    else:
-        training_vectors = vectors_tensor
-    
     # Train IVF with residual vectors (includes PQ training and export)
-    train_ivf_residual(
+    train_ivf(
         vectors=vectors_tensor,
-        training_vectors=training_vectors,
-        n_partitions=n_partitions,
         output_dir=output_dir,
+        n_training_vectors=max_vectors_for_training,
         max_iterations=n_iterations,
-        verbose=True,
+        pq_m=pq_m,
+        pq_k=pq_k,
     )
 
     logger.info(f"IVFPQ training with residual vectors completed")
@@ -109,7 +102,7 @@ def train(
     logger.info(f"  - partitions/: PQ-encoded residual vectors by partition")
     logger.info(f"  - pq_*.onnx: ONNX models for browser PQ distance computation")
     logger.info(f"  - pq_*.npy: binary codebooks and metadata")
-    logger.info(f"  - metadata.json: training metadata")
+    logger.info(f"  - ivf_metadata.json: training metadata")
 
 
 def _test_ivfpq_search(
@@ -119,7 +112,7 @@ def _test_ivfpq_search(
     n_test: int = 100,
 ) -> None:
     """Test IVFPQ search performance using the trained residual model."""
-    from ivfpq.ivf import search_ivf_residual, load_centroids_binary
+    from ivfpq.ivf import search_ivf, load_centroids_binary
     import json
 
     n_test = min(n_test, vectors.shape[0])
@@ -129,7 +122,7 @@ def _test_ivfpq_search(
     logger.info(f"  Test queries: {n_test}")
 
     # Load metadata
-    metadata_file = model_path / "metadata.json"
+    metadata_file = model_path / "ivf_metadata.json"
     with open(metadata_file, "r") as f:
         metadata = json.load(f)
 
@@ -149,12 +142,12 @@ def _test_ivfpq_search(
 
         for query_vector in test_queries[: min(10, n_test)]:  # Test subset for speed
             try:
-                vector_ids, distances = search_ivf_residual(
+                vector_ids, distances = search_ivf(
                     query_vector=query_vector,
                     centroids=centroids,
                     n_probe=n_probe,
                     model_path=model_path,
-                    k=50,
+                    k_per_partition=50,
                     verbose=False,
                 )
                 total_candidates += len(vector_ids)
@@ -179,7 +172,7 @@ def _test_ivfpq_accuracy(
     model_path: Path, vectors: torch.Tensor, n_test: int = 10, k: int = 50
 ) -> None:
     """Test IVFPQ accuracy by searching for random vectors and checking if their indices are returned."""
-    from ivfpq.ivf import search_ivf_residual, load_centroids_binary
+    from ivfpq.ivf import search_ivf, load_centroids_binary
     import json
     import random
 
@@ -188,7 +181,7 @@ def _test_ivfpq_accuracy(
     logger.info(f"  k (top results): {k}")
 
     # Load metadata
-    metadata_file = model_path / "metadata.json"
+    metadata_file = model_path / "ivf_metadata.json"
     with open(metadata_file, "r") as f:
         metadata = json.load(f)
 
@@ -212,12 +205,12 @@ def _test_ivfpq_accuracy(
             query_vector = vectors[random_idx]
 
             try:
-                vector_ids, distances = search_ivf_residual(
+                vector_ids, distances = search_ivf(
                     query_vector=query_vector,
                     centroids=centroids,
                     n_probe=n_probe,
                     model_path=model_path,
-                    k=k,
+                    k_per_partition=k,
                     verbose=False,
                 )
 
@@ -239,11 +232,11 @@ def _test_ivfpq_accuracy(
 
 @app.command()
 def test(
-    model_path: Path = typer.Argument(
-        ..., help="Path to trained IVFPQ model directory", exists=True
-    ),
     vectors_path: Path = typer.Argument(
         ..., help="Path to vectors.npy file", exists=True
+    ),
+    model_path: Path = typer.Argument(
+        ..., help="Path to trained IVFPQ model directory", exists=True
     ),
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to test (None = all)"

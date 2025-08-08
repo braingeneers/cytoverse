@@ -116,7 +116,6 @@ async function handleStart(message: StartLabelerMessage): Promise<void> {
     
     // Load ONNX models
     await pq.loadEncoder(`${modelBasePath}/pq_encode.onnx`)
-    await pq.loadDecoder(`${modelBasePath}/pq_decode.onnx`)
     await pq.loadDistanceModel(`${modelBasePath}/pq_distance.onnx`)
 
     isInitialized = true

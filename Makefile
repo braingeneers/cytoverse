@@ -6,6 +6,9 @@ test:
 	python -m pytest tests/unit
 	npx vitest run ivfpq
 
+benchmark:
+	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
+
 test-no-capture:
 	python -m pytest ivfpq/python/tests --capture=no --log-cli-level=DEBUG
 
@@ -57,10 +60,11 @@ ivfpq-tune:
 
 # IVF
 ivfpq-train:
+	# Note number of partitions ~ sqrt(number of vectors) rule of thumb
 	python scripts/ivfpq_train.py train \
 	data/references/$(model_id)/embeddings.npy \
 	public/models/$(model_id) \
-	--n-partitions 512 \
+	--n-partitions 5000 \
 	--max-vectors-for-training 100000 \
 	--n-iterations 30
 

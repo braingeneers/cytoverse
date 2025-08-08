@@ -19,6 +19,8 @@ dependencies = [
     "ivfpq",
     "scimilarity",
     "umap-pytorch",
+    "anndata>=0.12.1",
+    "pyarrow>=21.0.0",
     "scanpy>=1.11.4",
 ]
 

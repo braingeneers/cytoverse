@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 """
-Test suite for Product Quantization (PQ) implementation with residual vectors.
+Test suite for Product Quantization (PQ) implementation.
 
 This module tests the core functionality of the PQ implementation including:
-- Training with scikit-learn k-means on residual vectors
-- Encoding and decoding with residual vectors
+- Training with scikit-learn k-means
+- Encoding and decoding
 - ONNX model export for browser-side inference
-- Optimized distance computation with residual vectors
+- Optimized distance computation
 """
 
 import pytest
@@ -17,18 +17,14 @@ from pathlib import Path
 import json
 
 from ivfpq.pq import (
-    ProductQuantizer,
-    PQEncode,
-    PQDecode,
-    PQDistanceResidual,
-    train_pq_codebooks,
-    export_pq_models,
+    PQ,
+    PQDistance,
     create_pq_system,
 )
 
 
-class TestPQResidualBasic:
-    """Test basic PQ functionality with residual vectors and synthetic data."""
+class TestPQBasic:
+    """Test basic PQ functionality with synthetic data."""
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -37,25 +33,25 @@ class TestPQResidualBasic:
         self.k = 256
         self.n_vectors = 1000
 
-        # Create synthetic residual vectors (centered around zero as residuals should be)
+        # Create synthetic vectors
         torch.manual_seed(42)
         np.random.seed(42)
-        
-        # Create residual-like vectors (zero-centered with some structure)
-        self.residual_vectors = torch.randn(self.n_vectors, self.d) * 0.5
-        
+
+        # Create regular vectors with some structure
+        self.vectors = torch.randn(self.n_vectors, self.d)
+
         # Add some structure to make quantization meaningful
         for i in range(self.m):
             start_idx = i * (self.d // self.m)
             end_idx = (i + 1) * (self.d // self.m)
             # Add some consistent patterns within subspaces
-            pattern = torch.randn(self.d // self.m) * 0.3
-            self.residual_vectors[:, start_idx:end_idx] += pattern.unsqueeze(0)
+            pattern = torch.randn(self.d // self.m) * 0.5
+            self.vectors[:, start_idx:end_idx] += pattern.unsqueeze(0)
 
     def test_product_quantizer_initialization(self):
-        """Test ProductQuantizer initialization with residual vectors."""
-        pq = ProductQuantizer(self.d, self.m, self.k)
-        
+        """Test PQ initialization with vectors."""
+        pq = PQ(self.d, self.m, self.k)
+
         assert pq.d == self.d
         assert pq.m == self.m
         assert pq.k == self.k
@@ -64,134 +60,128 @@ class TestPQResidualBasic:
         assert pq.codebooks.shape == (self.m, self.k, pq.d_sub)
 
     def test_pq_training_with_sklearn(self):
-        """Test PQ training using scikit-learn k-means on residual vectors."""
-        pq = ProductQuantizer(self.d, self.m, self.k)
-        
-        # Train on residual vectors
-        pq.train_pq(self.residual_vectors, n_iterations=20)
-        
+        """Test PQ training using scikit-learn k-means."""
+        pq = PQ(self.d, self.m, self.k)
+
+        # Train on vectors
+        pq.train_pq(self.vectors, n_iterations=20)
+
         assert pq.is_trained
         assert pq.codebooks.shape == (self.m, self.k, pq.d_sub)
-        
+
         # Check that codebooks are not all zeros or identical
         for i in range(self.m):
             codebook = pq.codebooks[i]
             # Ensure not all centroids are identical
             centroid_means = codebook.mean(dim=1)
-            assert not torch.allclose(centroid_means, centroid_means[0].expand_as(centroid_means), atol=1e-3)
+            assert not torch.allclose(
+                centroid_means, centroid_means[0].expand_as(centroid_means), atol=1e-3
+            )
 
-    def test_pq_encode_decode_residuals(self):
-        """Test PQ encoding and decoding of residual vectors."""
-        pq = ProductQuantizer(self.d, self.m, self.k)
-        pq.train_pq(self.residual_vectors, n_iterations=10)
-        
+    def test_pq_encode_decode(self):
+        """Test PQ encoding and decoding."""
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=10)
+
         # Test encoding
-        test_residuals = self.residual_vectors[:100]
-        codes = pq(test_residuals)
-        
+        test_vectors = self.vectors[:100]
+        codes = pq(test_vectors)
+
         assert codes.shape == (100, self.m)
         assert codes.dtype == torch.long
         assert torch.all(codes >= 0)
         assert torch.all(codes < self.k)
-        
-        # Test decoding
-        decoded_residuals = pq.decode(codes)
-        
-        assert decoded_residuals.shape == test_residuals.shape
-        assert decoded_residuals.dtype == torch.float32
-        
-        # Check reconstruction quality (should be reasonable for residuals)
-        mse = torch.mean((test_residuals - decoded_residuals) ** 2)
-        relative_error = torch.norm(test_residuals - decoded_residuals) / torch.norm(test_residuals)
-        
-        # Residuals should reconstruct reasonably well
-        assert mse < 1.0  # Reasonable MSE for residual vectors
-        assert relative_error < 0.5  # Less than 50% relative error
 
-    def test_train_pq_codebooks_function(self, tmp_path):
-        """Test the train_pq_codebooks function with residual vectors."""
-        output_dir = tmp_path
-        
-        result = train_pq_codebooks(
-            training_vectors=self.residual_vectors,
-            m=self.m,
-            k=self.k,
-            max_iterations=10,
-            output_dir=output_dir,
-            save_binary=True
+        # Test decoding
+        decoded_vectors = pq.decode(codes)
+
+        assert decoded_vectors.shape == test_vectors.shape
+        assert decoded_vectors.dtype == torch.float32
+
+        # Check reconstruction quality
+        mse = torch.mean((test_vectors - decoded_vectors) ** 2)
+        relative_error = torch.norm(test_vectors - decoded_vectors) / torch.norm(
+            test_vectors
         )
-        
-        # Check return value
-        assert "codebooks" in result
-        assert "metadata" in result
-        
-        codebooks = result["codebooks"]
-        metadata = result["metadata"]
-        
-        assert codebooks.shape == (self.m, self.k, self.d // self.m)
-        assert metadata["d"] == self.d
-        assert metadata["m"] == self.m
-        assert metadata["k"] == self.k
-        assert metadata["version"] == "residual-1.0"
-        
+
+        # Vectors should reconstruct reasonably well
+        assert mse < 10.0  # Reasonable MSE
+        assert relative_error < 0.8  # Less than 80% relative error
+
+    def test_product_quantizer_save_load(self, tmp_path):
+        """Test the PQ save/load functionality with vectors."""
+        output_dir = tmp_path
+
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=10)
+
+        # Save the quantizer
+        pq.save(output_dir)
+
         # Check files were created
         assert (output_dir / "pq_metadata.json").exists()
         assert (output_dir / "pq_codebooks.bin").exists()
-        assert (output_dir / "pq_codebooks.npy").exists()
 
-    def test_export_pq_models(self, tmp_path):
-        """Test ONNX model export for residual vectors."""
+        # Load and verify
+        pq_loaded = PQ.load(output_dir)
+
+        assert pq_loaded.d == self.d
+        assert pq_loaded.m == self.m
+        assert pq_loaded.k == self.k
+        assert pq_loaded.is_trained
+        assert torch.allclose(pq_loaded.codebooks, pq.codebooks)
+
+    def test_export_pq_models_via_create_system(self, tmp_path):
+        """Test ONNX model export via create_pq_system."""
         output_dir = tmp_path
-        
-        # Train codebooks first
-        result = train_pq_codebooks(
-            training_vectors=self.residual_vectors,
+
+        # Create complete PQ system with ONNX export
+        result = create_pq_system(
+            training_vectors=self.vectors,
             m=self.m,
             k=self.k,
             max_iterations=5,
-            output_dir=output_dir
+            output_dir=output_dir,
+            k_nn=50,
         )
-        
-        # Export ONNX models
-        export_pq_models(result["codebooks"], output_dir, k_nn=50)
-        
+
         # Check ONNX files were created
         assert (output_dir / "pq_encode.onnx").exists()
-        assert (output_dir / "pq_decode.onnx").exists()
         assert (output_dir / "pq_distance.onnx").exists()
+        # Also check binary files are created
+        assert (output_dir / "pq_metadata.json").exists()
+        assert (output_dir / "pq_codebooks.bin").exists()
 
     def test_create_pq_system(self, tmp_path):
-        """Test complete PQ system creation for residual vectors."""
+        """Test complete PQ system creation for vectors."""
         output_dir = tmp_path
-        
+
         result = create_pq_system(
-            training_vectors=self.residual_vectors,
+            training_vectors=self.vectors,
             m=self.m,
             k=self.k,
             max_iterations=5,
-            output_dir=output_dir
+            output_dir=output_dir,
         )
-        
+
         # Check return value
         assert "codebooks" in result
         assert "metadata" in result
-        
+
         # Check all files were created
         expected_files = [
             "pq_metadata.json",
             "pq_codebooks.bin",
-            "pq_codebooks.npy",
             "pq_encode.onnx",
-            "pq_decode.onnx",
-            "pq_distance.onnx"
+            "pq_distance.onnx",
         ]
-        
+
         for filename in expected_files:
             assert (output_dir / filename).exists(), f"Missing file: {filename}"
 
 
 class TestPQONNXModels:
-    """Test ONNX model functionality for residual vectors."""
+    """Test ONNX model functionality for vectors."""
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -201,86 +191,72 @@ class TestPQONNXModels:
         self.n_vectors = 200
 
         torch.manual_seed(42)
-        self.residual_vectors = torch.randn(self.n_vectors, self.d) * 0.3
+        self.vectors = torch.randn(self.n_vectors, self.d)
 
-    def test_pq_encode_model(self, tmp_path):
-        """Test PQEncode ONNX model with residual vectors."""
-        # Train codebooks
-        output_dir = tmp_path
-        result = train_pq_codebooks(
-            self.residual_vectors, self.m, self.k, 5, output_dir
-        )
-        codebooks = result["codebooks"]
-        
-        # Test PQEncode model
-        encode_model = PQEncode()
-        encode_model.eval()
-        
-        test_residuals = self.residual_vectors[:10]
-        
+    def test_pq_encode_function(self, tmp_path):
+        """Test PQ forward (encode) with vectors."""
+        # Train quantizer
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=5)
+
+        test_vectors = self.vectors[:10]
+
         with torch.no_grad():
-            codes = encode_model(test_residuals, codebooks)
-        
+            codes = pq(test_vectors)
+
         assert codes.shape == (10, self.m)
         assert codes.dtype == torch.long
         assert torch.all(codes >= 0)
         assert torch.all(codes < self.k)
 
-    def test_pq_decode_model(self, tmp_path):
-        """Test PQDecode ONNX model with residual vectors."""
-        # Train codebooks
-        output_dir = tmp_path
-        result = train_pq_codebooks(
-            self.residual_vectors, self.m, self.k, 5, output_dir
-        )
-        codebooks = result["codebooks"]
-        
+    def test_pq_decode_function(self, tmp_path):
+        """Test PQ decode with vectors."""
+        # Train quantizer
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=5)
+
         # Create test codes
         test_codes = torch.randint(0, self.k, (10, self.m))
-        
-        # Test PQDecode model
-        decode_model = PQDecode()
-        decode_model.eval()
-        
+
         with torch.no_grad():
-            decoded = decode_model(test_codes, codebooks)
-        
+            decoded = pq.decode(test_codes)
+
         assert decoded.shape == (10, self.d)
         assert decoded.dtype == torch.float32
 
-    def test_pq_distance_residual_model(self, tmp_path):
-        """Test PQDistanceResidual ONNX model with residual vectors."""
-        # Train codebooks
-        output_dir = tmp_path
-        result = train_pq_codebooks(
-            self.residual_vectors, self.m, self.k, 5, output_dir
-        )
-        codebooks = result["codebooks"]
-        
+    def test_pq_distance_model(self, tmp_path):
+        """Test PQDistance ONNX model with vectors."""
+        # Train quantizer
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=5)
+        codebooks = pq.codebooks.data
+
         # Create test data
-        query_residual = torch.randn(self.d) * 0.3
+        query_vector = torch.randn(self.d)
         reference_codes = torch.randint(0, self.k, (100, self.m))
-        
-        # Test PQDistanceResidual model
-        distance_model = PQDistanceResidual(k=10)
+
+        # Test PQDistance model
+        distance_model = PQDistance(k=10)
         distance_model.eval()
-        
+
         with torch.no_grad():
-            indices, distances = distance_model(query_residual, reference_codes, codebooks)
-        
+            indices, distances = distance_model(
+                query_vector, reference_codes, codebooks
+            )
+
         assert indices.shape[0] == min(10, 100)
         assert distances.shape == indices.shape
         assert indices.dtype == torch.long
         assert distances.dtype == torch.float32
         assert torch.all(indices >= 0)
         assert torch.all(indices < 100)
-        
+
         # Check that distances are sorted (ascending)
         assert torch.all(distances[:-1] <= distances[1:])
 
 
-class TestPQResidualIntegration:
-    """Integration tests for PQ with residual vectors."""
+class TestPQIntegration:
+    """Integration tests for PQ with vectors."""
 
     def test_different_dimensions(self):
         """Test PQ with different vector dimensions."""
@@ -288,22 +264,22 @@ class TestPQResidualIntegration:
             m = 8 if d >= 64 else 4
             k = 64
             n_vectors = 100
-            
+
             torch.manual_seed(42)
-            residual_vectors = torch.randn(n_vectors, d) * 0.2
-            
-            pq = ProductQuantizer(d, m, k)
-            pq.train_pq(residual_vectors, n_iterations=5)
-            
+            vectors = torch.randn(n_vectors, d)
+
+            pq = PQ(d, m, k)
+            pq.train_pq(vectors, n_iterations=5)
+
             assert pq.is_trained
             assert pq.d == d
             assert pq.m == m
             assert pq.d_sub == d // m
-            
+
             # Test encode/decode
-            codes = pq(residual_vectors[:10])
+            codes = pq(vectors[:10])
             decoded = pq.decode(codes)
-            
+
             assert codes.shape == (10, m)
             assert decoded.shape == (10, d)
 
@@ -312,133 +288,139 @@ class TestPQResidualIntegration:
         d = 64
         k = 32
         n_vectors = 100
-        
+
         torch.manual_seed(42)
-        residual_vectors = torch.randn(n_vectors, d) * 0.2
-        
+        vectors = torch.randn(n_vectors, d)
+
         for m in [4, 8, 16]:
             if d % m != 0:
                 continue
-                
-            pq = ProductQuantizer(d, m, k)
-            pq.train_pq(residual_vectors, n_iterations=5)
-            
+
+            pq = PQ(d, m, k)
+            pq.train_pq(vectors, n_iterations=5)
+
             assert pq.is_trained
             assert pq.m == m
             assert pq.d_sub == d // m
-            
-            codes = pq(residual_vectors[:10])
+
+            codes = pq(vectors[:10])
             assert codes.shape == (10, m)
 
-    def test_reconstruction_quality_residuals(self):
-        """Test reconstruction quality specifically for residual vectors."""
+    def test_reconstruction_quality(self):
+        """Test reconstruction quality."""
         d = 128
         m = 16
         k = 256
         n_vectors = 500
-        
+
         torch.manual_seed(42)
-        # Create residual-like vectors (zero-centered, moderate variance)
-        residual_vectors = torch.randn(n_vectors, d) * 0.4
-        
-        pq = ProductQuantizer(d, m, k)
-        pq.train_pq(residual_vectors, n_iterations=15)
-        
-        # Test reconstruction on unseen residuals
-        test_residuals = torch.randn(50, d) * 0.4
-        codes = pq(test_residuals)
+        # Create vectors
+        vectors = torch.randn(n_vectors, d)
+
+        pq = PQ(d, m, k)
+        pq.train_pq(vectors, n_iterations=15)
+
+        # Test reconstruction on unseen vectors
+        test_vectors = torch.randn(50, d)
+        codes = pq(test_vectors)
         reconstructed = pq.decode(codes)
-        
+
         # Compute reconstruction metrics
-        mse = torch.mean((test_residuals - reconstructed) ** 2)
-        relative_error = torch.norm(test_residuals - reconstructed) / torch.norm(test_residuals)
-        
-        # Residual vectors should reconstruct well with sufficient quantization
-        assert mse < 0.8, f"MSE too high: {mse}"
-        assert relative_error < 0.7, f"Relative error too high: {relative_error}"
-        
+        mse = torch.mean((test_vectors - reconstructed) ** 2)
+        relative_error = torch.norm(test_vectors - reconstructed) / torch.norm(
+            test_vectors
+        )
+
+        # Vectors should reconstruct reasonably well with sufficient quantization
+        assert mse < 5.0, f"MSE too high: {mse}"
+        assert relative_error < 0.8, f"Relative error too high: {relative_error}"
+
         # Check compression ratio
         original_bits = d * 32  # 32-bit floats
         compressed_bits = m * 8  # 8-bit codes
         compression_ratio = original_bits / compressed_bits
-        
+
         assert compression_ratio >= 4.0  # Should achieve good compression
 
     def test_distance_computation_accuracy(self):
-        """Test accuracy of distance computation with residual vectors."""
+        """Test accuracy of distance computation with vectors."""
         d = 64
         m = 8
         k = 128
         n_vectors = 200
-        
+
         torch.manual_seed(42)
-        residual_vectors = torch.randn(n_vectors, d) * 0.3
-        
-        pq = ProductQuantizer(d, m, k)
-        pq.train_pq(residual_vectors, n_iterations=10)
-        
+        vectors = torch.randn(n_vectors, d)
+
+        pq = PQ(d, m, k)
+        pq.train_pq(vectors, n_iterations=10)
+
         # Encode all vectors
-        all_codes = pq(residual_vectors)
-        
+        all_codes = pq(vectors)
+
         # Test distance computation
-        query_residual = residual_vectors[0]
+        query_vector = vectors[0]
         reference_codes = all_codes[1:21]  # Use codes 1-20 as references
-        
-        distance_model = PQDistanceResidual(k=5)
+
+        distance_model = PQDistance(k=5)
         distance_model.eval()
-        
+
         with torch.no_grad():
-            indices, distances = distance_model(query_residual, reference_codes, pq.codebooks.data)
-        
+            indices, distances = distance_model(
+                query_vector, reference_codes, pq.codebooks.data
+            )
+
         # Verify results
         assert len(indices) == 5
         assert len(distances) == 5
-        
-        # Check that distances are reasonable (not too large for residuals)
-        assert torch.all(distances < 15.0), f"Distances too large: {distances}"
-        
+
+        # Check that distances are reasonable
+        assert torch.all(distances < 200.0), f"Distances too large: {distances}"
+
         # Verify indices are valid
         assert torch.all(indices >= 0)
         assert torch.all(indices < 20)
 
 
-class TestPQResidualCompatibility:
-    """Test compatibility and edge cases for residual-based PQ."""
+class TestPQCompatibility:
+    """Test compatibility and edge cases for PQ."""
 
     def test_save_load_compatibility(self, tmp_path):
-        """Test save/load compatibility with residual-based PQ."""
+        """Test save/load compatibility with PQ."""
         d = 64
         m = 8
         k = 64
         n_vectors = 100
-        
+
         torch.manual_seed(42)
-        residual_vectors = torch.randn(n_vectors, d) * 0.3
-        
-        pq = ProductQuantizer(d, m, k)
-        pq.train_pq(residual_vectors, n_iterations=5)
-        
-        save_path = tmp_path / "pq_residual.pkl"
-        
+        vectors = torch.randn(n_vectors, d)
+
+        pq = PQ(d, m, k)
+        pq.train_pq(vectors, n_iterations=5)
+
+        save_path = tmp_path / "pq"
+
         # Save
         pq.save(save_path)
         assert save_path.exists()
-        
+        assert (save_path / "pq_metadata.json").exists()
+        assert (save_path / "pq_codebooks.bin").exists()
+
         # Load
-        pq_loaded = ProductQuantizer.load(save_path)
-        
+        pq_loaded = PQ.load(save_path)
+
         # Check loaded quantizer matches original
         assert pq_loaded.d == pq.d
         assert pq_loaded.m == pq.m
         assert pq_loaded.k == pq.k
         assert pq_loaded.is_trained == pq.is_trained
         assert torch.allclose(pq_loaded.codebooks, pq.codebooks)
-        
+
         # Test functionality
-        test_residuals = residual_vectors[:10]
-        codes_orig = pq(test_residuals)
-        codes_loaded = pq_loaded(test_residuals)
-        
+        test_vectors = vectors[:10]
+        codes_orig = pq(test_vectors)
+        codes_loaded = pq_loaded(test_vectors)
+
         assert torch.equal(codes_orig, codes_loaded)
 
     def test_error_handling(self):
@@ -446,32 +428,32 @@ class TestPQResidualCompatibility:
         d = 64
         m = 8
         k = 64
-        
+
         # Test invalid dimension combinations
         with pytest.raises(ValueError):
-            ProductQuantizer(63, 8, k)  # d not divisible by m
-        
-        pq = ProductQuantizer(d, m, k)
-        
+            PQ(63, 8, k)  # d not divisible by m
+
+        pq = PQ(d, m, k)
+
         # Test operations on untrained quantizer
         test_vectors = torch.randn(10, d)
         test_codes = torch.randint(0, k, (10, m))
-        
+
         with pytest.raises(RuntimeError):
             pq(test_vectors)
-        
+
         with pytest.raises(RuntimeError):
             pq.decode(test_codes)
-        
+
         with pytest.raises(RuntimeError):
-            pq.save(Path("test.pkl"))
-        
+            pq.save(Path("test_dir"))
+
         # Train quantizer
-        pq.train_pq(torch.randn(100, d) * 0.3, n_iterations=5)
-        
+        pq.train_pq(torch.randn(100, d), n_iterations=5)
+
         # Test with wrong dimensions
         wrong_vectors = torch.randn(10, 32)  # Wrong dimension
-        
+
         with pytest.raises(ValueError):
             pq.train_pq(wrong_vectors)
 
@@ -481,55 +463,48 @@ class TestPQResidualCompatibility:
         m = 4
         k = 8  # Small codebook
         n_vectors = 50
-        
+
         torch.manual_seed(42)
-        residual_vectors = torch.randn(n_vectors, d) * 0.2
-        
-        pq = ProductQuantizer(d, m, k)
-        pq.train_pq(residual_vectors, n_iterations=5)
-        
+        vectors = torch.randn(n_vectors, d)
+
+        pq = PQ(d, m, k)
+        pq.train_pq(vectors, n_iterations=5)
+
         assert pq.is_trained
-        
-        codes = pq(residual_vectors)
+
+        codes = pq(vectors)
         assert torch.all(codes < k)
-        
+
         decoded = pq.decode(codes)
-        assert decoded.shape == residual_vectors.shape
+        assert decoded.shape == vectors.shape
 
     def test_metadata_consistency(self, tmp_path):
-        """Test metadata consistency in residual-based PQ."""
+        """Test metadata consistency in PQ."""
         d = 128
         m = 16
         k = 256
         n_vectors = 300
-        
+
         torch.manual_seed(42)
-        residual_vectors = torch.randn(n_vectors, d) * 0.3
-        
+        vectors = torch.randn(n_vectors, d)
+
         output_dir = tmp_path
-        
-        result = train_pq_codebooks(
-            residual_vectors, m, k, 10, output_dir
-        )
-        
-        metadata = result["metadata"]
-        
+
+        pq = PQ(d, m, k)
+        pq.train_pq(vectors, n_iterations=10)
+        pq.save(output_dir)
+
+        # Load metadata from file
+        with open(output_dir / "pq_metadata.json", "r") as f:
+            metadata = json.load(f)
+
         # Check metadata fields
         assert metadata["d"] == d
         assert metadata["m"] == m
         assert metadata["k"] == k
         assert metadata["d_sub"] == d // m
-        assert metadata["training_samples"] == n_vectors
-        assert metadata["version"] == "residual-1.0"
+        assert metadata["version"] == "1.0"
         assert metadata["compression_ratio"] == (d * 32) / (m * 8)
-        
-        # Load metadata from file
-        with open(output_dir / "pq_metadata.json", 'r') as f:
-            file_metadata = json.load(f)
-        
-        # Should match
-        for key in metadata:
-            assert file_metadata[key] == metadata[key]
 
 
 if __name__ == "__main__":

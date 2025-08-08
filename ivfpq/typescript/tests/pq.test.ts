@@ -159,48 +159,6 @@ describe('ONNX PQ Models for Residual Vectors', () => {
     console.log('✅ PQEncode model produces valid codes for residual vectors')
   })
 
-  it('should decode codes correctly to residual vectors with PQDecode model', async () => {
-    // Load ONNX model
-    const modelPath = path.join(FIXTURES_DIR, 'pq_decode.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
-    })
-
-    // Generate random test codes
-    const testCodes = new Array(TEST_PARAMS.n_samples * metadata.m)
-    for (let i = 0; i < testCodes.length; i++) {
-      testCodes[i] = Math.floor(Math.random() * metadata.k)
-    }
-    
-    const codes = new ort.Tensor('int64', testCodes, [TEST_PARAMS.n_samples, metadata.m])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    // Run inference
-    const results = await session.run({
-      codes: codes,
-      codebooks: codebooks
-    })
-
-    const decodedResiduals = results.embeddings.data as Float32Array
-
-    // Verify output shape and properties
-    expect(decodedResiduals.length).toBe(TEST_PARAMS.n_samples * metadata.d)
-    
-    // Check that all values are finite
-    for (let i = 0; i < decodedResiduals.length; i++) {
-      expect(isFinite(decodedResiduals[i])).toBe(true)
-    }
-
-    // Check that decoded residuals have reasonable magnitudes (should be centered around zero)
-    let sum = 0
-    for (let i = 0; i < decodedResiduals.length; i++) {
-      sum += decodedResiduals[i]
-    }
-    const mean = sum / decodedResiduals.length
-    expect(Math.abs(mean)).toBeLessThan(0.5) // Mean should be close to zero for residuals
-
-    console.log(`✅ PQDecode model produces valid residual vectors (mean: ${mean.toFixed(6)})`)
-  })
 
   it('should compute distances correctly for residual vectors with PQDistance model', async () => {
     // Load ONNX model
@@ -303,59 +261,6 @@ describe('ONNX PQ Models for Residual Vectors', () => {
 
 describe('PQ Integration Tests for Residual Vectors', () => {
   
-  it('should encode and decode residual vectors consistently', async () => {
-    // Load models
-    const encodeModelPath = path.join(FIXTURES_DIR, 'pq_encode.onnx')
-    const decodeModelPath = path.join(FIXTURES_DIR, 'pq_decode.onnx')
-    
-    const encodeSession = await ort.InferenceSession.create(encodeModelPath, {
-      executionProviders: ['cpu']
-    })
-    const decodeSession = await ort.InferenceSession.create(decodeModelPath, {
-      executionProviders: ['cpu']
-    })
-
-    // Generate test residual vectors
-    const testResiduals = generateResidualVectors(TEST_PARAMS.n_samples, metadata.d, 789)
-
-    // Prepare data
-    const embeddings = new ort.Tensor('float32', testResiduals, [TEST_PARAMS.n_samples, metadata.d])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    // Encode
-    const encodeResults = await encodeSession.run({
-      embeddings: embeddings,
-      codebooks: codebooks
-    })
-
-    const codes = encodeResults.codes
-
-    // Decode
-    const decodeResults = await decodeSession.run({
-      codes: codes,
-      codebooks: codebooks
-    })
-
-    const reconstructed = decodeResults.embeddings.data as Float32Array
-
-    // Check reconstruction error is reasonable for residual vectors
-    let totalError = 0
-    let totalOriginalNorm = 0
-    for (let i = 0; i < testResiduals.length; i++) {
-      const error = testResiduals[i] - reconstructed[i]
-      totalError += error * error
-      totalOriginalNorm += testResiduals[i] * testResiduals[i]
-    }
-    const mse = totalError / testResiduals.length
-    const relativeError = Math.sqrt(totalError / totalOriginalNorm)
-    
-    // MSE should be reasonable for residual vectors (smaller than original vectors)
-    expect(mse).toBeLessThan(0.5) // Lower threshold for residual vectors
-    expect(mse).toBeGreaterThan(0.0)
-    expect(relativeError).toBeLessThan(0.3) // Relative error should be reasonable
-    
-    console.log(`✅ Residual vector encode-decode roundtrip - MSE: ${mse.toFixed(6)}, Relative Error: ${relativeError.toFixed(6)}`)
-  })
 
   it('should compute distances efficiently for residual vectors', async () => {
     // This test measures the efficiency of residual-based distance computation
@@ -405,52 +310,6 @@ describe('PQ Integration Tests for Residual Vectors', () => {
     console.log(`✅ Computed residual-based distances for ${TEST_PARAMS.n_references} reference vectors in top-k format`)
   })
 
-  it('should provide better accuracy with residual vectors vs original vectors', async () => {
-    // This test conceptually validates that residual-based quantization should
-    // provide better reconstruction accuracy than direct quantization
-    
-    const encodeModelPath = path.join(FIXTURES_DIR, 'pq_encode.onnx')
-    const decodeModelPath = path.join(FIXTURES_DIR, 'pq_decode.onnx')
-    
-    const encodeSession = await ort.InferenceSession.create(encodeModelPath)
-    const decodeSession = await ort.InferenceSession.create(decodeModelPath)
-
-    // Generate test residual vectors (smaller magnitude, centered around zero)
-    const testResiduals = generateResidualVectors(50, metadata.d, 111)
-
-    // Compute reconstruction error for residual vectors
-    const embeddings = new ort.Tensor('float32', testResiduals, [50, metadata.d])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    const encodeResults = await encodeSession.run({
-      embeddings: embeddings,
-      codebooks: codebooks
-    })
-
-    const decodeResults = await decodeSession.run({
-      codes: encodeResults.codes,
-      codebooks: codebooks
-    })
-
-    const reconstructed = decodeResults.embeddings.data as Float32Array
-
-    // Calculate error metrics
-    let mse = 0
-    let originalNorm = 0
-    for (let i = 0; i < testResiduals.length; i++) {
-      const error = testResiduals[i] - reconstructed[i]
-      mse += error * error
-      originalNorm += testResiduals[i] * testResiduals[i]
-    }
-    mse /= testResiduals.length
-    const relativeError = Math.sqrt(mse * testResiduals.length / originalNorm)
-
-    // Residual vectors should have good reconstruction quality
-    expect(relativeError).toBeLessThan(0.25) // Less than 25% relative error
-    expect(mse).toBeLessThan(0.2) // Low MSE for residual vectors
-
-    console.log(`✅ Residual vector reconstruction quality - MSE: ${mse.toFixed(6)}, Relative Error: ${(relativeError * 100).toFixed(2)}%`)
-  })
 })
 
 describe('PQ Performance Tests for Residual Vectors', () => {

@@ -222,7 +222,6 @@ async function instantiateModel(
   
   // Load ONNX models
   await pqModel.loadEncoder(`${pqBasePath}/pq_encode.onnx`)
-  await pqModel.loadDecoder(`${pqBasePath}/pq_decode.onnx`)
   await pqModel.loadDistanceModel(`${pqBasePath}/pq_distance.onnx`)
   console.log('PQ Model loaded successfully')
 

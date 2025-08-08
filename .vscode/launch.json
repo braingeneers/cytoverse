@@ -77,14 +77,12 @@
       "name": "ivfpq train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_train.py",
+      "program": "${workspaceFolder}/scripts/ivfpq_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "${workspaceFolder}/public/models/scimilarity/ivf",
-        "--n-partitions",
-        "64",
+        "${workspaceFolder}/public/models/scimilarity/ivfpq",
         "--max-vectors",
         "100000",
         "--n-iterations",
@@ -99,8 +97,10 @@
       "console": "integratedTerminal",
       "args": [
         "test",
-        "${workspaceFolder}/public/models/scimilarity",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
+        "${workspaceFolder}/public/models/scimilarity/ivfpq",
+        "--max-vectors",
+        "100000",
       ]
     },
     {
