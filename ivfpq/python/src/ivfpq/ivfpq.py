@@ -31,6 +31,7 @@ def _train_ivfpq(
     output_dir: Path,
     n_partitions: int = None,
     n_training_vectors: int = None,
+    sample_training_vectors: bool = False,
     max_iterations: int = 100,
     pq_m: int = 16,
     pq_k: int = 256,
@@ -43,6 +44,7 @@ def _train_ivfpq(
         output_dir: Directory to save artifacts (pq, centroids, partitions)
         n_partitions: Number of partitions (default: sqrt(n_vectors))
         n_training_vectors: Number of training vectors to use for k-means (default: all vectors)
+        sample_training_vectors: Randomly sample training vectors instead of taking first n (default: False)
         max_iterations: Maximum k-means iterations
         pq_m: Number of PQ subspaces
         pq_k: Number of centroids per PQ subspace
@@ -58,7 +60,16 @@ def _train_ivfpq(
             f"n_partitions not specified, using default: {n_partitions} (sqrt(N))"
         )
 
-    training_vectors = vectors[:n_training_vectors] if n_training_vectors else vectors
+    if n_training_vectors:
+        if sample_training_vectors:
+            # Randomly sample n_training_vectors from the entire dataset
+            indices = torch.randperm(vectors.shape[0])[:n_training_vectors]
+            training_vectors = vectors[indices]
+        else:
+            # Take the first n_training_vectors
+            training_vectors = vectors[:n_training_vectors]
+    else:
+        training_vectors = vectors
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -337,23 +348,25 @@ class IVFPQ(nn.Module):
         return top_k_indices, top_k_distances
 
     @classmethod
-    def train(
+    def build(
         cls,
         vectors: torch.Tensor,
         output_dir: Path,
         n_partitions: int = None,
         num_training_vectors: Optional[int] = None,
+        sample_training_vectors: bool = False,
         max_iterations: int = 100,
         pq_m: int = 16,
         pq_k: int = 256,
     ) -> "IVFPQ":
         """
-        Train the IVF index using residual vectors.
+        Build the IVFPQ index using residual vectors.
 
         Args:
             vectors: All vectors to be indexed [N, d]
             output_dir: Directory to save artifacts
-            training_vectors: Subset of vectors for k-means training [N_train, d] (default: use all vectors)
+            num_training_vectors: Number of training vectors to use for k-means (default: all vectors)
+            sample_training_vectors: Randomly sample training vectors instead of taking first n (default: False)
             max_iterations: Number of k-means iterations
         """
         result = _train_ivfpq(
@@ -361,6 +374,7 @@ class IVFPQ(nn.Module):
             output_dir=output_dir,
             n_partitions=n_partitions,
             n_training_vectors=num_training_vectors,
+            sample_training_vectors=sample_training_vectors,
             max_iterations=max_iterations,
             pq_m=pq_m,
             pq_k=pq_k,
@@ -372,6 +386,29 @@ class IVFPQ(nn.Module):
         assert np.all(assignments >= 0)
 
         ivf = IVFPQ.load(output_dir)
+
+
+        # # Export ONNX model for the forward method
+        # onnx_file = output_dir / "ivf_forward.onnx"
+        # dummy_query = torch.randn(vectors.shape[1])
+        # torch.onnx.export(
+        #     ivf,
+        #     (
+        #         dummy_query,
+        #         ivf.centroids.data,
+        #         4
+        #     ),  # Example inputs: query, centroids, k
+        #     onnx_file,
+        #     export_params=True,
+        #     opset_version=11,
+        #     do_constant_folding=True,
+        #     input_names=["query_vector", "centroids", "k"],
+        #     output_names=["top_k_indices", "top_k_distances"],
+        #     dynamic_axes={
+        #         "query_vector": {0: "d"},
+        #         "centroids": {0: "n_partitions", 1: "d"},
+        #     },
+        # )
 
         assert np.all(assignments < ivf.n_partitions)
 

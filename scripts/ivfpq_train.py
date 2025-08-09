@@ -13,6 +13,7 @@ Features:
 - Performance testing with trained models
 """
 
+import random
 import typer
 import torch
 import numpy as np
@@ -20,30 +21,59 @@ from pathlib import Path
 import logging
 from typing import Optional
 
-from ivfpq.ivf import train_ivf
+from ivfpq.ivfpq import IVFPQ
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+DEFAULT_SEED = 42  # Fixed seed for reproducibility
 
 app = typer.Typer(
     help="Train IVFPQ models on vectors",
     add_completion=False,
 )
 
+# New helper for reproducibility
+def _set_seed(seed: int) -> None:
+    logger.info(f"Setting global random seed: {seed}")
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():  # noqa: SIM108
+        torch.cuda.manual_seed_all(seed)
+        logger.info("CUDA available: seeded all CUDA devices")
+    # MPS (Apple Silicon) shares CPU RNG; manual_seed suffices. Log if present.
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():  # noqa: SIM108
+        logger.info("MPS backend available: seeded via torch.manual_seed")
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:  # pragma: no cover
+        pass
+
 
 def _load_vectors(vectors_path: Path, max_vectors: Optional[int] = None) -> np.ndarray:
     """Load vectors and return as a numpy array."""
     logger.info(f"Loading vectors from {vectors_path}")
-    vectors = np.load(vectors_path)
-    logger.info(
-        f"Loaded {vectors.shape[0]} vectors of dimension {vectors.shape[1]} from .npy file"
-    )
 
-    # Limit number of vectors if specified (take first max_vectors)
-    if max_vectors is not None and vectors.shape[0] > max_vectors:
-        logger.info(f"Using first {max_vectors} vectors for training")
-        vectors = vectors[:max_vectors]
+    # Use memory mapping when max_vectors is specified to avoid loading entire file
+    if max_vectors is not None:
+        vectors_mmap = np.load(vectors_path, mmap_mode="r")
+        shape = vectors_mmap.shape
+        logger.info(
+            f"Memory-mapped {shape[0]} vectors of dimension {shape[1]} from .npy file"
+        )
+
+        # Only load the required vectors into memory
+        actual_max = min(max_vectors, shape[0])
+        logger.info(f"Loading first {actual_max} vectors into memory")
+        vectors = np.array(vectors_mmap[:actual_max])
+    else:
+        # Load entire file when no limit specified
+        vectors = np.load(vectors_path)
+        logger.info(
+            f"Loaded {vectors.shape[0]} vectors of dimension {vectors.shape[1]} from .npy file"
+        )
 
     return vectors
 
@@ -64,16 +94,18 @@ def train(
         50000,
         help="Maximum number of vectors to use for k-means training (default: 50k for memory efficiency)",
     ),
-    n_iterations: int = typer.Option(
-        30, help="Number of k-means iterations for coarse quantization"
+    sample_training_vectors: bool = typer.Option(
+        False,
+        help="Randomly sample training vectors instead of taking first n (default: False)",
+    ),
+    test: bool = typer.Option(
+        False,
+        help="Run performance tests on the trained IVFPQ model after training (default: False)",
     ),
 ) -> None:
-    """
-    Train complete IVFPQ model with residual vectors for browser consumption.
+    """Train complete IVFPQ model with residual vectors for browser consumption (deterministic)."""
+    _set_seed(DEFAULT_SEED)
 
-    Creates a complete set of artifacts in the specified output directory that are
-    compatible with the browser TypeScript implementation.
-    """
     vectors = _load_vectors(vectors_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
     d = vectors_tensor.shape[1]
@@ -87,11 +119,12 @@ def train(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Train IVF with residual vectors (includes PQ training and export)
-    train_ivf(
+    _ = IVFPQ.build(
         vectors=vectors_tensor,
         output_dir=output_dir,
-        n_training_vectors=max_vectors_for_training,
-        max_iterations=n_iterations,
+        n_partitions=None,  # Use default partitioning
+        num_training_vectors=max_vectors_for_training,
+        sample_training_vectors=sample_training_vectors,
         pq_m=pq_m,
         pq_k=pq_k,
     )
@@ -104,134 +137,18 @@ def train(
     logger.info(f"  - pq_*.npy: binary codebooks and metadata")
     logger.info(f"  - ivf_metadata.json: training metadata")
 
-
-def _test_ivfpq_search(
-    model_path: Path,
-    vectors: torch.Tensor,
-    n_probe_values: list[int],
-    n_test: int = 100,
-) -> None:
-    """Test IVFPQ search performance using the trained residual model."""
-    from ivfpq.ivf import search_ivf, load_centroids_binary
-    import json
-
-    n_test = min(n_test, vectors.shape[0])
-    test_queries = vectors[:n_test]
-
-    logger.info(f"IVFPQ Search Results:")
-    logger.info(f"  Test queries: {n_test}")
-
-    # Load metadata
-    metadata_file = model_path / "ivf_metadata.json"
-    with open(metadata_file, "r") as f:
-        metadata = json.load(f)
-
-    n_partitions = metadata["n_partitions"]
-    logger.info(f"  Total partitions: {n_partitions}")
-
-    # Load centroids
-    centroids_file = model_path / "centroids.bin"
-    centroids = load_centroids_binary(centroids_file)
-
-    # Test with different n_probe values
-    for n_probe in n_probe_values:
-        if n_probe > n_partitions:
-            continue
-
-        total_candidates = 0
-
-        for query_vector in test_queries[: min(10, n_test)]:  # Test subset for speed
-            try:
-                vector_ids, distances = search_ivf(
-                    query_vector=query_vector,
-                    centroids=centroids,
-                    n_probe=n_probe,
-                    model_path=model_path,
-                    k_per_partition=50,
-                    verbose=False,
-                )
-                total_candidates += len(vector_ids)
-            except Exception as e:
-                logger.warning(f"Search failed for query: {e}")
-
-        avg_candidates = (
-            total_candidates / min(10, n_test) if total_candidates > 0 else 0
-        )
-        search_fraction = (
-            avg_candidates / metadata["total_vectors"]
-            if metadata["total_vectors"] > 0
-            else 0
-        )
-
-        logger.info(
-            f"  n_probe={n_probe}: avg {avg_candidates:.1f} candidates ({search_fraction:.2%} of dataset)"
-        )
-
-
-def _test_ivfpq_accuracy(
-    model_path: Path, vectors: torch.Tensor, n_test: int = 10, k: int = 50
-) -> None:
-    """Test IVFPQ accuracy by searching for random vectors and checking if their indices are returned."""
-    from ivfpq.ivf import search_ivf, load_centroids_binary
-    import json
-    import random
-
-    logger.info(f"IVFPQ Accuracy Test:")
-    logger.info(f"  Test queries: {n_test}")
-    logger.info(f"  k (top results): {k}")
-
-    # Load metadata
-    metadata_file = model_path / "ivf_metadata.json"
-    with open(metadata_file, "r") as f:
-        metadata = json.load(f)
-
-    # Load centroids
-    centroids_file = model_path / "centroids.bin"
-    centroids = load_centroids_binary(centroids_file)
-
-    # Test with different n_probe values
-    n_probe_values = [1, 2, 4, 8, 16]
-
-    for n_probe in n_probe_values:
-        if n_probe > metadata["n_partitions"]:
-            continue
-
-        correct_retrievals = 0
-        total_tests = 0
-
-        for _ in range(n_test):
-            # Pick a random vector index
-            random_idx = random.randint(0, vectors.shape[0] - 1)
-            query_vector = vectors[random_idx]
-
-            try:
-                vector_ids, distances = search_ivf(
-                    query_vector=query_vector,
-                    centroids=centroids,
-                    n_probe=n_probe,
-                    model_path=model_path,
-                    k_per_partition=k,
-                    verbose=False,
-                )
-
-                # Check if the original index is in the returned results
-                if random_idx in vector_ids:
-                    correct_retrievals += 1
-
-                total_tests += 1
-
-            except Exception as e:
-                logger.warning(f"Search failed for query index {random_idx}: {e}")
-
-        accuracy = correct_retrievals / total_tests if total_tests > 0 else 0
-
-        logger.info(
-            f"  n_probe={n_probe}: {correct_retrievals}/{total_tests} correct ({accuracy:.1%} accuracy)"
+    if test:
+        logger.info("Running performance tests on trained IVFPQ model...")
+        measure_recall(
+            vectors_path=vectors_path,
+            model_path=output_dir,
+            max_vectors=max_vectors,
+            n_queries=100,  # Default number of queries for testing
         )
 
 
 @app.command()
-def test(
+def measure_recall(
     vectors_path: Path = typer.Argument(
         ..., help="Path to vectors.npy file", exists=True
     ),
@@ -241,17 +158,19 @@ def test(
     max_vectors: Optional[int] = typer.Option(
         None, help="Maximum number of vectors to test (None = all)"
     ),
-    n_queries: int = typer.Option(10, help="Number of test queries to run"),
+    n_queries: int = typer.Option(100, help="Number of test queries to run"),
 ) -> None:
     """
-    Test IVFPQ search performance on trained model.
+    Test IVFPQ recall performance on trained model.
 
     This command tests the trained IVFPQ model using residual vectors
-    and reports search performance statistics.
+    and reports recall performance statistics.
     """
+    _set_seed(DEFAULT_SEED)
+
     logger.info(f"Testing IVFPQ model from {model_path}")
 
-    # Load vectors for testing - note this is for testing, not training
+    # Load vectors for testing
     vectors = _load_vectors(vectors_path, max_vectors)
     vectors_tensor = torch.from_numpy(vectors)
 
@@ -259,15 +178,108 @@ def test(
         f"Loaded {vectors_tensor.shape[0]:,} vectors of dimension {vectors_tensor.shape[1]} for testing"
     )
 
-    # Test search performance with different n_probe values
-    logger.info("=== Testing IVFPQ Search Performance ===")
-    _test_ivfpq_search(model_path, vectors_tensor, [1, 2, 4, 8, 16], n_queries)
+    # Load the IVFPQ model
+    ivfpq = IVFPQ.load(model_path)
 
-    # Test accuracy by searching for random vectors
-    logger.info("\n=== Testing IVFPQ Accuracy ===")
-    _test_ivfpq_accuracy(model_path, vectors_tensor, n_queries)
+    # Select random indices for testing
+    total_vectors = vectors_tensor.shape[0]
+    test_indices = random.sample(range(total_vectors), min(n_queries, total_vectors))
 
-    logger.info("IVFPQ performance testing completed")
+    logger.info(
+        f"\n=== Testing Self-Accuracy on {len(test_indices)} randomly selected vectors ==="
+    )
+
+    # Test 1: Verify that searching for randomly selected vectors yields themselves as closest
+    correct_self_matches = 0
+    for idx in test_indices:
+        query_vector = vectors_tensor[idx]
+
+        try:
+            vector_ids, _ = ivfpq.search(
+                query_vector=query_vector,
+                model_path=model_path,
+                n_probe=8,  # Use reasonable n_probe for accuracy
+                k_per_partition=50,
+            )
+
+            # Check if the first result is the query vector itself
+            if len(vector_ids) > 0 and vector_ids[0] == idx:
+                correct_self_matches += 1
+            else:
+                # Find where the vector appears in the results
+                if idx in vector_ids:
+                    position = vector_ids.index(idx) + 1
+                    logger.info(
+                        f"  Vector {idx}: ✗ Not found as closest match. Found at position {position} in results"
+                    )
+                else:
+                    logger.info(
+                        f"  Vector {idx}: ✗ Not found in top {len(vector_ids)} results"
+                    )
+
+        except Exception as e:
+            logger.warning(f"  Vector {idx}: Search failed - {e}")
+
+    self_accuracy = (
+        correct_self_matches / len(test_indices) if len(test_indices) > 0 else 0
+    )
+    logger.info(
+        f"\nSelf-accuracy: {correct_self_matches}/{len(test_indices)} ({self_accuracy:.1%})"
+    )
+
+    # Test 2: Perturb the same vectors and verify they still find the original
+    logger.info(
+        f"\n=== Testing Perturbation Accuracy on same {len(test_indices)} vectors ==="
+    )
+
+    perturbation_scale = 0.01  # Small perturbation (1% of vector magnitude)
+    correct_perturbed_matches = 0
+
+    for idx in test_indices:
+        original_vector = vectors_tensor[idx]
+
+        # Create a small perturbation
+        perturbation = (
+            torch.randn_like(original_vector)
+            * perturbation_scale
+            * torch.norm(original_vector)
+        )
+        perturbed_vector = original_vector + perturbation
+
+        try:
+            vector_ids, _ = ivfpq.search(
+                query_vector=perturbed_vector,
+                model_path=model_path,
+                n_probe=8,
+                k_per_partition=50,
+            )
+
+            # Check if the first result is the original unperturbed vector
+            if len(vector_ids) > 0 and vector_ids[0] == idx:
+                correct_perturbed_matches += 1
+            else:
+                # Find where the original vector appears in the results
+                if idx in vector_ids:
+                    position = vector_ids.index(idx) + 1
+                    logger.info(
+                        f"  Perturbed vector {idx}: ✗ Original not found as closest match. Found at position {position} in results"
+                    )
+                else:
+                    logger.info(
+                        f"  Perturbed vector {idx}: ✗ Original not found in top {len(vector_ids)} results"
+                    )
+
+        except Exception as e:
+            logger.warning(f"  Perturbed vector {idx}: Search failed - {e}")
+
+    perturbed_accuracy = (
+        correct_perturbed_matches / len(test_indices) if len(test_indices) > 0 else 0
+    )
+    logger.info(
+        f"\nPerturbation accuracy: {correct_perturbed_matches}/{len(test_indices)} ({perturbed_accuracy:.1%})"
+    )
+
+    logger.info("\nIVFPQ validation completed")
 
 
 if __name__ == "__main__":

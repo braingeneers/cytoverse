@@ -342,21 +342,23 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { tableFromIPC, Vector } from 'apache-arrow'
 import { openDB, deleteDB, DBSchema, IDBPDatabase } from 'idb'
 
-import EmbeddingWorker from './embedder?worker'
-import LabelerWorker from './labeler?worker'
+import Worker from './worker?worker'
 import ScatterPlotWebGL from './ScatterPlotWebGL.vue'
 
 // Constants
 const drawerWidth = 320
 const miniDrawerWidth = 64
 
-// Types for embedding batches
-interface EmbeddingBatch {
-  test_vector_ids: string[]
-  pq_embeddings: Uint8Array
-  umap_coordinates: number[][]
-  start_index: number
-  end_index: number
+// Types for cell updates
+interface CellUpdate {
+  type: 'cell_update'
+  cellId: string
+  x: number
+  y: number
+  label?: string
+  labelId?: number
+  confidence?: number
+  trainVectorId?: number
 }
 
 // IndexedDB schema
@@ -423,20 +425,16 @@ const xCenter = ref(0)
 const yCenter = ref(0)
 const maxRange = ref(1)
 
-// Worker management - simplified approach
-let embedderWorker: Worker | null = null
-const labelerWorkers = ref<Worker[]>([])
-const numLabelers = Math.max(1, Math.floor(navigator.hardwareConcurrency / 3))
-const labelerBusy = ref<boolean[]>(new Array(numLabelers).fill(false))
-// Keep pendingBatches outside Vue's reactivity to avoid proxy issues
-let pendingBatches: EmbeddingBatch[] = []
+// Worker management - single unified worker
+let unifiedWorker: Worker | null = null
+const cellPositions = new Map<string, { x: number, y: number }>() // Track cell positions
 
 // Site path calculation
 const sitePath = window.location.origin + window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
 
 let db: IDBPDatabase<ResultsDB> | null = null
 
-console.log(`Will create ${numLabelers} labeler workers (${navigator.hardwareConcurrency} cores available)`)
+console.log(`Using unified worker approach`)
 
 // Computed properties
 const sortedLabelCounts = computed(() => {
@@ -450,284 +448,101 @@ const normalizeCoordinates = (x: number, y: number) => {
   return [normalizedX, normalizedY]
 }
 
-// Assign pending batches to available labelers
-const assignBatchToLabeler = () => {
-  if (pendingBatches.length === 0 || labelerWorkers.value.length === 0) {
-    console.log(`No batches to assign: pending=${pendingBatches.length}, workers=${labelerWorkers.value.length}`)
-    return
+// Track cell ID to index mapping
+const cellIdToIndex = new Map<string, number>()
+
+// Handle cell updates from unified worker
+const handleCellUpdate = (update: CellUpdate) => {
+  // Normalize coordinates
+  const [normalizedX, normalizedY] = normalizeCoordinates(update.x, update.y)
+  
+  let cellIndex = cellIdToIndex.get(update.cellId)
+  
+  if (cellIndex === undefined) {
+    // New cell - add to arrays
+    cellIndex = xTestData.value.length
+    cellIdToIndex.set(update.cellId, cellIndex)
+    
+    xTestData.value.push(normalizedX)
+    yTestData.value.push(normalizedY)
+    testDataLabels.value.push(update.labelId ?? -1)
+  } else {
+    // Update existing cell
+    xTestData.value[cellIndex] = normalizedX
+    yTestData.value[cellIndex] = normalizedY
+    if (update.labelId !== undefined) {
+      testDataLabels.value[cellIndex] = update.labelId
+    }
   }
-
-  console.log(`Assigning batches: ${pendingBatches.length} pending, labelers busy: ${labelerBusy.value.map((b, i) => `${i}:${b}`).join(', ')}`)
-
-  // Find an available labeler
-  for (let i = 0; i < numLabelers; i++) {
-    if (!labelerBusy.value[i] && labelerWorkers.value[i]) {
-      const batch = pendingBatches.shift()
-      if (!batch || !batch.test_vector_ids || !batch.pq_embeddings) {
-        console.error('Invalid batch data:', batch)
-        continue
-      }
-
-      console.log(`Assigning batch [${batch.start_index}-${batch.end_index}] to labeler ${i}`)
-      
-      // Create transferable copies to avoid Vue proxy issues
-      const message = {
-        type: 'embedding',
-        test_vector_ids: batch.test_vector_ids,
-        pq_embeddings: batch.pq_embeddings,
-        umap_coordinates: batch.umap_coordinates,
-        start_index: batch.start_index,
-        end_index: batch.end_index,
-      }
-      
-      // Use transferable objects for TypedArrays to avoid copying
-      const transferables: Transferable[] = []
-      if (batch.pq_embeddings instanceof Uint8Array) {
-        transferables.push(batch.pq_embeddings.buffer)
-      }
-      
-      labelerWorkers.value[i].postMessage(message, transferables)
-      labelerBusy.value[i] = true
-      break
+  
+  // Update label counts if labeled
+  if (update.labelId !== undefined && update.labelId >= 0 && update.labelId < categoryLabels.value.length) {
+    const label = categoryLabels.value[update.labelId]
+    labelCounts.value[label] = (labelCounts.value[label] || 0) + 1
+    totalLabeled.value += 1
+    
+    // Store in IndexedDB if available
+    if (db) {
+      const tx = db.transaction('results', 'readwrite')
+      tx.store.put(
+        {
+          labelId: update.labelId,
+          x: normalizedX,
+          y: normalizedY,
+          confidence: update.confidence ?? 0,
+        },
+        update.cellId
+      ).catch((error) => {
+        console.error('Failed to store test result:', error)
+      })
     }
   }
 }
 
-// Terminate all workers
-const terminateWorkers = () => {
-  if (embedderWorker) {
-    console.log('Terminating embedder worker...')
-    embedderWorker.terminate()
-    embedderWorker = null
+// Terminate worker
+const terminateWorker = () => {
+  if (unifiedWorker) {
+    console.log('Terminating unified worker...')
+    unifiedWorker.terminate()
+    unifiedWorker = null
   }
-
-  labelerWorkers.value.forEach((worker, idx) => {
-    console.log(`Terminating labeler worker ${idx}...`)
-    worker.terminate()
-  })
-  labelerWorkers.value = []
-  labelerBusy.value = new Array(numLabelers).fill(false)
 }
 
-// Create labeler workers
-const createLabelerWorkers = () => {
-  console.log('Creating labeler workers...')
+// Create unified worker
+const createUnifiedWorker = () => {
+  console.log('Creating unified worker...')
 
-  const workers: Worker[] = []
-  for (let i = 0; i < numLabelers; i++) {
-    const labeler = new LabelerWorker()
-    workers.push(labeler)
+  const worker = new Worker()
 
-    // Initialize labeler
-    console.log(`Initializing labeler ${i} with modelID: ${selectedModel.value}`)
-    labeler.postMessage({
-      type: 'start',
-      modelsURL: `${sitePath}/models`,
-      modelID: selectedModel.value,
-      categoryData: categoryData.value?.data[0].values || new Int32Array(0),
-      categoryDataLength: categoryData.value?.length || 0,
-    })
-
-    // Mark as busy until initialized
-    labelerBusy.value[i] = true
-
-    // Handle labeler messages
-    labeler.onmessage = (evt) => {
-      switch (evt.data.type) {
-        case 'status':
-          console.log(`Labeler ${i} status:`, evt.data.message)
-          if (evt.data.message && evt.data.message.includes('initialized successfully')) {
-            labelerBusy.value[i] = false
-            console.log(`Labeler ${i} is ready`)
-            // Try to assign any pending batches
-            assignBatchToLabeler()
-          }
-          break
-        case 'labeled':
-          console.log('Received labeled batch:', evt.data.umap_coordinates?.length, 'points')
-          console.log(`Labeled batch indices: ${evt.data.start_index} to ${evt.data.end_index}`)
-          labelerBusy.value[i] = false
-
-          // Process labeling results
-          if (
-            evt.data.train_vector_ids &&
-            evt.data.label_ids &&
-            evt.data.confidences &&
-            categoryLabels.value.length > 0
-          ) {
-            const newLabelCounts: { [label: string]: number } = {}
-            let validLabels = 0
-
-            // First, calculate counts and prepare label updates
-            const labelUpdates: { index: number; categoryIndex: number; confidence: number }[] = []
-
-            for (let idx = 0; idx < evt.data.train_vector_ids.length; idx++) {
-              const categoryIndex = evt.data.label_ids[idx]
-              const confidence = evt.data.confidences[idx]
-
-              if (categoryIndex >= 0 && categoryIndex < categoryLabels.value.length) {
-                const label = categoryLabels.value[categoryIndex]
-                newLabelCounts[label] = (newLabelCounts[label] || 0) + 1
-                validLabels++
-              }
-
-              labelUpdates.push({ index: evt.data.start_index + idx, categoryIndex, confidence })
-
-              // Store in IndexedDB if available
-              if (
-                db &&
-                evt.data.test_vector_ids &&
-                evt.data.umap_coordinates &&
-                evt.data.test_vector_ids[idx] &&
-                evt.data.umap_coordinates[idx]
-              ) {
-                const tx = db.transaction('results', 'readwrite')
-                tx.store
-                  .put(
-                    {
-                      labelId: categoryIndex,
-                      x: evt.data.umap_coordinates[idx][0],
-                      y: evt.data.umap_coordinates[idx][1],
-                      confidence: confidence,
-                    },
-                    evt.data.test_vector_ids[idx]
-                  )
-                  .catch((error) => {
-                    console.error('Failed to store test result:', error)
-                  })
-              }
-            }
-
-            // Batch update test labels
-            const updated = [...testDataLabels.value]
-            for (const { index, categoryIndex } of labelUpdates) {
-              if (index < updated.length) {
-                updated[index] = categoryIndex
-              }
-            }
-            testDataLabels.value = updated
-
-            // Update counts and progress
-            const updatedCounts = { ...labelCounts.value }
-            for (const [label, count] of Object.entries(newLabelCounts)) {
-              updatedCounts[label] = (updatedCounts[label] || 0) + count
-            }
-            labelCounts.value = updatedCounts
-
-            totalLabeled.value += validLabels
-            totalProcessed.value += evt.data.train_vector_ids.length
-
-            const progressPercent = Math.min(100, Math.round((totalProcessed.value / totalNumCells.value) * 100))
-            progress.value = progressPercent
-            statusMessage.value = `Processed ${totalProcessed.value} of ${totalNumCells.value} cells...`
-
-            if (
-              totalProcessed.value >= totalNumCells.value &&
-              pendingBatches.length === 0
-            ) {
-              isRunning.value = false
-              if (startTime.value) {
-                const endTime = Date.now()
-                const totalElapsed = Math.round((endTime - startTime.value) / 1000)
-                const minutes = Math.floor(totalElapsed / 60)
-                const seconds = totalElapsed % 60
-                const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
-                statusMessage.value = `Complete - Labeled ${totalProcessed.value.toLocaleString()} cells in ${timeStr}`
-              } else {
-                statusMessage.value = 'Processing complete'
-              }
-            }
-          }
-
-          // Try to assign next batch
-          assignBatchToLabeler()
-          break
-        case 'error':
-          console.error(`Labeler ${i} error:`, evt.data.error)
-          labelerBusy.value[i] = false
-          assignBatchToLabeler()
-          break
-      }
-    }
-  }
-
-  labelerWorkers.value = workers
-}
-
-// Create embedder worker
-const createEmbedderWorker = () => {
-  console.log('Creating embedder worker...')
-
-  const embedder = new EmbeddingWorker()
-
-  embedder.onmessage = (evt) => {
+  worker.onmessage = (evt) => {
     switch (evt.data.type) {
       case 'status':
         statusMessage.value = evt.data.message
         break
-      case 'modelDownloadProgress':
+      case 'progress':
         progress.value = Math.min(100, Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
-        statusMessage.value = 'Downloading model...'
+        totalProcessed.value = evt.data.countFinished
+        statusMessage.value = `Processed ${evt.data.countFinished} of ${evt.data.totalToProcess} cells...`
         break
-      case 'embedding': {
-        console.log('Received embedding batch:', evt.data.umap_coordinates?.length, 'points')
-        console.log(`Received embeddings: ${evt.data.start_index} to ${evt.data.end_index}`)
-        totalNumCells.value = evt.data.totalToProcess
-
-        // Initialize arrays if needed
-        if (xTestData.value.length < evt.data.totalToProcess) {
-          xTestData.value = new Array(evt.data.totalToProcess).fill(0)
-        }
-        if (yTestData.value.length < evt.data.totalToProcess) {
-          yTestData.value = new Array(evt.data.totalToProcess).fill(0)
-        }
-        if (testDataLabels.value.length < evt.data.totalToProcess) {
-          testDataLabels.value = new Array(evt.data.totalToProcess).fill(-1)
-        }
-
-        // Plot coordinates at correct indices
-        if (evt.data.umap_coordinates && evt.data.umap_coordinates.length > 0) {
-          const updatedX = [...xTestData.value]
-          const updatedY = [...yTestData.value]
-          
-          for (let i = 0; i < evt.data.umap_coordinates.length; i++) {
-            const coordinate = evt.data.umap_coordinates[i]
-            if (coordinate && coordinate.length >= 2) {
-              const [normalizedX, normalizedY] = normalizeCoordinates(coordinate[0], coordinate[1])
-              updatedX[evt.data.start_index + i] = normalizedX
-              updatedY[evt.data.start_index + i] = normalizedY
-            }
-          }
-          
-          xTestData.value = updatedX
-          yTestData.value = updatedY
-        }
-
-        // Add to pending queue and try to assign to labeler
-        // Store raw data to avoid Vue proxy wrapping
-        const batch = {
-          test_vector_ids: evt.data.test_vector_ids,
-          pq_embeddings: evt.data.pq_embeddings,
-          umap_coordinates: evt.data.umap_coordinates,
-          start_index: evt.data.start_index,
-          end_index: evt.data.end_index,
-        }
-        pendingBatches.push(batch)
-        assignBatchToLabeler()
+      case 'cell_update':
+        handleCellUpdate(evt.data as CellUpdate)
         break
-      }
       case 'finished':
-        console.log('Embedder finished processing')
-        console.log(`Pending batches: ${pendingBatches.length}`)
-        // Try to assign any remaining pending batches
-        for (let j = 0; j < numLabelers; j++) {
-          if (pendingBatches.length > 0) {
-            assignBatchToLabeler()
-          }
+        console.log('Worker finished processing')
+        isRunning.value = false
+        if (startTime.value) {
+          const endTime = Date.now()
+          const totalElapsed = Math.round((endTime - startTime.value) / 1000)
+          const minutes = Math.floor(totalElapsed / 60)
+          const seconds = totalElapsed % 60
+          const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+          statusMessage.value = `Complete - Labeled ${totalProcessed.value.toLocaleString()} cells in ${timeStr}`
+        } else {
+          statusMessage.value = 'Processing complete'
         }
         break
       case 'error':
-        console.error('Embedder error:', evt.data.error)
+        console.error('Worker error:', evt.data.error)
         isRunning.value = false
         statusMessage.value = ''
         errorMessage.value = evt.data.error.toString()
@@ -736,8 +551,9 @@ const createEmbedderWorker = () => {
     }
   }
 
-  embedderWorker = embedder
+  unifiedWorker = worker
 }
+
 
 // WebGPU detection
 const detectWebGPU = async () => {
@@ -885,7 +701,7 @@ const loadTrainingData = async () => {
 }
 
 const start = async () => {
-  console.log('Starting embedding...', selectedFile.value?.name)
+  console.log('Starting processing...', selectedFile.value?.name)
 
   // Clear any existing test data and state
   xTestData.value = []
@@ -895,7 +711,8 @@ const start = async () => {
   totalLabeled.value = 0
   totalNumCells.value = 0
   totalProcessed.value = 0
-  pendingBatches = []
+  cellPositions.clear()
+  cellIdToIndex.clear()
 
   // Initialize or clear the IndexedDB
   try {
@@ -921,8 +738,6 @@ const start = async () => {
       },
     })
 
-    // Database is now fresh - no need to clear data
-
     // Store category labels
     const categoryTx = db.transaction('labels', 'readwrite')
     for (let i = 0; i < categoryLabels.value.length; i++) {
@@ -940,21 +755,22 @@ const start = async () => {
   progress.value = 0
   isRunning.value = true
 
-  // Create workers and start processing
-  terminateWorkers()
-  createLabelerWorkers()
-  createEmbedderWorker()
+  // Create worker and start processing
+  terminateWorker()
+  createUnifiedWorker()
 
-  // Start the embedder
-  console.log(`Starting embedder with modelID: ${selectedModel.value}`)
-  if (embedderWorker) {
-    embedderWorker.postMessage({
+  // Start the worker
+  console.log(`Starting unified worker with modelID: ${selectedModel.value}`)
+  if (unifiedWorker) {
+    unifiedWorker.postMessage({
       type: 'start',
       modelsURL: `${sitePath}/models`,
       modelID: selectedModel.value,
       h5File: selectedFile.value,
       cellRangePercent: 100,
       useWebGPU: useWebGPU.value,
+      categoryData: categoryData.value?.data[0].values || new Int32Array(0),
+      categoryDataLength: categoryData.value?.length || 0,
     })
   }
 }
@@ -974,7 +790,7 @@ const stop = () => {
     statusMessage.value = `Stopped - Labeled ${totalProcessed.value.toLocaleString()} cells in ${timeStr}`
   }
 
-  terminateWorkers()
+  terminateWorker()
 }
 
 const exportResultsToCSV = async () => {
@@ -1073,10 +889,10 @@ watch(selectedFile, (newFile) => {
   }
 })
 
-// Initialize workers when model changes
+// Initialize worker when model changes
 watch(selectedModel, () => {
-  terminateWorkers()
-  // Note: We don't create workers here, they are created on start
+  terminateWorker()
+  // Note: We don't create worker here, it is created on start
 })
 
 // Load categories when model changes
@@ -1100,9 +916,9 @@ onMounted(() => {
   window.addEventListener('resize', updateIsMobile)
 })
 
-// Cleanup workers on unmount
+// Cleanup worker on unmount
 onUnmounted(() => {
-  terminateWorkers()
+  terminateWorker()
   window.removeEventListener('resize', updateIsMobile)
 })
 </script>

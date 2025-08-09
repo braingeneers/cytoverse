@@ -1,357 +1,377 @@
 /**
- * Integrated IVFPQ (Inverted File with Product Quantization) system for approximate nearest neighbor search.
+ * IVFPQ (Inverted File with Product Quantization) implementation for approximate nearest neighbor search.
  * 
- * This module combines IVF partitioning with PQ compression to enable fast ANN search
- * on large datasets using residual vectors for improved accuracy.
+ * This module uses pre-trained IVFPQ models from the Python pipeline to perform ANN search
+ * using ONNX models for distance computation with residual vectors.
  * 
- * Supports:
- * - Loading pre-trained IVFPQ models from Python pipeline
- * - ONNX model inference for IVF partition selection
- * - Residual-based PQ distance computation
- * - Browser and Node.js environments
- * - HTTP fetching for browser-based workers
+ * Supports both HTTP and file system access for model artifacts.
  */
 
-import * as ort from 'onnxruntime-web'
-import { InvertedFileIndex } from './ivf'
-import { ProductQuantizer, SearchResults, PQMetadata, loadPQMetadata } from './pq'
+import { PQDistance } from './pq'
 
 /**
- * IVFPQ search configuration
- */
-export interface IVFPQConfig {
-  n_probe: number  // Number of partitions to search
-  k: number        // Number of nearest neighbors to return
-  basePath?: string // Base path for loading model artifacts
-}
-
-/**
- * IVFPQ metadata structure
+ * IVFPQ metadata structure matching Python output
  */
 export interface IVFPQMetadata {
-  ivf: {
-    n_partitions: number
-    d: number
-    version: string
-  }
-  pq: PQMetadata
+  d: number
+  n_partitions: number
+  pq_m: number
+  pq_k: number
+  total_vectors: number
+  max_iterations: number
+  inertia: number
+  partition_sizes: { [key: string]: number }
+  centroids_shape: number[]
+  version: string
 }
 
 /**
- * IVFPQ search results with global indices
+ * PQ metadata structure
  */
-export interface IVFPQSearchResults {
-  indices: number[]    // Global vector indices in original dataset
-  distances: number[]  // Distances to query vector
-  partitions?: number[] // Partition IDs where results were found (optional)
+export interface PQMetadata {
+  d: number
+  m: number
+  k: number
+  d_sub: number
+  compression_ratio: number
+  codebooks_shape: number[]
+  codebooks_size: number
+  training_samples: number
+  max_iterations: number
+  version: string
 }
 
 /**
- * Integrated IVFPQ system for ANN search using residual vectors
+ * Partition data loaded from binary files
+ */
+interface PartitionData {
+  vector_ids: Int32Array
+  pq_codes: Uint8Array
+  size: number
+}
+
+/**
+ * Search configuration
+ */
+export interface SearchConfig {
+  n_probe: number
+  k: number
+}
+
+/**
+ * Search results
+ */
+export interface SearchResults {
+  indices: number[]
+  distances: number[]
+}
+
+/**
+ * IVFPQ system for ANN search using pre-trained models
  */
 export class IVFPQ {
-  private ivf: InvertedFileIndex
-  private pq: ProductQuantizer
-  private ivfSession: ort.InferenceSession | null = null
-  private metadata: IVFPQMetadata | null = null
   private basePath: string
+  private useHttp: boolean
+  private metadata: IVFPQMetadata | null = null
+  private pqMetadata: PQMetadata | null = null
+  private centroids: Float32Array | null = null
+  private codebooks: Float32Array | null = null
+  private pqDistance: PQDistance | null = null
+  private partitionCache: Map<number, PartitionData> = new Map()
   
   constructor(basePath: string) {
     this.basePath = basePath
-    this.ivf = new InvertedFileIndex(basePath)
-    this.pq = null as any // Will be initialized during load
+    this.useHttp = basePath.startsWith('http://') || basePath.startsWith('https://')
   }
   
   /**
-   * Load complete IVFPQ system from pre-trained models
+   * Load the IVFPQ system from artifacts
    */
   async load(): Promise<void> {
     console.log(`Loading IVFPQ system from ${this.basePath}`)
     
-    // Load IVF metadata and centroids
-    await this.ivf.loadMetadata()
+    // Load IVF metadata
+    await this.loadMetadata()
     
-    // Load PQ metadata and create PQ instance
-    const pqMetadata = await loadPQMetadata(`${this.basePath}/pq_metadata.json`)
-    this.pq = new ProductQuantizer(pqMetadata)
+    // Load IVF centroids
+    await this.loadCentroids()
+    
+    // Load PQ metadata
+    await this.loadPQMetadata()
     
     // Load PQ codebooks
-    const codebooksResponse = await fetch(`${this.basePath}/pq_codebooks.bin`)
-    if (!codebooksResponse.ok) {
-      throw new Error(`Failed to load PQ codebooks: ${codebooksResponse.statusText}`)
-    }
-    const codebooksBuffer = await codebooksResponse.arrayBuffer()
-    const codebooks = new Float32Array(codebooksBuffer)
-    this.pq.loadCodebooks(codebooks)
+    await this.loadCodebooks()
     
-    // Load PQ distance model for residual search
-    await this.pq.loadDistanceModel(`${this.basePath}/pq_distance.onnx`)
+    // Initialize PQ distance calculator
+    this.pqDistance = new PQDistance(
+      this.pqMetadata!.m,
+      this.pqMetadata!.k,
+      this.pqMetadata!.d_sub
+    )
     
-    // Try to load IVF ONNX model if available
-    try {
-      await this.loadIVFModel(`${this.basePath}/ivf_search.onnx`)
-    } catch (error) {
-      console.warn('IVF ONNX model not found, using CPU-based search')
-    }
+    // Load PQ distance ONNX model
+    await this.loadPQDistanceModel()
     
-    // Store combined metadata
-    this.metadata = {
-      ivf: {
-        n_partitions: this.ivf['metadata'].n_partitions,
-        d: this.ivf['metadata'].d,
-        version: this.ivf['metadata'].version || 'residual-1.0'
-      },
-      pq: pqMetadata
-    }
-    
-    console.log('IVFPQ system loaded successfully')
-    console.log(`  IVF: ${this.metadata.ivf.n_partitions} partitions, ${this.metadata.ivf.d}D`)
-    console.log(`  PQ: m=${pqMetadata.m}, k=${pqMetadata.k}, compression=${pqMetadata.compression_ratio}x`)
+    console.log(`IVFPQ system loaded: ${this.metadata!.n_partitions} partitions, ${this.metadata!.d}D`)
   }
   
   /**
-   * Load IVF ONNX model for accelerated partition search
+   * Load IVF metadata from JSON file
    */
-  async loadIVFModel(modelPath: string): Promise<void> {
-    try {
-      this.ivfSession = await ort.InferenceSession.create(modelPath, {
-        executionProviders: ['wasm'],
-        logSeverityLevel: 3,
-      })
-      console.log(`Loaded IVF ONNX model from ${modelPath}`)
-    } catch (error) {
-      console.error('Failed to load IVF model:', error)
-      throw error
+  private async loadMetadata(): Promise<void> {
+    const data = await this.fetchData('ivf_metadata.json', 'json')
+    this.metadata = data as IVFPQMetadata
+  }
+  
+  /**
+   * Load PQ metadata from JSON file
+   */
+  private async loadPQMetadata(): Promise<void> {
+    const data = await this.fetchData('pq_metadata.json', 'json')
+    this.pqMetadata = data as PQMetadata
+  }
+  
+  /**
+   * Load IVF centroids from binary file
+   */
+  private async loadCentroids(): Promise<void> {
+    const buffer = await this.fetchData('ivf_centroids.bin', 'arraybuffer') as ArrayBuffer
+    const view = new DataView(buffer)
+    
+    // Read header
+    const n_partitions = view.getUint32(0, true)
+    const d = view.getUint32(4, true)
+    
+    // Validate dimensions
+    if (n_partitions !== this.metadata!.n_partitions || d !== this.metadata!.d) {
+      throw new Error('Centroids dimensions mismatch with metadata')
+    }
+    
+    // Read centroids data
+    this.centroids = new Float32Array(buffer, 8)
+  }
+  
+  /**
+   * Load PQ codebooks from binary file
+   */
+  private async loadCodebooks(): Promise<void> {
+    const buffer = await this.fetchData('pq_codebooks.bin', 'arraybuffer') as ArrayBuffer
+    
+    // The file contains raw float32 array without header
+    this.codebooks = new Float32Array(buffer)
+    
+    // Validate the size matches expected dimensions
+    const expectedSize = this.pqMetadata!.m * this.pqMetadata!.k * this.pqMetadata!.d_sub
+    if (this.codebooks.length !== expectedSize) {
+      throw new Error(
+        `Codebooks size mismatch: got ${this.codebooks.length}, expected ${expectedSize} ` +
+        `(m=${this.pqMetadata!.m}, k=${this.pqMetadata!.k}, d_sub=${this.pqMetadata!.d_sub})`
+      )
     }
   }
   
   /**
-   * Search for k nearest neighbors using IVFPQ with residual vectors
-   * 
-   * @param queryVectors - Query vectors as Float32Array [batch_size, d]
-   * @param config - Search configuration
-   * @returns Search results with global indices and distances
+   * Load PQ distance ONNX model
    */
-  async search(
-    queryVectors: Float32Array,
-    config: Partial<IVFPQConfig> = {}
-  ): Promise<IVFPQSearchResults[]> {
-    if (!this.metadata) {
-      throw new Error('IVFPQ system not loaded. Call load() first.')
+  private async loadPQDistanceModel(): Promise<void> {
+    const modelPath = `${this.basePath}/pq_distance.onnx`
+    await this.pqDistance!.loadModel(modelPath)
+  }
+  
+  /**
+   * Load a partition from binary file
+   */
+  private async loadPartition(partitionId: number): Promise<PartitionData> {
+    // Check cache first
+    if (this.partitionCache.has(partitionId)) {
+      return this.partitionCache.get(partitionId)!
+    }
+    
+    const path = `partitions/partition_${partitionId.toString().padStart(4, '0')}.bin`
+    const buffer = await this.fetchData(path, 'arraybuffer') as ArrayBuffer
+    const view = new DataView(buffer)
+    
+    // Read header
+    const num_vectors = view.getUint32(0, true)
+    const m = view.getUint32(4, true)
+    
+    // Validate m dimension
+    if (m !== this.pqMetadata!.m) {
+      throw new Error(`Partition m=${m} doesn't match PQ m=${this.pqMetadata!.m}`)
+    }
+    
+    // Read interleaved data
+    const vector_ids = new Int32Array(num_vectors)
+    const pq_codes = new Uint8Array(num_vectors * m)
+    
+    let offset = 8
+    for (let i = 0; i < num_vectors; i++) {
+      vector_ids[i] = view.getInt32(offset, true)
+      offset += 4
+      
+      for (let j = 0; j < m; j++) {
+        pq_codes[i * m + j] = view.getUint8(offset)
+        offset += 1
+      }
+    }
+    
+    const partitionData = {
+      vector_ids,
+      pq_codes,
+      size: num_vectors
+    }
+    
+    // Cache the partition
+    this.partitionCache.set(partitionId, partitionData)
+    
+    return partitionData
+  }
+  
+  /**
+   * Find nearest partitions for a query vector
+   */
+  private findNearestPartitions(queryVector: Float32Array, nProbe: number): number[] {
+    if (!this.centroids || !this.metadata) {
+      throw new Error('IVFPQ not loaded')
+    }
+    
+    const n_partitions = this.metadata.n_partitions
+    const d = this.metadata.d
+    
+    // Compute distances to all centroids
+    const distances = new Float32Array(n_partitions)
+    for (let i = 0; i < n_partitions; i++) {
+      let dist = 0
+      for (let j = 0; j < d; j++) {
+        const diff = queryVector[j] - this.centroids[i * d + j]
+        dist += diff * diff
+      }
+      distances[i] = dist
+    }
+    
+    // Find top nProbe partitions
+    const indices = Array.from({length: n_partitions}, (_, i) => i)
+    indices.sort((a, b) => distances[a] - distances[b])
+    
+    return indices.slice(0, nProbe)
+  }
+  
+  /**
+   * Search for k nearest neighbors
+   */
+  async search(queryVector: Float32Array, config: Partial<SearchConfig> = {}): Promise<SearchResults> {
+    if (!this.metadata || !this.pqMetadata || !this.centroids || !this.codebooks || !this.pqDistance) {
+      throw new Error('IVFPQ system not loaded')
     }
     
     const { n_probe = 1, k = 10 } = config
-    const d = this.metadata.ivf.d
-    const batchSize = queryVectors.length / d
+    const d = this.metadata.d
     
-    if (queryVectors.length % d !== 0) {
-      throw new Error(`Query vectors length ${queryVectors.length} not divisible by dimension ${d}`)
+    if (queryVector.length !== d) {
+      throw new Error(`Query vector dimension ${queryVector.length} doesn't match index dimension ${d}`)
     }
     
-    const results: IVFPQSearchResults[] = []
+    // Step 1: Find nearest partitions
+    const partitionIds = this.findNearestPartitions(queryVector, n_probe)
     
-    // Process each query vector
-    for (let q = 0; q < batchSize; q++) {
-      const queryOffset = q * d
-      const queryVector = queryVectors.slice(queryOffset, queryOffset + d)
+    // Step 2: Search within each partition
+    const allCandidates: Array<{index: number, distance: number}> = []
+    
+    for (const partitionId of partitionIds) {
+      // Load partition data
+      const partition = await this.loadPartition(partitionId)
       
-      // Step 1: Find top partitions and compute query residuals
-      const { partitionIds, queryResiduals } = await this.searchPartitions(queryVector, n_probe)
-      
-      // Step 2: Search within each partition using residual-based PQ
-      const partitionResults: { indices: number[], distances: number[], partition: number }[] = []
-      
-      for (let i = 0; i < partitionIds.length; i++) {
-        const partitionId = partitionIds[i]
-        const queryResidual = queryResiduals[i]
-        
-        // Load partition data
-        const partitionData = await this.ivf.loadPartition(partitionId)
-        
-        if (partitionData.size === 0) {
-          continue // Skip empty partitions
-        }
-        
-        // Search using PQ with residual vectors
-        const searchResults = await this.pq.findNearestNeighborsResidual(
-          queryResidual,
-          partitionData.pq_codes,
-          Math.min(k, partitionData.size) // Don't request more than partition size
-        )
-        
-        // Convert local indices to global indices
-        const globalIndices = searchResults.indices.map(localIdx => 
-          partitionData.vector_ids[localIdx]
-        )
-        
-        partitionResults.push({
-          indices: globalIndices,
-          distances: searchResults.distances,
-          partition: partitionId
-        })
+      if (partition.size === 0) {
+        continue
       }
       
-      // Step 3: Merge results from all partitions and select top-k
-      const mergedResults = this.mergePartitionResults(partitionResults, k)
-      results.push(mergedResults)
-    }
-    
-    return results
-  }
-  
-  /**
-   * Search for relevant partitions using ONNX model or CPU fallback
-   */
-  private async searchPartitions(
-    queryVector: Float32Array,
-    nProbe: number
-  ): Promise<{ partitionIds: number[], queryResiduals: Float32Array[] }> {
-    
-    if (this.ivfSession) {
-      // Use ONNX model for partition search
-      const queryTensor = new ort.Tensor('float32', queryVector, [1, queryVector.length])
-      const nProbeTensor = new ort.Tensor('int64', [BigInt(nProbe)], [1])
-      
-      const outputs = await this.ivfSession.run({
-        query: queryTensor,
-        n_probe: nProbeTensor
-      })
-      
-      // Extract partition IDs and residuals
-      const partitionIds = Array.from(outputs.partition_ids.data as BigInt64Array).map(Number)
-      const residualsData = outputs.query_residuals.data as Float32Array
-      
-      // Reshape residuals [n_probe, d]
-      const d = queryVector.length
-      const queryResiduals: Float32Array[] = []
-      for (let i = 0; i < nProbe; i++) {
-        const residual = residualsData.slice(i * d, (i + 1) * d)
-        queryResiduals.push(residual)
+      // Compute query residual for this partition
+      const centroidOffset = partitionId * d
+      const queryResidual = new Float32Array(d)
+      for (let i = 0; i < d; i++) {
+        queryResidual[i] = queryVector[i] - this.centroids[centroidOffset + i]
       }
       
-      return { partitionIds, queryResiduals }
-    } else {
-      // Fallback to CPU-based search
-      return this.ivf.searchPartitions(queryVector, nProbe)
-    }
-  }
-  
-  /**
-   * Merge results from multiple partitions and select top-k globally
-   */
-  private mergePartitionResults(
-    partitionResults: { indices: number[], distances: number[], partition: number }[],
-    k: number
-  ): IVFPQSearchResults {
-    // Combine all results
-    const allResults: { index: number, distance: number, partition: number }[] = []
-    
-    for (const pr of partitionResults) {
-      for (let i = 0; i < pr.indices.length; i++) {
-        allResults.push({
-          index: pr.indices[i],
-          distance: pr.distances[i],
-          partition: pr.partition
+      // Use PQ distance to find nearest neighbors in this partition
+      const partitionResults = await this.pqDistance.search(
+        queryResidual,
+        partition.pq_codes,
+        this.codebooks,
+        Math.min(k, partition.size)
+      )
+      
+      // Convert local indices to global indices
+      for (let i = 0; i < partitionResults.indices.length; i++) {
+        const localIdx = partitionResults.indices[i]
+        const globalIdx = partition.vector_ids[localIdx]
+        allCandidates.push({
+          index: globalIdx,
+          distance: partitionResults.distances[i]
         })
       }
     }
     
-    // Sort by distance
-    allResults.sort((a, b) => a.distance - b.distance)
-    
-    // Take top-k
-    const topK = allResults.slice(0, k)
+    // Step 3: Sort all candidates and return top k
+    allCandidates.sort((a, b) => a.distance - b.distance)
+    const topK = allCandidates.slice(0, k)
     
     return {
-      indices: topK.map(r => r.index),
-      distances: topK.map(r => r.distance),
-      partitions: topK.map(r => r.partition)
+      indices: topK.map(c => c.index),
+      distances: topK.map(c => c.distance)
     }
   }
   
   /**
-   * Get system metadata
+   * Fetch data from HTTP or file system
    */
-  getMetadata(): IVFPQMetadata | null {
-    return this.metadata
+  private async fetchData(path: string, type: 'json' | 'arraybuffer'): Promise<any> {
+    const fullPath = `${this.basePath}/${path}`
+    
+    if (this.useHttp) {
+      const response = await fetch(fullPath)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`)
+      }
+      return type === 'json' ? response.json() : response.arrayBuffer()
+    } else {
+      // For Node.js file system access
+      const fs = await import('fs')
+      const fsPath = await import('path')
+      const resolvedPath = fsPath.resolve(fullPath)
+      
+      if (type === 'json') {
+        const data = await fs.promises.readFile(resolvedPath, 'utf-8')
+        return JSON.parse(data)
+      } else {
+        const buffer = await fs.promises.readFile(resolvedPath)
+        return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+      }
+    }
   }
   
   /**
-   * Check if system is loaded and ready
+   * Get metadata
+   */
+  getMetadata(): { ivf: IVFPQMetadata, pq: PQMetadata } | null {
+    if (!this.metadata || !this.pqMetadata) {
+      return null
+    }
+    return { ivf: this.metadata, pq: this.pqMetadata }
+  }
+  
+  /**
+   * Check if system is ready
    */
   isReady(): boolean {
-    return this.metadata !== null && this.pq !== null
+    return !!(this.metadata && this.pqMetadata && this.centroids && this.codebooks && this.pqDistance)
   }
 }
 
 /**
- * Factory function to create and load an IVFPQ system
+ * Create and load an IVFPQ system
  */
-export async function createIVFPQ(
-  basePath: string,
-  config?: Partial<IVFPQConfig>
-): Promise<IVFPQ> {
-  const ivfpq = new IVFPQ(config?.basePath || basePath)
+export async function createIVFPQ(basePath: string): Promise<IVFPQ> {
+  const ivfpq = new IVFPQ(basePath)
   await ivfpq.load()
   return ivfpq
 }
-
-/**
- * Load IVFPQ system for browser-based workers with HTTP fetching
- */
-export async function loadIVFPQForBrowser(
-  baseUrl: string,
-  config?: Partial<IVFPQConfig>
-): Promise<IVFPQ> {
-  // Ensure we're using HTTP/HTTPS URLs for browser context
-  if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-    throw new Error('Browser context requires HTTP/HTTPS URLs for model loading')
-  }
-  
-  return createIVFPQ(baseUrl, config)
-}
-
-/**
- * Utility to validate IVFPQ database structure
- */
-export async function validateIVFPQDatabase(basePath: string): Promise<boolean> {
-  try {
-    // Check for required files
-    const requiredFiles = [
-      'centroids.bin',
-      'pq_metadata.json',
-      'pq_codebooks.bin',
-      'pq_distance.onnx'
-    ]
-    
-    for (const file of requiredFiles) {
-      const response = await fetch(`${basePath}/${file}`)
-      if (!response.ok) {
-        console.error(`Missing required file: ${file}`)
-        return false
-      }
-    }
-    
-    // Try to load metadata to validate format
-    const pqMetadata = await loadPQMetadata(`${basePath}/pq_metadata.json`)
-    if (!pqMetadata.version || !pqMetadata.version.startsWith('residual')) {
-      console.warn('PQ metadata version not compatible with residual vectors')
-    }
-    
-    return true
-  } catch (error) {
-    console.error('Failed to validate IVFPQ database:', error)
-    return false
-  }
-}
-
-/**
- * Export types and interfaces for external use
- */
-export type { 
-  SearchResults,
-  PQMetadata
-} from './pq'
-
-export { InvertedFileIndex } from './ivf'
-export { ProductQuantizer } from './pq'

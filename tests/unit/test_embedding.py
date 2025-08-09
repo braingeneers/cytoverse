@@ -14,7 +14,7 @@ from pathlib import Path
 from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
 
-from ivfpq.ivfpq import InvertedFileIndex, load_centroids_binary
+from ivfpq import IVFPQ
 
 
 @pytest.fixture
@@ -142,23 +142,11 @@ class TestEmbeddingData:
         print(f"Computed embeddings shape: {computed_embeddings.shape}")
 
         # Load the IVF model for nearest neighbor search
-        ivf_model_path = Path("public/models/scimilarity")
+        ivf_model_path = Path("public/models/scimilarity/ivfpq")
         assert ivf_model_path.exists()
-        
-        # Load model metadata to get dimensions
-        metadata_file = ivf_model_path / "metadata.json"
-        import json
-        with open(metadata_file, "r") as f:
-            metadata = json.load(f)
-        
-        # Initialize InvertedFileIndex with correct dimensions
-        ivf = InvertedFileIndex(d=metadata["d"], n_partitions=metadata["n_partitions"])
-        
-        # Load centroids
-        centroids_file = ivf_model_path / "centroids.bin"
-        ivf.centroids.data = load_centroids_binary(centroids_file)
-        ivf.is_trained = True
 
+        ivf = IVFPQ.load(ivf_model_path)
+        
         # Search for nearest neighbors for the first embedding
         query_embedding = torch.from_numpy(computed_embeddings[0]).float()
 
@@ -167,7 +155,7 @@ class TestEmbeddingData:
             query_embedding,
             model_path=ivf_model_path,
             n_probe=4,  # Search multiple partitions for better accuracy
-            k=1,  # Get the top nearest neighbor
+            k_per_partition=1,  # Get the top nearest neighbor
         )
 
         print(

@@ -1,370 +1,239 @@
 /**
- * TypeScript tests for ONNX PQ (Product Quantization) models with residual vectors.
- * 
- * This test file validates that the exported ONNX PQ models work correctly
- * in a browser-like environment with residual vector support, comparing results
- * with expected values from Python training pipeline.
+ * Unit tests for Product Quantization distance computation.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as ort from 'onnxruntime-web'
-import fs from 'fs'
-import path from 'path'
+import { PQDistance } from '../src/pq'
 
-// Test configuration
-const FIXTURES_DIR = path.join(__dirname, '..', '..', 'python', 'tests', 'artifacts')
+// Mock onnxruntime-web
+vi.mock('onnxruntime-web', () => ({
+  InferenceSession: {
+    create: vi.fn()
+  },
+  Tensor: vi.fn((type: string, data: any, dims: number[]) => ({
+    type,
+    data,
+    dims
+  }))
+}))
 
-interface PQTestMetadata {
-  d: number
-  m: number
-  k: number
-  d_sub: number
-  compression_ratio: number
-  codebooks_shape: number[]
-  codebooks_size: number
-  training_samples: number
-  max_iterations: number
-  version: string // Should be "residual-1.0" for new implementation
-}
-
-// Helper functions to load binary data
-function loadFloat32Binary(filePath: string): Float32Array {
-  const buffer = fs.readFileSync(filePath)
-  return new Float32Array(buffer.buffer, buffer.byteOffset, buffer.length / 4)
-}
-
-function loadInt32Binary(filePath: string): Int32Array {
-  const buffer = fs.readFileSync(filePath)
-  return new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / 4)
-}
-
-function loadInt64Binary(filePath: string): BigInt64Array {
-  const buffer = fs.readFileSync(filePath)
-  return new BigInt64Array(buffer.buffer, buffer.byteOffset, buffer.length / 8)
-}
-
-function loadMetadata(filePath: string): PQTestMetadata {
-  const jsonStr = fs.readFileSync(filePath, 'utf8')
-  return JSON.parse(jsonStr) as PQTestMetadata
-}
-
-// Generate residual-like test vectors (zero-centered)
-function generateResidualVectors(numVectors: number, dimension: number, seed: number = 42): Float32Array {
-  // Simple deterministic random number generator
-  let seedValue = seed
-  const rng = () => {
-    seedValue = (seedValue * 9301 + 49297) % 233280
-    return seedValue / 233280
-  }
-
-  const vectors = new Float32Array(numVectors * dimension)
-  for (let i = 0; i < vectors.length; i++) {
-    // Generate residual-like vectors (zero-centered with moderate variance)
-    vectors[i] = (rng() - 0.5) * 0.8 // Values between -0.4 and 0.4
-  }
-  return vectors
-}
-
-// Test data - will be loaded from fixtures
-let metadata: PQTestMetadata
-let testCodebooks: Float32Array
-
-// Test parameters
-const TEST_PARAMS = {
-  n_samples: 100,
-  n_references: 1000,
-  k_nn: 50
-}
-
-beforeAll(() => {
-  // Load metadata and codebooks
-  metadata = loadMetadata(path.join(FIXTURES_DIR, 'pq_metadata.json'))
-  testCodebooks = loadFloat32Binary(path.join(FIXTURES_DIR, 'pq_codebooks.bin'))
-
-  console.log('Loaded PQ test data for residual vectors:')
-  console.log(`  Metadata: d=${metadata.d}, m=${metadata.m}, k=${metadata.k}, d_sub=${metadata.d_sub}`)
-  console.log(`  Version: ${metadata.version}`)
-  console.log(`  Codebooks shape: [${metadata.m}, ${metadata.k}, ${metadata.d_sub}]`)
-  console.log(`  Test parameters: n_samples=${TEST_PARAMS.n_samples}, n_references=${TEST_PARAMS.n_references}, k_nn=${TEST_PARAMS.k_nn}`)
-})
-
-describe('ONNX PQ Models for Residual Vectors', () => {
+describe('PQDistance', () => {
+  let mockSession: any
   
-  it('should load metadata correctly with residual version', () => {
-    expect(metadata).toBeDefined()
-    expect(metadata.d).toBeGreaterThan(0)
-    expect(metadata.m).toBeGreaterThan(0)
-    expect(metadata.k).toBeGreaterThan(0)
-    expect(metadata.d_sub).toBe(metadata.d / metadata.m)
-    expect(metadata.compression_ratio).toBeGreaterThan(1)
-    expect(metadata.codebooks_shape).toEqual([metadata.m, metadata.k, metadata.d_sub])
-    
-    // Check for residual version
-    if (metadata.version) {
-      expect(metadata.version).toBe('residual-1.0')
-      console.log('✅ Detected residual-based PQ model')
-    } else {
-      console.warn('⚠️  Legacy PQ model detected, proceeding with tests')
+  beforeEach(() => {
+    mockSession = {
+      run: vi.fn()
     }
+    vi.clearAllMocks()
+    ;(ort.InferenceSession.create as any).mockResolvedValue(mockSession)
   })
-
-  it('should load codebooks with correct shape for residual vectors', () => {
-    expect(testCodebooks.length).toBe(metadata.codebooks_size)
-    expect(testCodebooks.length).toBe(metadata.m * metadata.k * metadata.d_sub)
-    
-    // Check that codebooks contain valid data (not all zeros or NaN)
-    let nonZeroCount = 0
-    for (let i = 0; i < testCodebooks.length; i++) {
-      expect(isFinite(testCodebooks[i])).toBe(true)
-      if (Math.abs(testCodebooks[i]) > 1e-6) {
-        nonZeroCount++
-      }
-    }
-    expect(nonZeroCount).toBeGreaterThan(testCodebooks.length * 0.5) // At least 50% non-zero
-
-    console.log('✅ Codebooks loaded successfully for residual vector processing')
+  
+  describe('Constructor', () => {
+    it('should initialize with correct parameters', () => {
+      const pqDistance = new PQDistance(16, 256, 8)
+      expect(pqDistance).toBeDefined()
+    })
   })
-
-  it('should encode residual vectors correctly with PQEncode model', async () => {
-    // Load ONNX model
-    const modelPath = path.join(FIXTURES_DIR, 'pq_encode.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
-    })
-
-    // Generate test residual vectors
-    const testResiduals = generateResidualVectors(TEST_PARAMS.n_samples, metadata.d)
-
-    // Prepare inputs
-    const embeddings = new ort.Tensor('float32', testResiduals, [TEST_PARAMS.n_samples, metadata.d])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    // Run inference
-    const results = await session.run({
-      embeddings: embeddings,
-      codebooks: codebooks
-    })
-
-    const codes = results.codes.data as BigInt64Array
-
-    // Verify output shape and constraints
-    expect(codes.length).toBe(TEST_PARAMS.n_samples * metadata.m)
-    
-    // Check that all codes are within valid range
-    for (let i = 0; i < codes.length; i++) {
-      expect(Number(codes[i])).toBeGreaterThanOrEqual(0)
-      expect(Number(codes[i])).toBeLessThan(metadata.k)
-    }
-
-    console.log('✅ PQEncode model produces valid codes for residual vectors')
-  })
-
-
-  it('should compute distances correctly for residual vectors with PQDistance model', async () => {
-    // Load ONNX model
-    const modelPath = path.join(FIXTURES_DIR, 'pq_distance.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
-    })
-
-    // Generate test residual query
-    const testQueryResidual = generateResidualVectors(1, metadata.d, 123)
-
-    const testRefCodes = new Array(TEST_PARAMS.n_references * metadata.m)
-    for (let i = 0; i < testRefCodes.length; i++) {
-      testRefCodes[i] = Math.floor(Math.random() * metadata.k)
-    }
-
-    // Prepare inputs using correct input names for residual model
-    const queryResidual = new ort.Tensor('float32', testQueryResidual, [metadata.d])
-    const referenceCodes = new ort.Tensor('int64', testRefCodes, [TEST_PARAMS.n_references, metadata.m])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    // Run inference
-    const results = await session.run({
-      query_residual: queryResidual,
-      reference_codes: referenceCodes,
-      codebooks: codebooks
-    })
-
-    const indices = results.indices.data as BigInt64Array
-    const distances = results.distances.data as Float32Array
-
-    // Verify output shape and properties
-    expect(indices.length).toBe(TEST_PARAMS.k_nn)
-    expect(distances.length).toBe(TEST_PARAMS.k_nn)
-    
-    // Check that all indices are valid and unique
-    const indexSet = new Set()
-    for (let i = 0; i < indices.length; i++) {
-      const idx = Number(indices[i])
-      expect(idx).toBeGreaterThanOrEqual(0)
-      expect(idx).toBeLessThan(TEST_PARAMS.n_references)
-      expect(indexSet.has(idx)).toBe(false) // Should be unique
-      indexSet.add(idx)
-    }
-
-    // Check that distances are non-negative and sorted
-    for (let i = 0; i < distances.length; i++) {
-      expect(distances[i]).toBeGreaterThanOrEqual(0)
-      expect(isFinite(distances[i])).toBe(true)
+  
+  describe('Model Loading', () => {
+    it('should load ONNX model successfully', async () => {
+      const pqDistance = new PQDistance(16, 256, 8)
+      await pqDistance.loadModel('http://example.com/pq_distance.onnx')
       
-      if (i > 0) {
-        expect(distances[i]).toBeGreaterThanOrEqual(distances[i - 1]) // Should be sorted
-      }
-    }
-
-    console.log(`✅ PQDistance model produces valid results for residual vectors (min distance: ${distances[0].toFixed(6)})`)
-  })
-
-  it('should handle edge cases gracefully with residual vectors', async () => {
-    const modelPath = path.join(FIXTURES_DIR, 'pq_encode.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
+      expect(ort.InferenceSession.create).toHaveBeenCalledWith(
+        'http://example.com/pq_distance.onnx',
+        expect.objectContaining({
+          executionProviders: ['wasm'],
+          logSeverityLevel: 3
+        })
+      )
     })
-
-    // Test with single residual vector
-    const singleResidual = generateResidualVectors(1, metadata.d, 456)
     
-    const embeddings = new ort.Tensor('float32', singleResidual, [1, metadata.d])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    const results = await session.run({
-      embeddings: embeddings,
-      codebooks: codebooks
+    it('should throw error if model loading fails', async () => {
+      ;(ort.InferenceSession.create as any).mockRejectedValue(new Error('Failed to load'))
+      
+      const pqDistance = new PQDistance(16, 256, 8)
+      await expect(pqDistance.loadModel('http://example.com/pq_distance.onnx'))
+        .rejects.toThrow('Failed to load')
     })
-
-    const codes = results.codes.data as BigInt64Array
-    expect(codes.length).toBe(metadata.m)
-
-    // Verify all codes are within valid range
-    for (let i = 0; i < codes.length; i++) {
-      expect(Number(codes[i])).toBeGreaterThanOrEqual(0)
-      expect(Number(codes[i])).toBeLessThan(metadata.k)
-    }
-
-    console.log('✅ Edge case (single residual vector) handled correctly')
   })
-
-  it('should have reasonable compression ratio for residual vectors', () => {
-    // Calculate expected compression ratio
-    const originalBits = metadata.d * 32 // 32-bit floats
-    const compressedBits = metadata.m * 8 // 8 bits per code (since k <= 256)
-    const expectedRatio = originalBits / compressedBits
-    
-    expect(metadata.compression_ratio).toBeGreaterThan(1) // Should have compression
-    expect(metadata.compression_ratio).toBeCloseTo(expectedRatio, 1) // Should match calculated ratio
-    
-    console.log(`✅ Compression ratio for residual vectors: ${metadata.compression_ratio}x (${originalBits} -> ${compressedBits} bits)`)
-  })
-})
-
-describe('PQ Integration Tests for Residual Vectors', () => {
   
-
-  it('should compute distances efficiently for residual vectors', async () => {
-    // This test measures the efficiency of residual-based distance computation
-    
-    const modelPath = path.join(FIXTURES_DIR, 'pq_distance.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
+  describe('Search with ONNX', () => {
+    it('should perform search using ONNX model', async () => {
+      const pqDistance = new PQDistance(2, 4, 2)
+      await pqDistance.loadModel('http://example.com/pq_distance.onnx')
+      
+      // Mock ONNX output
+      mockSession.run.mockResolvedValue({
+        indices: { data: new BigInt64Array([0n, 2n, 1n]) },
+        distances: { data: new Float32Array([0.1, 0.3, 0.5]) }
+      })
+      
+      const queryResidual = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      const pqCodes = new Uint8Array([
+        0, 1,  // Vector 0
+        1, 0,  // Vector 1
+        2, 2,  // Vector 2
+      ])
+      const codebooks = new Float32Array(2 * 4 * 2) // m * k * d_sub
+      
+      const results = await pqDistance.search(queryResidual, pqCodes, codebooks, 3)
+      
+      expect(results.indices).toEqual([0, 2, 1])
+      expect(results.distances[0]).toBeCloseTo(0.1, 5)
+      expect(results.distances[1]).toBeCloseTo(0.3, 5)
+      expect(results.distances[2]).toBeCloseTo(0.5, 5)
+      
+      // Verify ONNX was called with correct tensors
+      expect(mockSession.run).toHaveBeenCalledWith({
+        query_residual: expect.objectContaining({
+          type: 'float32',
+          dims: [1, 4]
+        }),
+        pq_codes: expect.objectContaining({
+          type: 'uint8',
+          dims: [3, 2]
+        }),
+        codebooks: expect.objectContaining({
+          type: 'float32',
+          dims: [2, 4, 2]
+        }),
+        k: expect.objectContaining({
+          type: 'int64',
+          dims: [1]
+        })
+      })
     })
-
-    // Generate test residual query
-    const testQueryResidual = generateResidualVectors(1, metadata.d, 999)
-
-    const testRefCodes = new Array(TEST_PARAMS.n_references * metadata.m)
-    for (let i = 0; i < testRefCodes.length; i++) {
-      testRefCodes[i] = Math.floor(Math.random() * metadata.k)
-    }
-
-    // Measure distance computation time
-    console.time('PQ Distance Computation (Residual)')
     
-    const queryResidual = new ort.Tensor('float32', testQueryResidual, [metadata.d])
-    const referenceCodes = new ort.Tensor('int64', testRefCodes, [TEST_PARAMS.n_references, metadata.m])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    const results = await session.run({
-      query_residual: queryResidual,
-      reference_codes: referenceCodes,
-      codebooks: codebooks
+    it('should throw error if model not loaded', async () => {
+      const pqDistance = new PQDistance(2, 4, 2)
+      
+      const queryResidual = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      const pqCodes = new Uint8Array([0, 1])
+      const codebooks = new Float32Array(2 * 4 * 2)
+      
+      await expect(pqDistance.search(queryResidual, pqCodes, codebooks, 1))
+        .rejects.toThrow('Distance model not loaded')
+    })
+  })
+  
+  describe('CPU Search Fallback', () => {
+    it('should compute asymmetric distances on CPU', () => {
+      const pqDistance = new PQDistance(2, 4, 2)
+      
+      // Create test data
+      const queryResidual = new Float32Array([1, 0, 0, 1]) // d=4, m=2, d_sub=2
+      
+      // PQ codes for 3 vectors
+      const pqCodes = new Uint8Array([
+        0, 0,  // Vector 0: uses centroids [0,0] from both subquantizers
+        1, 1,  // Vector 1: uses centroids [1,1]
+        0, 1,  // Vector 2: uses centroids [0,1]
+      ])
+      
+      // Codebooks: [m=2, k=4, d_sub=2]
+      // Subquantizer 0 centroids (for first 2 dims of query)
+      // Centroid 0: [1, 0]
+      // Centroid 1: [0, 1]
+      // Centroid 2: [-1, 0]
+      // Centroid 3: [0, -1]
+      // Subquantizer 1 centroids (for last 2 dims of query)
+      // Similar pattern
+      const codebooks = new Float32Array([
+        // Subquantizer 0
+        1, 0,   // Centroid 0
+        0, 1,   // Centroid 1
+        -1, 0,  // Centroid 2
+        0, -1,  // Centroid 3
+        // Subquantizer 1
+        0, 1,   // Centroid 0
+        1, 0,   // Centroid 1
+        0, -1,  // Centroid 2
+        -1, 0,  // Centroid 3
+      ])
+      
+      const results = pqDistance.searchCPU(queryResidual, pqCodes, codebooks, 2)
+      
+      expect(results.indices).toHaveLength(2)
+      expect(results.distances).toHaveLength(2)
+      
+      // Verify that distances are computed correctly
+      // Vector 0 uses centroids [1,0] and [0,1]
+      // Query residual is [1,0,0,1]
+      // Distance = sqrt((1-1)^2 + (0-0)^2 + (0-0)^2 + (1-1)^2) = 0
+      expect(results.distances[0]).toBeCloseTo(0, 5)
+      
+      // Results should be sorted by distance
+      expect(results.distances[0]).toBeLessThanOrEqual(results.distances[1])
     })
     
-    console.timeEnd('PQ Distance Computation (Residual)')
-
-    const indices = results.indices.data as BigInt64Array
-    const distances = results.distances.data as Float32Array
+    it('should handle k larger than number of vectors', () => {
+      const pqDistance = new PQDistance(2, 4, 2)
+      
+      const queryResidual = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      const pqCodes = new Uint8Array([0, 1, 1, 0]) // 2 vectors
+      const codebooks = new Float32Array(2 * 4 * 2)
+      
+      const results = pqDistance.searchCPU(queryResidual, pqCodes, codebooks, 10)
+      
+      expect(results.indices).toHaveLength(2) // Only 2 vectors available
+      expect(results.distances).toHaveLength(2)
+    })
     
-    expect(indices.length).toBe(TEST_PARAMS.k_nn)
-    expect(distances.length).toBe(TEST_PARAMS.k_nn)
+    it('should return empty results for empty pqCodes', () => {
+      const pqDistance = new PQDistance(2, 4, 2)
+      
+      const queryResidual = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      const pqCodes = new Uint8Array(0)
+      const codebooks = new Float32Array(2 * 4 * 2)
+      
+      const results = pqDistance.searchCPU(queryResidual, pqCodes, codebooks, 5)
+      
+      expect(results.indices).toHaveLength(0)
+      expect(results.distances).toHaveLength(0)
+    })
     
-    // All distances should be non-negative and sorted
-    for (let i = 0; i < distances.length; i++) {
-      expect(distances[i]).toBeGreaterThanOrEqual(0)
-      if (i > 0) {
-        expect(distances[i]).toBeGreaterThanOrEqual(distances[i - 1])
+    it('should compute correct distances with real-world-like data', () => {
+      const pqDistance = new PQDistance(4, 16, 2)
+      
+      // 8-dimensional query residual
+      const queryResidual = new Float32Array([
+        0.5, 0.5,  // Subquantizer 0
+        -0.5, 0.5, // Subquantizer 1
+        0.5, -0.5, // Subquantizer 2
+        -0.5, -0.5 // Subquantizer 3
+      ])
+      
+      // PQ codes for 5 vectors
+      const pqCodes = new Uint8Array([
+        0, 0, 0, 0,  // Vector 0
+        15, 15, 15, 15,  // Vector 1
+        0, 5, 10, 15,  // Vector 2
+        7, 7, 7, 7,  // Vector 3
+        1, 2, 3, 4,  // Vector 4
+      ])
+      
+      // Create codebooks with known patterns
+      const codebooks = new Float32Array(4 * 16 * 2)
+      for (let subq = 0; subq < 4; subq++) {
+        for (let k = 0; k < 16; k++) {
+          const offset = (subq * 16 + k) * 2
+          // Create diverse centroids
+          codebooks[offset] = Math.cos(k * Math.PI / 8)
+          codebooks[offset + 1] = Math.sin(k * Math.PI / 8)
+        }
       }
-    }
-
-    console.log(`✅ Computed residual-based distances for ${TEST_PARAMS.n_references} reference vectors in top-k format`)
-  })
-
-})
-
-describe('PQ Performance Tests for Residual Vectors', () => {
-  it('should run residual vector encoding with reasonable performance', async () => {
-    const modelPath = path.join(FIXTURES_DIR, 'pq_encode.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
+      
+      const results = pqDistance.searchCPU(queryResidual, pqCodes, codebooks, 3)
+      
+      expect(results.indices).toHaveLength(3)
+      expect(results.distances).toHaveLength(3)
+      
+      // Verify results are sorted
+      for (let i = 1; i < results.distances.length; i++) {
+        expect(results.distances[i]).toBeGreaterThanOrEqual(results.distances[i - 1])
+      }
     })
-
-    // Generate test residual vectors
-    const testResiduals = generateResidualVectors(TEST_PARAMS.n_samples, metadata.d, 222)
-
-    // Measure encoding time
-    console.time('PQ Encoding (Residual)')
-    const embeddings = new ort.Tensor('float32', testResiduals, [TEST_PARAMS.n_samples, metadata.d])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    await session.run({
-      embeddings: embeddings,
-      codebooks: codebooks
-    })
-    console.timeEnd('PQ Encoding (Residual)')
-
-    // This test just ensures the operations complete in reasonable time
-    expect(true).toBe(true)
-  })
-
-  it('should run residual distance computation with reasonable performance', async () => {
-    const modelPath = path.join(FIXTURES_DIR, 'pq_distance.onnx')
-    const session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['cpu']
-    })
-
-    // Generate test residual query
-    const testQueryResidual = generateResidualVectors(1, metadata.d, 333)
-
-    const testRefCodes = new Array(TEST_PARAMS.n_references * metadata.m)
-    for (let i = 0; i < testRefCodes.length; i++) {
-      testRefCodes[i] = Math.floor(Math.random() * metadata.k)
-    }
-
-    // Measure distance + top-k time
-    console.time('PQ Distance + Top-K (Residual)')
-    const queryResidual = new ort.Tensor('float32', testQueryResidual, [metadata.d])
-    const referenceCodes = new ort.Tensor('int64', testRefCodes, [TEST_PARAMS.n_references, metadata.m])
-    const codebooks = new ort.Tensor('float32', testCodebooks, [metadata.m, metadata.k, metadata.d_sub])
-
-    await session.run({
-      query_residual: queryResidual,
-      reference_codes: referenceCodes,
-      codebooks: codebooks
-    })
-    console.timeEnd('PQ Distance + Top-K (Residual)')
-
-    // This test just ensures the operations complete in reasonable time
-    expect(true).toBe(true)
   })
 })

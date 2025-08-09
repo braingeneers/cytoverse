@@ -1,13 +1,10 @@
 /**
- * Unit tests for integrated IVFPQ (Inverted File with Product Quantization) system.
- * 
- * Tests the complete IVFPQ pipeline including IVF partition search, PQ distance
- * computation with residual vectors, and integrated ANN search functionality.
+ * Unit tests for IVFPQ (Inverted File with Product Quantization) system.
  */
 
-import { describe, it, expect, beforeAll, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as ort from 'onnxruntime-web'
-import { IVFPQ, createIVFPQ, loadIVFPQForBrowser, validateIVFPQDatabase } from '../src/ivfpq'
+import { IVFPQ, createIVFPQ } from '../src/ivfpq'
 
 // Mock onnxruntime-web
 vi.mock('onnxruntime-web', () => ({
@@ -41,20 +38,23 @@ describe('IVFPQ System', () => {
     ;(ort.InferenceSession.create as any).mockResolvedValue(mockSession)
   })
   
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
-  
   describe('IVFPQ Loading', () => {
-    it('should load complete IVFPQ system from base path', async () => {
-      // Mock IVF centroids binary file
-      const mockCentroidsBuffer = new ArrayBuffer(8 + 4 * 4 * 128) // header + 4 partitions × 128 dims
-      const centroidsView = new DataView(mockCentroidsBuffer)
-      centroidsView.setUint32(0, 4, true) // n_partitions
-      centroidsView.setUint32(4, 128, true) // dimension
+    it('should load complete IVFPQ system from HTTP path', async () => {
+      // Mock IVF metadata
+      const mockIVFMetadata = {
+        d: 128,
+        n_partitions: 4,
+        pq_m: 16,
+        pq_k: 256,
+        total_vectors: 1000,
+        max_iterations: 100,
+        inertia: 1234.5,
+        partition_sizes: { '0': 250, '1': 250, '2': 250, '3': 250 },
+        centroids_shape: [4, 128],
+        version: 'residual-1.1'
+      }
       
-      // Mock metadata files
-      const mockIVFMetadata = { version: 'residual-1.0' }
+      // Mock PQ metadata
       const mockPQMetadata = {
         d: 128,
         m: 16,
@@ -68,18 +68,22 @@ describe('IVFPQ System', () => {
         version: 'residual-1.0'
       }
       
-      // Mock PQ codebooks
-      const mockCodebooksBuffer = new ArrayBuffer(mockPQMetadata.codebooks_size * 4)
+      // Mock IVF centroids binary
+      const centroidsBuffer = new ArrayBuffer(8 + 4 * 128 * 4)
+      const centroidsView = new DataView(centroidsBuffer)
+      centroidsView.setUint32(0, 4, true) // n_partitions
+      centroidsView.setUint32(4, 128, true) // d
+      
+      // Mock PQ codebooks binary
+      const codebooksBuffer = new ArrayBuffer(12 + 16 * 256 * 8 * 4)
+      const codebooksView = new DataView(codebooksBuffer)
+      codebooksView.setUint32(0, 16, true) // m
+      codebooksView.setUint32(4, 256, true) // k
+      codebooksView.setUint32(8, 8, true) // d_sub
       
       // Setup fetch responses
       mockFetch.mockImplementation((url: string) => {
-        if (url.endsWith('/centroids.bin')) {
-          return Promise.resolve({
-            ok: true,
-            arrayBuffer: () => Promise.resolve(mockCentroidsBuffer)
-          })
-        }
-        if (url.endsWith('/metadata.json')) {
+        if (url.endsWith('/ivf_metadata.json')) {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve(mockIVFMetadata)
@@ -91,285 +95,216 @@ describe('IVFPQ System', () => {
             json: () => Promise.resolve(mockPQMetadata)
           })
         }
+        if (url.endsWith('/ivf_centroids.bin')) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(centroidsBuffer)
+          })
+        }
         if (url.endsWith('/pq_codebooks.bin')) {
           return Promise.resolve({
             ok: true,
-            arrayBuffer: () => Promise.resolve(mockCodebooksBuffer)
+            arrayBuffer: () => Promise.resolve(codebooksBuffer)
           })
         }
         if (url.endsWith('/pq_distance.onnx')) {
           return Promise.resolve({ ok: true })
         }
-        if (url.endsWith('/ivf_search.onnx')) {
-          return Promise.resolve({ ok: true })
-        }
-        return Promise.resolve({ ok: false })
+        return Promise.reject(new Error(`Unexpected URL: ${url}`))
       })
       
-      const ivfpq = new IVFPQ('/models')
+      const ivfpq = new IVFPQ('http://example.com/models')
       await ivfpq.load()
       
       expect(ivfpq.isReady()).toBe(true)
       
       const metadata = ivfpq.getMetadata()
-      expect(metadata).toBeDefined()
-      expect(metadata?.ivf.n_partitions).toBe(4)
-      expect(metadata?.ivf.d).toBe(128)
-      expect(metadata?.pq.m).toBe(16)
-      expect(metadata?.pq.k).toBe(256)
+      expect(metadata).not.toBeNull()
+      expect(metadata!.ivf.n_partitions).toBe(4)
+      expect(metadata!.ivf.d).toBe(128)
+      expect(metadata!.pq.m).toBe(16)
+      expect(metadata!.pq.k).toBe(256)
     })
     
-    it('should handle missing IVF ONNX model gracefully', async () => {
-      // Mock responses without IVF ONNX model
-      const mockCentroidsBuffer = new ArrayBuffer(8 + 4 * 4 * 128)
-      const centroidsView = new DataView(mockCentroidsBuffer)
-      centroidsView.setUint32(0, 4, true)
-      centroidsView.setUint32(4, 128, true)
+    it('should throw error if metadata fetch fails', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'))
       
-      const mockPQMetadata = {
-        d: 128,
-        m: 16,
-        k: 256,
-        d_sub: 8,
-        compression_ratio: 32,
-        codebooks_shape: [16, 256, 8],
-        codebooks_size: 16 * 256 * 8,
-        training_samples: 10000,
-        max_iterations: 100,
-        version: 'residual-1.0'
-      }
-      
-      mockFetch.mockImplementation((url: string) => {
-        if (url.endsWith('/ivf_search.onnx')) {
-          return Promise.resolve({ ok: false }) // Model not found
-        }
-        if (url.endsWith('/centroids.bin')) {
-          return Promise.resolve({
-            ok: true,
-            arrayBuffer: () => Promise.resolve(mockCentroidsBuffer)
-          })
-        }
-        if (url.endsWith('/pq_metadata.json')) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve(mockPQMetadata)
-          })
-        }
-        if (url.endsWith('/pq_codebooks.bin')) {
-          return Promise.resolve({
-            ok: true,
-            arrayBuffer: () => Promise.resolve(new ArrayBuffer(mockPQMetadata.codebooks_size * 4))
-          })
-        }
-        return Promise.resolve({ ok: true })
-      })
-      
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      
-      const ivfpq = new IVFPQ('/models')
-      await ivfpq.load()
-      
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('IVF ONNX model not found'))
-      expect(ivfpq.isReady()).toBe(true)
-      
-      consoleWarnSpy.mockRestore()
-    })
-    
-    it('should throw error when required files are missing', async () => {
-      mockFetch.mockResolvedValue({ ok: false, statusText: 'Not Found' })
-      
-      const ivfpq = new IVFPQ('/models')
-      await expect(ivfpq.load()).rejects.toThrow('Failed to load centroids')
+      const ivfpq = new IVFPQ('http://example.com/models')
+      await expect(ivfpq.load()).rejects.toThrow('Network error')
     })
   })
   
   describe('IVFPQ Search', () => {
-    let ivfpq: IVFPQ
-    
-    beforeEach(async () => {
-      // Setup complete mock environment for search tests
-      const mockCentroidsBuffer = new ArrayBuffer(8 + 2 * 4 * 128) // 2 partitions
-      const centroidsView = new DataView(mockCentroidsBuffer)
-      centroidsView.setUint32(0, 2, true) // n_partitions
-      centroidsView.setUint32(4, 128, true) // dimension
+    it('should perform search with loaded system', async () => {
+      // Setup complete IVFPQ system
+      const mockIVFMetadata = {
+        d: 4,
+        n_partitions: 2,
+        pq_m: 2,
+        pq_k: 4,
+        total_vectors: 10,
+        max_iterations: 10,
+        inertia: 10.0,
+        partition_sizes: { '0': 5, '1': 5 },
+        centroids_shape: [2, 4],
+        version: 'residual-1.1'
+      }
       
       const mockPQMetadata = {
-        d: 128,
-        m: 16,
-        k: 256,
-        d_sub: 8,
-        compression_ratio: 32,
-        codebooks_shape: [16, 256, 8],
-        codebooks_size: 16 * 256 * 8,
-        training_samples: 10000,
-        max_iterations: 100,
+        d: 4,
+        m: 2,
+        k: 4,
+        d_sub: 2,
+        compression_ratio: 4,
+        codebooks_shape: [2, 4, 2],
+        codebooks_size: 2 * 4 * 2,
+        training_samples: 100,
+        max_iterations: 10,
         version: 'residual-1.0'
       }
       
+      // Create binary data for centroids
+      const centroidsBuffer = new ArrayBuffer(8 + 2 * 4 * 4)
+      const centroidsView = new DataView(centroidsBuffer)
+      centroidsView.setUint32(0, 2, true) // n_partitions
+      centroidsView.setUint32(4, 4, true) // d
+      const centroidsData = new Float32Array(centroidsBuffer, 8)
+      centroidsData.set([0, 0, 0, 0, 1, 1, 1, 1]) // Two centroids
+      
+      // Create binary data for codebooks
+      const codebooksBuffer = new ArrayBuffer(12 + 2 * 4 * 2 * 4)
+      const codebooksView = new DataView(codebooksBuffer)
+      codebooksView.setUint32(0, 2, true) // m
+      codebooksView.setUint32(4, 4, true) // k
+      codebooksView.setUint32(8, 2, true) // d_sub
+      
+      // Create partition data
+      const partitionBuffer = new ArrayBuffer(8 + 3 * (4 + 2))
+      const partitionView = new DataView(partitionBuffer)
+      partitionView.setUint32(0, 3, true) // num_vectors
+      partitionView.setUint32(4, 2, true) // m
+      let offset = 8
+      // Vector 0
+      partitionView.setInt32(offset, 0, true); offset += 4
+      partitionView.setUint8(offset, 0); offset += 1
+      partitionView.setUint8(offset, 1); offset += 1
+      // Vector 1
+      partitionView.setInt32(offset, 1, true); offset += 4
+      partitionView.setUint8(offset, 1); offset += 1
+      partitionView.setUint8(offset, 0); offset += 1
+      // Vector 2
+      partitionView.setInt32(offset, 2, true); offset += 4
+      partitionView.setUint8(offset, 2); offset += 1
+      partitionView.setUint8(offset, 2); offset += 1
+      
+      // Setup fetch mock
       mockFetch.mockImplementation((url: string) => {
-        if (url.endsWith('/centroids.bin')) {
+        if (url.endsWith('/ivf_metadata.json')) {
           return Promise.resolve({
             ok: true,
-            arrayBuffer: () => Promise.resolve(mockCentroidsBuffer)
+            json: () => Promise.resolve(mockIVFMetadata)
           })
         }
         if (url.endsWith('/pq_metadata.json')) {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve(mockPQMetadata)
+          })
+        }
+        if (url.endsWith('/ivf_centroids.bin')) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(centroidsBuffer)
           })
         }
         if (url.endsWith('/pq_codebooks.bin')) {
           return Promise.resolve({
             ok: true,
-            arrayBuffer: () => Promise.resolve(new ArrayBuffer(mockPQMetadata.codebooks_size * 4))
+            arrayBuffer: () => Promise.resolve(codebooksBuffer)
           })
         }
-        if (url.includes('/partition_')) {
-          // Mock partition data
-          const mockPartitionBuffer = new ArrayBuffer(12 + 100 * 4 + 100 * 16) // header + 100 vectors
-          const partitionView = new DataView(mockPartitionBuffer)
-          partitionView.setUint32(0, 100, true) // size
-          partitionView.setUint32(4, 16, true) // m
-          partitionView.setUint32(8, 100 * 4 + 100 * 16, true) // data_size
+        if (url.endsWith('/pq_distance.onnx')) {
+          return Promise.resolve({ ok: true })
+        }
+        if (url.includes('/partitions/partition_0000.bin')) {
           return Promise.resolve({
             ok: true,
-            arrayBuffer: () => Promise.resolve(mockPartitionBuffer)
+            arrayBuffer: () => Promise.resolve(partitionBuffer)
           })
         }
-        return Promise.resolve({ ok: true })
+        return Promise.reject(new Error(`Unexpected URL: ${url}`))
       })
       
-      ivfpq = new IVFPQ('/models')
+      // Mock ONNX session run for PQ distance
+      mockSession.run.mockResolvedValue({
+        indices: { data: new BigInt64Array([0n, 1n]) },
+        distances: { data: new Float32Array([0.1, 0.2]) }
+      })
+      
+      const ivfpq = new IVFPQ('http://example.com/models')
       await ivfpq.load()
-    })
-    
-    it('should perform search with ONNX models', async () => {
-      // Mock ONNX session responses
-      mockSession.run.mockImplementation((inputs: any) => {
-        if (inputs.query) {
-          // IVF search response
-          return Promise.resolve({
-            partition_ids: { data: new BigInt64Array([0n, 1n]) },
-            query_residuals: { data: new Float32Array(2 * 128) }
-          })
-        }
-        if (inputs.query_residual) {
-          // PQ distance response
-          const indices = new BigInt64Array([0n, 1n, 2n, 3n, 4n])
-          const distances = new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5])
-          return Promise.resolve({
-            indices: { data: indices },
-            distances: { data: distances }
-          })
-        }
-        return Promise.resolve({})
-      })
       
-      const queryVector = new Float32Array(128)
-      queryVector.fill(0.5)
+      const queryVector = new Float32Array([0.1, 0.1, 0.1, 0.1])
+      const results = await ivfpq.search(queryVector, { n_probe: 1, k: 2 })
       
-      const results = await ivfpq.search(queryVector, { n_probe: 2, k: 5 })
-      
-      expect(results).toHaveLength(1)
-      expect(results[0].indices).toHaveLength(5)
-      expect(results[0].distances).toHaveLength(5)
-      expect(results[0].distances[0]).toBeLessThanOrEqual(results[0].distances[1])
-    })
-    
-    it('should handle batch queries', async () => {
-      mockSession.run.mockImplementation((inputs: any) => {
-        if (inputs.query) {
-          return Promise.resolve({
-            partition_ids: { data: new BigInt64Array([0n]) },
-            query_residuals: { data: new Float32Array(128) }
-          })
-        }
-        if (inputs.query_residual) {
-          return Promise.resolve({
-            indices: { data: new BigInt64Array([0n, 1n]) },
-            distances: { data: new Float32Array([0.1, 0.2]) }
-          })
-        }
-        return Promise.resolve({})
-      })
-      
-      const batchSize = 3
-      const queryVectors = new Float32Array(batchSize * 128)
-      
-      const results = await ivfpq.search(queryVectors, { n_probe: 1, k: 2 })
-      
-      expect(results).toHaveLength(batchSize)
-      results.forEach(result => {
-        expect(result.indices).toHaveLength(2)
-        expect(result.distances).toHaveLength(2)
-      })
-    })
-    
-    it('should throw error for invalid query dimensions', async () => {
-      const invalidQuery = new Float32Array(100) // Wrong dimension
-      
-      await expect(ivfpq.search(invalidQuery, { k: 5 }))
-        .rejects.toThrow('not divisible by dimension')
+      expect(results.indices).toHaveLength(2)
+      expect(results.distances).toHaveLength(2)
+      expect(results.indices[0]).toBe(0)
+      expect(results.indices[1]).toBe(1)
     })
     
     it('should handle empty partitions gracefully', async () => {
-      // Override partition loading to return empty partition
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes('/partition_')) {
-          const emptyBuffer = new ArrayBuffer(12) // Just header, no data
-          const view = new DataView(emptyBuffer)
-          view.setUint32(0, 0, true) // size = 0
-          view.setUint32(4, 16, true) // m
-          view.setUint32(8, 0, true) // data_size = 0
-          return Promise.resolve({
-            ok: true,
-            arrayBuffer: () => Promise.resolve(emptyBuffer)
-          })
-        }
-        // Default response for other files
-        return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)) })
-      })
+      // Setup basic mocks
+      const mockIVFMetadata = {
+        d: 4,
+        n_partitions: 2,
+        pq_m: 2,
+        pq_k: 4,
+        total_vectors: 0,
+        max_iterations: 10,
+        inertia: 0,
+        partition_sizes: { '0': 0, '1': 0 },
+        centroids_shape: [2, 4],
+        version: 'residual-1.1'
+      }
       
-      mockSession.run.mockImplementation(() => {
-        return Promise.resolve({
-          partition_ids: { data: new BigInt64Array([0n]) },
-          query_residuals: { data: new Float32Array(128) }
-        })
-      })
-      
-      const queryVector = new Float32Array(128)
-      const results = await ivfpq.search(queryVector, { n_probe: 1, k: 5 })
-      
-      expect(results[0].indices).toHaveLength(0)
-      expect(results[0].distances).toHaveLength(0)
-    })
-  })
-  
-  describe('Factory Functions', () => {
-    it('should create IVFPQ with factory function', async () => {
       const mockPQMetadata = {
-        d: 128,
-        m: 16,
-        k: 256,
-        d_sub: 8,
-        compression_ratio: 32,
-        codebooks_shape: [16, 256, 8],
-        codebooks_size: 16 * 256 * 8,
-        training_samples: 10000,
-        max_iterations: 100,
+        d: 4,
+        m: 2,
+        k: 4,
+        d_sub: 2,
+        compression_ratio: 4,
+        codebooks_shape: [2, 4, 2],
+        codebooks_size: 2 * 4 * 2,
+        training_samples: 100,
+        max_iterations: 10,
         version: 'residual-1.0'
       }
       
+      // Create empty partition
+      const emptyPartitionBuffer = new ArrayBuffer(8)
+      const emptyPartitionView = new DataView(emptyPartitionBuffer)
+      emptyPartitionView.setUint32(0, 0, true) // num_vectors = 0
+      emptyPartitionView.setUint32(4, 2, true) // m
+      
+      // Create binary data for centroids
+      const centroidsBuffer = new ArrayBuffer(8 + 2 * 4 * 4)
+      const centroidsView = new DataView(centroidsBuffer)
+      centroidsView.setUint32(0, 2, true)
+      centroidsView.setUint32(4, 4, true)
+      
+      // Create binary data for codebooks
+      const codebooksBuffer = new ArrayBuffer(12 + 2 * 4 * 2 * 4)
+      const codebooksView = new DataView(codebooksBuffer)
+      codebooksView.setUint32(0, 2, true)
+      codebooksView.setUint32(4, 4, true)
+      codebooksView.setUint32(8, 2, true)
+      
       mockFetch.mockImplementation((url: string) => {
-        if (url.endsWith('/centroids.bin')) {
-          const buffer = new ArrayBuffer(8 + 4 * 128)
-          const view = new DataView(buffer)
-          view.setUint32(0, 1, true)
-          view.setUint32(4, 128, true)
+        if (url.endsWith('/ivf_metadata.json')) {
           return Promise.resolve({
             ok: true,
-            arrayBuffer: () => Promise.resolve(buffer)
+            json: () => Promise.resolve(mockIVFMetadata)
           })
         }
         if (url.endsWith('/pq_metadata.json')) {
@@ -378,135 +313,116 @@ describe('IVFPQ System', () => {
             json: () => Promise.resolve(mockPQMetadata)
           })
         }
-        return Promise.resolve({
-          ok: true,
-          arrayBuffer: () => Promise.resolve(new ArrayBuffer(100))
-        })
-      })
-      
-      const ivfpq = await createIVFPQ('/models')
-      expect(ivfpq.isReady()).toBe(true)
-    })
-    
-    it('should load IVFPQ for browser with HTTP URLs', async () => {
-      mockFetch.mockImplementation(() => {
-        return Promise.resolve({
-          ok: true,
-          arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
-          json: () => Promise.resolve({})
-        })
-      })
-      
-      const ivfpq = await loadIVFPQForBrowser('https://example.com/models')
-      expect(ivfpq).toBeDefined()
-    })
-    
-    it('should reject non-HTTP URLs in browser context', async () => {
-      await expect(loadIVFPQForBrowser('/local/path'))
-        .rejects.toThrow('Browser context requires HTTP/HTTPS URLs')
-    })
-  })
-  
-  describe('Database Validation', () => {
-    it('should validate complete IVFPQ database', async () => {
-      mockFetch.mockImplementation((url: string) => {
-        const requiredFiles = [
-          'centroids.bin',
-          'pq_metadata.json',
-          'pq_codebooks.bin',
-          'pq_distance.onnx'
-        ]
-        
-        const filename = url.split('/').pop()
-        if (requiredFiles.includes(filename || '')) {
-          if (filename === 'pq_metadata.json') {
-            return Promise.resolve({
-              ok: true,
-              json: () => Promise.resolve({ version: 'residual-1.0' })
-            })
-          }
+        if (url.endsWith('/ivf_centroids.bin')) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(centroidsBuffer)
+          })
+        }
+        if (url.endsWith('/pq_codebooks.bin')) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(codebooksBuffer)
+          })
+        }
+        if (url.endsWith('/pq_distance.onnx')) {
           return Promise.resolve({ ok: true })
         }
-        return Promise.resolve({ ok: false })
-      })
-      
-      const isValid = await validateIVFPQDatabase('/models')
-      expect(isValid).toBe(true)
-    })
-    
-    it('should detect missing required files', async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url.endsWith('pq_distance.onnx')) {
-          return Promise.resolve({ ok: false }) // Missing file
-        }
-        if (url.endsWith('pq_metadata.json')) {
+        if (url.includes('/partitions/')) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ version: 'residual-1.0' })
+            arrayBuffer: () => Promise.resolve(emptyPartitionBuffer)
           })
         }
-        return Promise.resolve({ ok: true })
+        return Promise.reject(new Error(`Unexpected URL: ${url}`))
       })
       
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const ivfpq = new IVFPQ('http://example.com/models')
+      await ivfpq.load()
       
-      const isValid = await validateIVFPQDatabase('/models')
-      expect(isValid).toBe(false)
-      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Missing required file'))
+      const queryVector = new Float32Array([0.1, 0.1, 0.1, 0.1])
+      const results = await ivfpq.search(queryVector, { n_probe: 1, k: 5 })
       
-      consoleErrorSpy.mockRestore()
-    })
-    
-    it('should warn about incompatible PQ version', async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url.endsWith('pq_metadata.json')) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ version: 'legacy-1.0' })
-          })
-        }
-        return Promise.resolve({ ok: true })
-      })
-      
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      
-      const isValid = await validateIVFPQDatabase('/models')
-      expect(isValid).toBe(true)
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('not compatible with residual vectors'))
-      
-      consoleWarnSpy.mockRestore()
+      expect(results.indices).toHaveLength(0)
+      expect(results.distances).toHaveLength(0)
     })
   })
   
-  describe('Error Handling', () => {
-    it('should throw error when searching before loading', async () => {
-      const ivfpq = new IVFPQ('/models')
-      const queryVector = new Float32Array(128)
+  describe('Factory Functions', () => {
+    it('should create IVFPQ using factory function', async () => {
+      // Mock minimal required responses
+      const mockIVFMetadata = {
+        d: 4,
+        n_partitions: 1,
+        pq_m: 2,
+        pq_k: 4,
+        total_vectors: 10,
+        max_iterations: 10,
+        inertia: 1.0,
+        partition_sizes: { '0': 10 },
+        centroids_shape: [1, 4],
+        version: 'residual-1.1'
+      }
       
-      await expect(ivfpq.search(queryVector))
-        .rejects.toThrow('IVFPQ system not loaded')
-    })
-    
-    it('should handle network errors gracefully', async () => {
-      mockFetch.mockRejectedValue(new Error('Network error'))
+      const mockPQMetadata = {
+        d: 4,
+        m: 2,
+        k: 4,
+        d_sub: 2,
+        compression_ratio: 4,
+        codebooks_shape: [2, 4, 2],
+        codebooks_size: 2 * 4 * 2,
+        training_samples: 100,
+        max_iterations: 10,
+        version: 'residual-1.0'
+      }
       
-      const ivfpq = new IVFPQ('/models')
-      await expect(ivfpq.load()).rejects.toThrow('Network error')
-    })
-    
-    it('should handle corrupted metadata', async () => {
+      const centroidsBuffer = new ArrayBuffer(8 + 1 * 4 * 4)
+      const centroidsView = new DataView(centroidsBuffer)
+      centroidsView.setUint32(0, 1, true)
+      centroidsView.setUint32(4, 4, true)
+      
+      const codebooksBuffer = new ArrayBuffer(12 + 2 * 4 * 2 * 4)
+      const codebooksView = new DataView(codebooksBuffer)
+      codebooksView.setUint32(0, 2, true)
+      codebooksView.setUint32(4, 4, true)
+      codebooksView.setUint32(8, 2, true)
+      
       mockFetch.mockImplementation((url: string) => {
+        if (url.endsWith('/ivf_metadata.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockIVFMetadata)
+          })
+        }
         if (url.endsWith('/pq_metadata.json')) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.reject(new Error('Invalid JSON'))
+            json: () => Promise.resolve(mockPQMetadata)
           })
         }
-        return Promise.resolve({ ok: true })
+        if (url.endsWith('/ivf_centroids.bin')) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(centroidsBuffer)
+          })
+        }
+        if (url.endsWith('/pq_codebooks.bin')) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(codebooksBuffer)
+          })
+        }
+        if (url.endsWith('/pq_distance.onnx')) {
+          return Promise.resolve({ ok: true })
+        }
+        return Promise.reject(new Error(`Unexpected URL: ${url}`))
       })
       
-      const ivfpq = new IVFPQ('/models')
-      await expect(ivfpq.load()).rejects.toThrow()
+      const ivfpq = await createIVFPQ('http://example.com/models')
+      
+      expect(ivfpq).toBeInstanceOf(IVFPQ)
+      expect(ivfpq.isReady()).toBe(true)
     })
   })
 })

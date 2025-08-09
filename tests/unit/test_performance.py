@@ -22,10 +22,7 @@ import time
 from scimilarity import CellAnnotation
 from scimilarity.utils import align_dataset, lognorm_counts
 
-# import sys
-
-# sys.path.append(str(Path(__file__).parent.parent.parent / "ivfpq" / "python" / "src"))
-from ivfpq.ivf import search_ivf, load_centroids_binary
+from ivfpq import IVFPQ
 
 
 @pytest.fixture
@@ -49,7 +46,13 @@ def scimilarity_model_path():
 @pytest.fixture
 def ivfpq_model_path():
     """Path to IVFPQ model artifacts."""
-    return Path(__file__).parent.parent.parent / "public" / "models" / "scimilarity"
+    return (
+        Path(__file__).parent.parent.parent
+        / "public"
+        / "models"
+        / "scimilarity"
+        / "ivfpq"
+    )
 
 
 @pytest.fixture
@@ -115,12 +118,11 @@ def get_ivfpq_predictions_batch(
     Returns:
         predictions: Predicted cell type labels
     """
-    # Load centroids
-    centroids_path = model_path / "centroids.bin"
-    centroids = load_centroids_binary(centroids_path)
 
     predictions = []
     n_cells = len(embeddings)
+
+    ivf = IVFPQ.load(model_path)
 
     # Process in batches for efficiency
     for batch_start in range(0, n_cells, batch_size):
@@ -133,11 +135,10 @@ def get_ivfpq_predictions_batch(
             query_vector = torch.from_numpy(embedding).float()
 
             # Search using IVFPQ
-            vector_ids, distances = search_ivf(
+            vector_ids, distances = ivf.search(
                 query_vector=query_vector,
-                centroids=centroids,
-                n_probe=n_partitions_search,
                 model_path=model_path,
+                n_probe=n_partitions_search,
                 k_per_partition=k_neighbors,
             )
 
@@ -175,12 +176,12 @@ def test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path):
     """
     Test IVFPQ accuracy by searching for random embeddings from the reference dataset
     and comparing the retrieved labels with ground truth.
-    
+
     This tests the accuracy of the IVFPQ vector database alone without SCimilarity.
     """
     import random
     import json
-    
+
     # Load reference embeddings
     reference_embeddings_path = (
         Path(__file__).parent.parent.parent
@@ -189,102 +190,98 @@ def test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path):
         / "scimilarity"
         / "embeddings.npy"
     )
-    
+
     print("Loading reference embeddings...")
     reference_embeddings = np.load(reference_embeddings_path)
     print(f"  Reference embeddings shape: {reference_embeddings.shape}")
-    
+
     # Load reference labels
     print("Loading reference labels...")
     reference_labels = pd.read_parquet(reference_labels_path)
     print(f"  Reference labels shape: {reference_labels.shape}")
-    
-    # Load IVFPQ model
-    centroids_path = ivfpq_model_path / "centroids.bin"
-    centroids = load_centroids_binary(centroids_path)
-    
+
     # Test parameters
     n_test = 100  # Number of random embeddings to test
     k_neighbors = 50
     n_probe_values = [1, 2, 4, 8, 16, 32]
-    
+
     print(f"\n=== IVFPQ Self-Accuracy Test ===")
     print(f"Testing {n_test} random embeddings from reference dataset")
     print(f"k-neighbors: {k_neighbors}")
-    
+
     # Set random seed for reproducibility
     random.seed(42)
     np.random.seed(42)
-    
+
+    ivf = IVFPQ.load(ivfpq_model_path)
+
     results = {}
-    
+
     for n_probe in n_probe_values:
         print(f"\nTesting with n_probe={n_probe}:")
-        
+
         correct_predictions = 0
         total_tests = 0
-        
+
         # Sample random indices
         n_embeddings = reference_embeddings.shape[0]
         test_indices = random.sample(range(n_embeddings), min(n_test, n_embeddings))
-        
+
         for idx in test_indices:
             # Get embedding and ground truth label
             query_embedding = reference_embeddings[idx]
             ground_truth_label = reference_labels.iloc[idx]["prediction"]
-            
+
             # Convert to torch tensor
             query_vector = torch.from_numpy(query_embedding).float()
-            
+
             try:
                 # Search using IVFPQ
-                vector_ids, distances = search_ivf(
+                vector_ids, distances = ivf.search(
                     query_vector=query_vector,
-                    centroids=centroids,
-                    n_probe=n_probe,
                     model_path=ivfpq_model_path,
+                    n_probe=n_probe,
                     k_per_partition=k_neighbors,
-                    verbose=False,
                 )
-                
+
                 # Get labels for nearest neighbors
                 neighbor_labels = []
                 for vec_id in vector_ids[:k_neighbors]:
                     if vec_id < len(reference_labels):
                         label = reference_labels.iloc[vec_id]["prediction"]
                         neighbor_labels.append(label)
-                
+
                 # Vote for most common label
                 if neighbor_labels:
                     label_counts = Counter(neighbor_labels)
                     predicted_label = label_counts.most_common(1)[0][0]
-                    
+
                     if predicted_label == ground_truth_label:
                         correct_predictions += 1
-                    
+
                     total_tests += 1
-                    
+
             except Exception as e:
                 print(f"  Search failed for index {idx}: {e}")
-        
+
         if total_tests > 0:
             accuracy = correct_predictions / total_tests
             results[n_probe] = {
                 "correct": correct_predictions,
                 "total": total_tests,
-                "accuracy": accuracy
+                "accuracy": accuracy,
             }
             print(f"  Accuracy: {correct_predictions}/{total_tests} ({accuracy:.2%})")
         else:
             print(f"  No successful searches")
-    
+
     # Print summary
     print("\n=== Summary ===")
     print("n_probe | Accuracy")
     print("--------|----------")
     for n_probe, res in results.items():
         print(f"{n_probe:7d} | {res['accuracy']:.2%}")
-    
+
     # Assert minimum accuracy for reasonable n_probe values
     if 8 in results:
         min_accuracy = 0.70  # 70% accuracy threshold for n_probe=8
@@ -292,7 +289,9 @@ def test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path):
         assert (
             actual_accuracy >= min_accuracy
         ), f"Accuracy {actual_accuracy:.2%} with n_probe=8 is below required {min_accuracy:.0%} threshold"
-        print(f"\n✓ Test passed: IVFPQ self-accuracy ({actual_accuracy:.2%}) meets {min_accuracy:.0%} threshold")
+        print(
+            f"\n✓ Test passed: IVFPQ self-accuracy ({actual_accuracy:.2%}) meets {min_accuracy:.0%} threshold"
+        )
 
 
 def test_ivfpq_accuracy(
@@ -377,7 +376,7 @@ def test_ivfpq_accuracy(
 
 if __name__ == "__main__":
     import sys
-    
+
     # Run test directly
     test_data_path = (
         Path(__file__).parent.parent / "fixtures" / "GSE136831_subsample_100.h5ad"
@@ -390,7 +389,11 @@ if __name__ == "__main__":
         / "model_v1.1"
     )
     ivfpq_model_path = (
-        Path(__file__).parent.parent.parent / "public" / "models" / "scimilarity"
+        Path(__file__).parent.parent.parent
+        / "public"
+        / "models"
+        / "scimilarity"
+        / "ivfpq"
     )
     reference_labels_path = (
         Path(__file__).parent.parent.parent
@@ -409,5 +412,8 @@ if __name__ == "__main__":
         # Run comparison test (default)
         print("Running IVFPQ vs SCimilarity accuracy test...")
         test_ivfpq_accuracy(
-            test_data_path, scimilarity_model_path, ivfpq_model_path, reference_labels_path
+            test_data_path,
+            scimilarity_model_path,
+            ivfpq_model_path,
+            reference_labels_path,
         )

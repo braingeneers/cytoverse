@@ -23,8 +23,10 @@ class TestNProbeAccuracy:
     def setup_method(self):
         """Set up test fixtures with sophisticated vector distribution."""
         self.d = 128
-        self.n_vectors = 5000
-        self.n_partitions = 32
+        self.n_vectors = 10_000
+        self.n_partitions = int(
+            np.sqrt(self.n_vectors)
+        )  # Square root for balanced partitions
         self.n_clusters = 16  # Natural clusters in data
 
         # Create sophisticated vector distribution with clear structure
@@ -125,7 +127,7 @@ class TestNProbeAccuracy:
         print(
             f"\nTraining IVF with {self.n_vectors} vectors, {self.n_partitions} partitions"
         )
-        ivf = IVFPQ.train(
+        ivf = IVFPQ.build(
             vectors=self.vectors,
             n_partitions=self.n_partitions,
             output_dir=output_dir,
@@ -232,7 +234,7 @@ class TestNProbeAccuracy:
         output_dir = tmp_path
 
         # Train IVF
-        ivf = IVFPQ.train(
+        ivf = IVFPQ.build(
             vectors=self.vectors,
             n_partitions=self.n_partitions,
             output_dir=output_dir,

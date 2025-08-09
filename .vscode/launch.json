@@ -5,25 +5,25 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "scimilarity export model",
+      "name": "export scimilarity model",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_export_model.py",
+      "program": "${workspaceFolder}/scripts/scimilarity_export_model.py",
       "console": "integratedTerminal",
       "args": [
-        "data/scimilarity/model_v1.1",
-        "${workspaceFolder}/public/models/scimilarity/embedding"
+        "data/models/scimilarity/model_v1.1",
+        "${workspaceFolder}/public/models/dev/embedding"
       ]
     },
     {
       "name": "export scimilarity embedding",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/scimilarity_to_embeddings.py",
+      "program": "${workspaceFolder}/scripts/scimilarity_to_embeddings.py",
       "console": "integratedTerminal",
       "args": [
-        "data/scimilarity/model_v1.1/cellsearch",
-        "data/scimilarity",
+        "data/models/scimilarity/model_v1.1/cellsearch",
+        "data/references/dev",
         "--labels",
         "prediction",
         "--labels",
@@ -35,6 +35,28 @@
         "--num-embeddings",
         "100000",
         "--validate"
+      ]
+    },
+    {
+      "name": "ivfpq train",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/ivfpq_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "train",
+        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
+        "${workspaceFolder}/public/models/dev/ivfpq",
+        "--max-vectors",
+        "1_000_000",
+        "--max-vectors-for-training",
+        "100_000",
+        "--pq-m",
+        "32",
+        "--pq-k",
+        "256",
+        "--sample-training-vectors",
+        "--test"
       ]
     },
     {
@@ -74,36 +96,6 @@
       ]
     },
     {
-      "name": "ivfpq train",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/ivfpq_train.py",
-      "console": "integratedTerminal",
-      "args": [
-        "train",
-        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "${workspaceFolder}/public/models/scimilarity/ivfpq",
-        "--max-vectors",
-        "100000",
-        "--n-iterations",
-        "30"
-      ]
-    },
-    {
-      "name": "ivfpq test",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/ivfpq_train.py",
-      "console": "integratedTerminal",
-      "args": [
-        "test",
-        "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "${workspaceFolder}/public/models/scimilarity/ivfpq",
-        "--max-vectors",
-        "100000",
-      ]
-    },
-    {
       "name": "pumap train",
       "type": "debugpy",
       "request": "launch",
@@ -113,7 +105,7 @@
         "train",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/data/references/scimilarity/labels.parquet",
-        "${workspaceFolder}/public/models/scimilarity/pumap",
+        "${workspaceFolder}/public/models/dev/pumap",
         "--num-vectors",
         "10000"
       ]
@@ -126,7 +118,7 @@
       "console": "integratedTerminal",
       "args": [
         "map",
-        "${workspaceFolder}/public/models/scimilarity/pumap/model.onnx",
+        "${workspaceFolder}/public/models/dev/pumap/model.onnx",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/data/references/scimilarity/",
         "--num-vectors",
@@ -143,7 +135,7 @@
       "args": [
         "export",
         "${workspaceFolder}/data/scimilarity/",
-        "${workspaceFolder}/public/models/scimilarity/pumap"
+        "${workspaceFolder}/public/models/dev/pumap"
       ]
     },
     {

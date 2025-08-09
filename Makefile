@@ -60,18 +60,14 @@ ivfpq-tune:
 
 # IVF
 ivfpq-train:
-	# Note number of partitions ~ sqrt(number of vectors) rule of thumb
 	python scripts/ivfpq_train.py train \
 	data/references/$(model_id)/embeddings.npy \
-	public/models/$(model_id) \
-	--n-partitions 5000 \
-	--max-vectors-for-training 100000 \
-	--n-iterations 30
-
-ivfpq-test:
-	python scripts/ivfpq_train.py test \
-	public/models/$(model_id) \
-	data/references/$(model_id)/embeddings.npy
+	public/models/$(model_id)/ivfpq \
+	--max-vectors-for-training 2_400_000 \
+	--pq-m 32 \
+	--pq-k 256 \
+	--sample-training-vectors \
+	--test
 
 # PUMAP
 pumap-train:

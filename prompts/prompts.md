@@ -110,3 +110,13 @@ Develop a new unit test, test_performance.py, that tests the accuracy and perfor
 - Use SCimilarity to generate a set of embeddings and labels (see ingest_h5ad_as_reference).
 - Use ivfpq/python/src/ivf.py and the exported artifacts from the entire SCimilarity reference set in public/models/scimilarity to generate labels for each of the cells in the query file.
 - Compare the predicted labels to the ground truth labels and report an accuracy figure failing if its less then 99% 
+
+# Simplify embedder and labeler
+
+Let's completely refactor and simplify the worker computation of the embedder and labeler:
+- Create a new worker.ts file which will replace labeler and embedder
+- It should take an h5ad file and pull counts out exactly the same as embedder.ts does, pass these to the embedding model and generated an embeddings vector
+- Then it should run these through pumap and post the coordinates to the App.vue to plot as it currently does (un-labeled x/y)
+- It should then use ivfpq.ts to label the embeddings by searching for the 50 closest cells in the reference and reporting the consusus label - similiar to the logic currently there (ie return confidence, label, cell id etc...)
+- Finally it should yield this label, cell id and x,y from the existing pumap output to App.vue to update the plot.
+- Get rid of the pool of labelers fed by the single embedder. Instead it will stream form the h5 file and yield batches back to App.vue on its own (un-labeled x,y followed by labeled) simplifying greatly the data flow.

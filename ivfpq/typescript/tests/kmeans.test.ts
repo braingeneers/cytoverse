@@ -11,7 +11,7 @@ import fs from 'fs'
 import path from 'path'
 
 // Test configuration
-const FIXTURES_DIR = path.join(__dirname, '..', '..', 'python', 'tests', 'artifacts')
+const FIXTURES_DIR = path.join(__dirname, '..', '..', '..', 'public', 'kmeans-benchmark')
 
 interface TestMetadata {
   k: number

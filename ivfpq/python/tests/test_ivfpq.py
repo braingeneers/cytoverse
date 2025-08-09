@@ -58,7 +58,7 @@ class TestIVFResidualBasic:
         output_dir = tmp_path
 
         # Train IVF with residual vectors
-        ivf = IVFPQ.train(
+        ivf = IVFPQ.build(
             vectors=self.vectors,
             output_dir=output_dir,
             max_iterations=20,
@@ -145,7 +145,7 @@ class TestIVFResidualBasic:
         output_dir = tmp_path
 
         # Train IVF
-        ivf = IVFPQ.train(
+        ivf = IVFPQ.build(
             vectors=self.vectors,
             output_dir=output_dir,
             max_iterations=10,
@@ -194,7 +194,7 @@ class TestIVFResidualBasic:
         output_dir = tmp_path
 
         # Train and save
-        ivf = IVFPQ.train(
+        ivf = IVFPQ.build(
             vectors=self.vectors,
             output_dir=output_dir,
             max_iterations=10,
@@ -215,7 +215,6 @@ class TestIVFResidualIntegration:
         """Test with different vector dimensions."""
         for d in [64, 128, 256]:
             n_vectors = 200
-            n_partitions = 8
 
             torch.manual_seed(42)
             vectors = torch.randn(n_vectors, d)
@@ -223,7 +222,7 @@ class TestIVFResidualIntegration:
             test_output_dir = tmp_path / f"test_dim_{d}"
             test_output_dir.mkdir(exist_ok=True)
 
-            ivf = IVFPQ.train(
+            ivf = IVFPQ.build(
                 vectors=vectors,
                 output_dir=test_output_dir,
                 max_iterations=5,
@@ -242,7 +241,7 @@ class TestIVFResidualIntegration:
             test_output_dir = tmp_path / f"test_partitions_{n_partitions}"
             test_output_dir.mkdir(exist_ok=True)
 
-            ivf = IVFPQ.train(
+            ivf = IVFPQ.build(
                 vectors=vectors,
                 output_dir=test_output_dir,
                 n_partitions=n_partitions,
@@ -272,7 +271,7 @@ class TestIVFResidualIntegration:
         output_dir = tmp_path
 
         # Train
-        ivf = IVFPQ.train(
+        ivf = IVFPQ.build(
             vectors=vectors,
             output_dir=output_dir,
             max_iterations=15,

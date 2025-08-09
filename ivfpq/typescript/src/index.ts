@@ -1,9 +1,9 @@
-export { InvertedFileIndex, InvertedFileIndex as IVF } from './ivf';
-export { 
-  ProductQuantizer, 
-  ProductQuantizer as PQ,
-  loadPQMetadata,
-  loadCodebooksFromFile,
-  loadPQModel
-} from './pq';
-export type { IVFConfig, PQConfig } from './types';
+export { IVFPQ, createIVFPQ } from './ivfpq'
+export { PQDistance } from './pq'
+export type { 
+  IVFPQMetadata, 
+  PQMetadata, 
+  SearchConfig, 
+  SearchResults 
+} from './ivfpq'
+export type { PQSearchResults } from './pq'
