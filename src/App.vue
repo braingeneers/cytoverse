@@ -341,7 +341,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { tableFromIPC, Vector } from 'apache-arrow'
 import { openDB, deleteDB, DBSchema, IDBPDatabase } from 'idb'
 
 import Worker from './worker?worker'
@@ -398,9 +397,9 @@ const useWebGPU = ref(false)
 const isMobile = ref(window.innerWidth < 768)
 
 // Scatter plot data state - training data (static)
-const xTrainData = ref<Vector | null>(null)
-const yTrainData = ref<Vector | null>(null)
-const categoryData = ref<Vector | null>(null)
+const xTrainData = ref<Float32Array | null>(null)
+const yTrainData = ref<Float32Array | null>(null)
+const categoryData = ref<Int16Array | null>(null)
 const categoryLabels = ref<string[]>([])
 const isLoadingData = ref(false)
 const selectedCategory = ref('')
@@ -443,8 +442,6 @@ const scatterPlotRef = ref<{ startTimerUpdates: () => void, stopTimerUpdates: ()
 const sitePath = window.location.origin + window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
 
 let db: IDBPDatabase<ResultsDB> | null = null
-
-console.log(`Using unified worker approach`)
 
 // Computed properties
 const sortedLabelCounts = computed(() => {
@@ -717,12 +714,17 @@ const loadTrainingData = async () => {
     yCenter.value = metadata.yCenter || 0
     maxRange.value = metadata.maxRange || 1
 
-    // Load Arrow files in parallel
+    // Load binary files in parallel
     const [xResponse, yResponse, categoryResponse] = await Promise.all([
-      fetch(`${sitePath}/models/${modelID}/pumap/x.arrow`),
-      fetch(`${sitePath}/models/${modelID}/pumap/y.arrow`),
-      fetch(`${sitePath}/models/${modelID}/pumap/${selectedCategory.value}.arrow`),
+      fetch(`${sitePath}/models/${modelID}/pumap/x.bin`),
+      fetch(`${sitePath}/models/${modelID}/pumap/y.bin`),
+      fetch(`${sitePath}/models/${modelID}/pumap/${selectedCategory.value}.bin`),
     ])
+
+    // Check if all responses are successful
+    if (!xResponse.ok) throw new Error(`Failed to fetch x.bin: ${xResponse.status}`)
+    if (!yResponse.ok) throw new Error(`Failed to fetch y.bin: ${yResponse.status}`)
+    if (!categoryResponse.ok) throw new Error(`Failed to fetch ${selectedCategory.value}.bin: ${categoryResponse.status}`)
 
     const [xBuffer, yBuffer, categoryBuffer] = await Promise.all([
       xResponse.arrayBuffer(),
@@ -730,22 +732,30 @@ const loadTrainingData = async () => {
       categoryResponse.arrayBuffer(),
     ])
 
-    // Convert Arrow buffers to tables
-    const xTable = tableFromIPC(new Uint8Array(xBuffer))
-    const yTable = tableFromIPC(new Uint8Array(yBuffer))
-    const categoryTable = tableFromIPC(new Uint8Array(categoryBuffer))
+    // Convert binary buffers to typed arrays
+    console.log(`Buffer sizes: x=${xBuffer.byteLength}, y=${yBuffer.byteLength}, category=${categoryBuffer.byteLength}`)
+    
+    // Check if buffer sizes are valid
+    if (xBuffer.byteLength % 4 !== 0) {
+      throw new Error(`X buffer size ${xBuffer.byteLength} is not a multiple of 4`)
+    }
+    if (yBuffer.byteLength % 4 !== 0) {
+      throw new Error(`Y buffer size ${yBuffer.byteLength} is not a multiple of 4`)
+    }
+    if (categoryBuffer.byteLength % 2 !== 0) {
+      throw new Error(`Category buffer size ${categoryBuffer.byteLength} is not a multiple of 2`)
+    }
+    
+    const xData = new Float32Array(xBuffer)
+    const yData = new Float32Array(yBuffer)
+    const categoryIndices = new Int16Array(categoryBuffer)
 
-    // Extract vectors
-    const xVector = xTable.getChild('x')!
-    const yVector = yTable.getChild('y')!
-    const categoryVector = categoryTable.getChild(selectedCategory.value)!
-
-    xTrainData.value = xVector
-    yTrainData.value = yVector
-    categoryData.value = categoryVector
+    xTrainData.value = xData
+    yTrainData.value = yData
+    categoryData.value = categoryIndices
     categoryLabels.value = labels
 
-    console.log(`Loaded training data: ${xVector.length} points, ${labels.length} category labels`)
+    console.log(`Loaded training data: ${xData.length} points, ${labels.length} category labels`)
   } catch (error) {
     console.error('Error loading training data:', error)
     // Switch to an available category silently
@@ -827,7 +837,7 @@ const start = async () => {
       modelID: selectedModel.value,
       h5File: selectedFile.value,
       useWebGPU: useWebGPU.value,
-      categoryData: categoryData.value?.data[0].values || new Int32Array(0),
+      categoryData: categoryData.value || new Int16Array(0),
       categoryDataLength: categoryData.value?.length || 0,
     })
   }

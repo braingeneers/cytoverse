@@ -5,7 +5,10 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   optimizeDeps: {
-    exclude: ['onnxruntime-web', 'parquet-wasm'],
+    exclude: [
+      'onnxruntime-web', 
+      // 'parquet-wasm',
+    ],
   },
   base: './', // For gh-pages
   server: {
@@ -42,10 +45,10 @@ export default defineConfig({
           src: 'node_modules/onnxruntime-web/dist/*.wasm',
           dest: 'assets',
         },
-        {
-          src: 'node_modules/parquet-wasm/esm/*.wasm',
-          dest: 'assets',
-        },
+        // {
+        //   src: 'node_modules/parquet-wasm/esm/*.wasm',
+        //   dest: 'assets',
+        // },
         {
           src: 'public/*',
           dest: './',

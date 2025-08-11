@@ -14,8 +14,6 @@ import scanpy as sc
 from tqdm import tqdm
 
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
@@ -248,19 +246,19 @@ def export(
         ..., help="Path to input directory containing mappings.npy and labels.parquet"
     ),
     output_path: Path = typer.Argument(
-        ..., help="Path to output directory for Arrow files and metadata"
+        ..., help="Path to output directory for binary files and metadata"
     ),
 ) -> None:
     """
-    Export mappings and labels to Arrow columnar format files.
+    Export mappings and labels to binary format files.
 
     NOTE: Only the first len(mappings.npy) x and y are exported, but
     categories are exported for all rows in labels.parquet.
 
     Reads mappings.npy and labels.parquet from input_path and outputs:
-    - x.arrow and y.arrow: Coordinate columns in Arrow format for each mapping
-    - {column_name}.arrow: Category indices for each label column as int16
-    - metadata.json: Contains categories mapping for label columns
+    - x.bin and y.bin: Coordinate arrays as float32 binary files
+    - {column_name}.bin: Category indices for each label column as int16 binary files
+    - metadata.json: Contains categories mapping for label columns and data shapes
     """
     typer.echo(f"Exporting data from {input_path} to {output_path}")
 
@@ -313,23 +311,19 @@ def export(
         f"Normalized Y range: [{np.min(normalized_mappings[:, 1]):.3f}, {np.max(normalized_mappings[:, 1]):.3f}]"
     )
 
-    # Export x and y coordinates as separate Arrow files
+    # Export x and y coordinates as separate binary files
     typer.echo("Exporting coordinate columns...")
 
     # X coordinates
-    x_array = pa.array(normalized_mappings[:, 0], type=pa.float32())
-    x_table = pa.table([x_array], names=["x"])
-    x_path = output_path / "x.arrow"
-    with pa.ipc.new_file(x_path, x_table.schema) as writer:
-        writer.write_table(x_table)
+    x_data = normalized_mappings[:, 0].astype(np.float32)
+    x_path = output_path / "x.bin"
+    x_data.tofile(x_path)
     typer.echo(f"Saved X coordinates to {x_path}")
 
     # Y coordinates
-    y_array = pa.array(normalized_mappings[:, 1], type=pa.float32())
-    y_table = pa.table([y_array], names=["y"])
-    y_path = output_path / "y.arrow"
-    with pa.ipc.new_file(y_path, y_table.schema) as writer:
-        writer.write_table(y_table)
+    y_data = normalized_mappings[:, 1].astype(np.float32)
+    y_path = output_path / "y.bin"
+    y_data.tofile(y_path)
     typer.echo(f"Saved Y coordinates to {y_path}")
 
     # Load labels.parquet
@@ -351,7 +345,7 @@ def export(
         if labels_df[col].dtype.name == "category":
             # For categorical columns, get categories and codes
             categories = labels_df[col].cat.categories.tolist()
-            indices = labels_df[col].cat.codes.astype(np.int16)
+            indices = labels_df[col].cat.codes.values.astype(np.int16)
         else:
             # For non-categorical columns, create categories from unique values
             unique_values = labels_df[col].unique()
@@ -360,11 +354,10 @@ def export(
 
             # Create mapping from values to indices
             value_to_idx = {val: idx for idx, val in enumerate(categories)}
-            indices = (
-                labels_df[col]
-                .map(lambda x: value_to_idx.get(str(x), -1) if pd.notna(x) else -1)
-                .astype(np.int16)
-            )
+            indices = np.array([
+                value_to_idx.get(str(x), -1) if pd.notna(x) else -1
+                for x in labels_df[col]
+            ], dtype=np.int16)
 
         # Validate that the column doesn't have too many categories
         assert (
@@ -374,12 +367,9 @@ def export(
         # Store categories for metadata
         categories_dict[col] = categories
 
-        # Export indices as Arrow file
-        indices_array = pa.array(indices, type=pa.int16())
-        indices_table = pa.table([indices_array], names=[col])
-        col_path = output_path / f"{col}.arrow"
-        with pa.ipc.new_file(col_path, indices_table.schema) as writer:
-            writer.write_table(indices_table)
+        # Export indices as binary file
+        col_path = output_path / f"{col}.bin"
+        indices.tofile(col_path)
         typer.echo(f"    Saved {len(categories)} categories to {col_path}")
 
     # Create metadata.json
@@ -389,6 +379,7 @@ def export(
         "xCenter": float(x_center),
         "yCenter": float(y_center),
         "maxRange": float(max_range),
+        "numPoints": len(mappings),
     }
 
     metadata_path = output_path / "metadata.json"

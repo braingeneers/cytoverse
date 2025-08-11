@@ -11,18 +11,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import createScatterplot from 'regl-scatterplot'
-import { Vector } from 'apache-arrow'
 
 // Props interface
 interface Props {
-  xTrainData: Vector | null
-  yTrainData: Vector | null
+  xTrainData: Float32Array | null
+  yTrainData: Float32Array | null
   xTestData: number[]
   yTestData: number[]
   testDataLabels: number[]
-  categoryData: Vector | null
+  categoryData: Int16Array | null
   categoryLabels: string[]
 }
 
@@ -141,46 +140,13 @@ const initializeScatterplot = () => {
 
   scatterplotRef = scatterplot
 
-  // Convert Arrow Vectors to typed arrays for regl-scatterplot
-  // Try to access the underlying buffer directly if possible, otherwise convert
+  // Use typed arrays directly - they're already Float32Array and Int16Array
   const numPoints = Math.min(props.xTrainData.length, props.yTrainData.length, props.categoryData.length)
 
-  // Check if we can access the underlying typed array directly
-  let xArray: Float32Array
-  let yArray: Float32Array
-
-  // Arrow Vector.data should give us access to the underlying data
-  if (props.xTrainData.data.length > 0 && props.xTrainData.data[0].values instanceof Float32Array) {
-    xArray = props.xTrainData.data[0].values as Float32Array
-  } else {
-    // Fallback to copying data
-    xArray = new Float32Array(numPoints)
-    for (let i = 0; i < numPoints; i++) {
-      xArray[i] = props.xTrainData.get(i) || 0
-    }
-  }
-
-  if (props.yTrainData.data.length > 0 && props.yTrainData.data[0].values instanceof Float32Array) {
-    yArray = props.yTrainData.data[0].values as Float32Array
-  } else {
-    // Fallback to copying data
-    yArray = new Float32Array(numPoints)
-    for (let i = 0; i < numPoints; i++) {
-      yArray[i] = props.yTrainData.get(i) || 0
-    }
-  }
-
-  // Get category indices for valueA
-  let categoryArrayData: number[]
-  if (props.categoryData.data.length > 0 && props.categoryData.data[0].values) {
-    categoryArrayData = Array.from(props.categoryData.data[0].values)
-  } else {
-    // Fallback to vector access
-    categoryArrayData = Array.from(
-      { length: props.categoryData.length },
-      (_, i) => props.categoryData!.get(i) || 0
-    )
-  }
+  // Direct access to typed arrays
+  const xArray = props.xTrainData
+  const yArray = props.yTrainData
+  const categoryArrayData = Array.from(props.categoryData)
 
   // Initial render with only training data
   const trainX = Array.from(xArray)
@@ -217,37 +183,10 @@ const buildColumnData = () => {
 
   const numPoints = Math.min(props.xTrainData.length, props.yTrainData.length, props.categoryData.length)
 
-  // Get training data
-  let xArray: Float32Array
-  let yArray: Float32Array
-
-  if (props.xTrainData.data.length > 0 && props.xTrainData.data[0].values instanceof Float32Array) {
-    xArray = props.xTrainData.data[0].values as Float32Array
-  } else {
-    xArray = new Float32Array(numPoints)
-    for (let i = 0; i < numPoints; i++) {
-      xArray[i] = props.xTrainData.get(i) || 0
-    }
-  }
-
-  if (props.yTrainData.data.length > 0 && props.yTrainData.data[0].values instanceof Float32Array) {
-    yArray = props.yTrainData.data[0].values as Float32Array
-  } else {
-    yArray = new Float32Array(numPoints)
-    for (let i = 0; i < numPoints; i++) {
-      yArray[i] = props.yTrainData.get(i) || 0
-    }
-  }
-
-  let categoryArrayData: number[]
-  if (props.categoryData.data.length > 0 && props.categoryData.data[0].values) {
-    categoryArrayData = Array.from(props.categoryData.data[0].values)
-  } else {
-    categoryArrayData = Array.from(
-      { length: props.categoryData.length },
-      (_, i) => props.categoryData!.get(i) || 0
-    )
-  }
+  // Direct access to typed arrays
+  const xArray = props.xTrainData
+  const yArray = props.yTrainData
+  const categoryArrayData = Array.from(props.categoryData)
 
   // If no test data, return just training data
   if (props.xTestData.length === 0 && props.yTestData.length === 0) {

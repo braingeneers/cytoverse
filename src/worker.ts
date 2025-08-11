@@ -32,7 +32,7 @@ interface StartMessage {
   modelsURL: string
   h5File: File
   useWebGPU: boolean
-  categoryData: Int32Array
+  categoryData: Int16Array
   categoryDataLength: number
 }
 
@@ -103,7 +103,7 @@ interface FinishedMessage {
 
 // Global state
 let model: ModelInfo | null = null
-let categoryData: Int32Array | null = null
+let categoryData: Int16Array | null = null
 let categoryDataLength = 0
 
 // Handle messages from main thread

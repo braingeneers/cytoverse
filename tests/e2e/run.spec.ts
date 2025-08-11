@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test'
 
+test('Navigate to root, nothin else...', async ({ page }) => {
+  await page.goto('/')
+})
+
 test('Navigate to root, do NOT wait for results', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('radio-cpu-option').click()

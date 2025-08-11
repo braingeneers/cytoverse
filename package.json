@@ -20,12 +20,10 @@
   },
   "dependencies": {
     "@cytoverse/ivfpq": "workspace:*",
-    "apache-arrow": "^20.0.0",
     "csv-parse": "^6.1.0",
     "h5wasm": "^0.8.1",
     "idb": "^8.0.3",
     "onnxruntime-web": "^1.22.0",
-    "parquet-wasm": "^0.6.1",
     "regl-scatterplot": "^1.14.1",
     "vue": "^3.5.18",
     "vuetify": "^3.7.7",

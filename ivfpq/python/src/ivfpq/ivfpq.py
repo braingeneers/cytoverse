@@ -329,20 +329,20 @@ class IVFPQ(nn.Module):
         )
 
     def forward(
-        self, query_vector: torch.Tensor, centroids: torch.Tensor, k: int
+        self, query_vector: torch.Tensor, partition_centroids: torch.Tensor, k: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Perform coarse centroid search.
 
         Args:
             query_vector: Query vector of shape [d]
-            centroids: Partition centroids of shape [n_partitions, d]
+            partition_centroids: Partition centroids of shape [n_partitions, d]
             k: Number of nearest centroids to return
 
         Returns:
             Tuple of (top_k_indices, top_k_distances)
         """
-        distances = torch.cdist(query_vector.unsqueeze(0), centroids).squeeze(0)
+        distances = torch.cdist(query_vector.unsqueeze(0), partition_centroids).squeeze(0)
         top_k_distances, top_k_indices = torch.topk(distances, k=k, largest=False)
         return top_k_indices, top_k_distances
 
@@ -386,28 +386,23 @@ class IVFPQ(nn.Module):
 
         ivf = IVFPQ.load(output_dir)
 
-
-        # # Export ONNX model for the forward method
-        # onnx_file = output_dir / "ivf_forward.onnx"
-        # dummy_query = torch.randn(vectors.shape[1])
-        # torch.onnx.export(
-        #     ivf,
-        #     (
-        #         dummy_query,
-        #         ivf.centroids.data,
-        #         4
-        #     ),  # Example inputs: query, centroids, k
-        #     onnx_file,
-        #     export_params=True,
-        #     opset_version=11,
-        #     do_constant_folding=True,
-        #     input_names=["query_vector", "centroids", "k"],
-        #     output_names=["top_k_indices", "top_k_distances"],
-        #     dynamic_axes={
-        #         "query_vector": {0: "d"},
-        #         "centroids": {0: "n_partitions", 1: "d"},
-        #     },
-        # )
+        # Export ONNX model for the forward method
+        onnx_file = output_dir / "ivf_forward.onnx"
+        dummy_query = torch.randn(vectors.shape[1])
+        torch.onnx.export(
+            ivf,
+            (dummy_query, ivf.centroids.data, 4),  # Example inputs: query, partition_centroids, k
+            onnx_file,
+            export_params=True,
+            opset_version=11,
+            do_constant_folding=True,
+            input_names=["query_vector", "partition_centroids", "k"],
+            output_names=["top_k_indices", "top_k_distances"],
+            dynamic_axes={
+                "query_vector": {0: "d"},
+                "partition_centroids": {0: "n_partitions", 1: "d"},
+            },
+        )
 
         assert np.all(assignments < ivf.n_partitions)
 
@@ -441,7 +436,9 @@ class IVFPQ(nn.Module):
         # Step 2: Search each partition using PQ
         all_candidates = []
         partitions_dir = model_path / "partitions"
-        pq_distance_partition = PQDistance()  # This k is now only used for initialization
+        pq_distance_partition = (
+            PQDistance()
+        )  # This k is now only used for initialization
 
         for partition_id in top_partitions:
             partition_id = partition_id.item()
@@ -508,16 +505,16 @@ class IVFPQ(nn.Module):
                 dummy_query,
                 self.centroids.data,
                 4,
-            ),  # Example inputs: query, centroids, k
+            ),  # Example inputs: query, partition_centroids, k
             onnx_file,
             export_params=True,
             opset_version=11,
             do_constant_folding=True,
-            input_names=["query_vector", "centroids", "k"],
+            input_names=["query_vector", "partition_centroids", "k"],
             output_names=["top_k_indices", "top_k_distances"],
             dynamic_axes={
                 "query_vector": {0: "d"},
-                "centroids": {0: "n_partitions", 1: "d"},
+                "partition_centroids": {0: "n_partitions", 1: "d"},
             },
         )
 
