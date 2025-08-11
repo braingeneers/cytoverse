@@ -82,6 +82,7 @@ interface StatusMessage {
 
 interface ProgressMessage {
   type: 'progress'
+  message: string
   countFinished: number
   totalToProcess: number
 }
@@ -159,7 +160,7 @@ async function instantiateModel(
     loadedBytes += value.length
 
     self.postMessage({
-      type: 'modelDownloadProgress',
+      type: 'progress',
       message: 'Downloading model...',
       countFinished: loadedBytes,
       totalToProcess: totalBytes,

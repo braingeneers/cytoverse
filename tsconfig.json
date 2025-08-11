@@ -6,6 +6,8 @@
     "jsx": "preserve",
     "allowImportingTsExtensions": true,
     "sourceMap": true,
+    "sourceRoot": "./src",
+    "rootDirs": ["src", "ivfpq/typescript/src"],
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -21,11 +23,14 @@
   },
   "files": [],
   "references": [
+    // {
+    //   "path": "./tsconfig.node.json"
+    // },
+    // {
+    //   "path": "./tsconfig.app.json"
+    // },
     {
-      "path": "./tsconfig.node.json"
-    },
-    {
-      "path": "./tsconfig.app.json"
+      "path": "./ivfpq/typescript"
     }
   ]
 }

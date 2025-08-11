@@ -18,8 +18,11 @@ notice:
 	@echo "- Embeddings & metadata to data/references/$(model_id)"
 	@echo "- Web Artificats to web/public/models/$(model_id)"
 
+update-models-list:
+	ls public/models | sort > public/models/models.txt
+
 scimilarity: model_id=scimilarity
-scimilarity: notice scimilarity-embeddings scimilarity-model ivfpq-train pumap
+scimilarity: notice scimilarity-embeddings scimilarity-model ivfpq-train pumap update-models-list
 
 # brain: model_id=brain
 # brain: notice brain-embeddings scimilarity-model pumap ivfpq
@@ -92,8 +95,6 @@ pumap-export:
 	public/models/$(model_id)/pumap/
 
 pumap: pumap-train pumap-map pumap-export
-
-
 
 # Testing
 update-validations:

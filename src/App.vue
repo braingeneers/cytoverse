@@ -84,8 +84,9 @@
           <!-- Model Selection -->
           <div class="form-section">
             <v-select
+              data-testid="model-select-dropdown"
               v-model="selectedModel"
-              :items="[{title: 'Brain', value: 'brain'}, {title: 'SCimilarity', value: 'scimilarity'}]"
+              :items="availableModels"
               label="Reference"
               :disabled="isRunning"
               variant="outlined"
@@ -96,6 +97,7 @@
           <!-- Category Selection -->
           <div class="form-section">
             <v-select
+              data-testid="category-select-dropdown"
               v-model="selectedCategory"
               :items="availableCategories"
               label="Category"
@@ -385,6 +387,7 @@ const fileList = ref<File[]>([])
 const statusMessage = ref('')
 const progress = ref(0)
 const selectedModel = ref('scimilarity')
+const availableModels = ref<{ title: string; value: string }[]>([])
 const isRunning = ref(false)
 const hasWebGPU = ref(false)
 const useWebGPU = ref(false)
@@ -556,6 +559,34 @@ const createUnifiedWorker = () => {
 
 
 // WebGPU detection
+const loadAvailableModels = async () => {
+  try {
+    const response = await fetch('models/models.txt')
+    const text = await response.text()
+    const modelNames = text.split('\n').filter(name => name.trim())
+    
+    availableModels.value = modelNames.map(name => ({
+      // title: name.charAt(0).toUpperCase() + name.slice(1),
+      title: name,
+      value: name
+    }))
+    
+    // Set default to 'scimilarity' if available, otherwise first model
+    if (modelNames.includes('scimilarity')) {
+      selectedModel.value = 'scimilarity'
+    } else if (modelNames.length > 0) {
+      selectedModel.value = modelNames[0]
+    }
+  } catch (error) {
+    console.error('Error loading models:', error)
+    // Fallback to hardcoded models
+    availableModels.value = [
+      {title: 'Brain', value: 'brain'}, 
+      {title: 'SCimilarity', value: 'scimilarity'}
+    ]
+  }
+}
+
 const detectWebGPU = async () => {
   try {
     const webGPUSupported = await isWebGPUSupported()
@@ -896,8 +927,29 @@ watch(selectedModel, () => {
 })
 
 // Load categories when model changes
-watch(selectedModel, () => {
-  loadCategoriesFromMetadata()
+watch(selectedModel, async () => {
+  // Clear existing test data and artifacts when model changes
+  xTestData.value = []
+  yTestData.value = []
+  testDataLabels.value = []
+  labelCounts.value = {}
+  totalLabeled.value = 0
+  cellPositions.clear()
+  cellIdToIndex.clear()
+  
+  // Clear training data to refresh scatter plot
+  xTrainData.value = null
+  yTrainData.value = null
+  categoryData.value = null
+  categoryLabels.value = []
+  
+  // Load categories for the new model
+  await loadCategoriesFromMetadata()
+  
+  // Load training data for the new model/category
+  if (selectedCategory.value) {
+    await loadTrainingData()
+  }
 })
 
 // Reload training data when selectedCategory changes
@@ -911,6 +963,7 @@ onMounted(() => {
   console.log('App mounted')
   fetchSampleFile()
   detectWebGPU()
+  loadAvailableModels()
   loadCategoriesFromMetadata()
   
   window.addEventListener('resize', updateIsMobile)

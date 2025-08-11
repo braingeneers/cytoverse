@@ -146,7 +146,7 @@ class TestEmbeddingData:
         assert ivf_model_path.exists()
 
         ivf = IVFPQ.load(ivf_model_path)
-        
+
         # Search for nearest neighbors for the first embedding
         query_embedding = torch.from_numpy(computed_embeddings[0]).float()
 
@@ -155,7 +155,6 @@ class TestEmbeddingData:
             query_embedding,
             model_path=ivf_model_path,
             n_probe=4,  # Search multiple partitions for better accuracy
-            k_per_partition=1,  # Get the top nearest neighbor
         )
 
         print(
@@ -180,7 +179,6 @@ class TestEmbeddingData:
 
         # Validate that we found a meaningful nearest neighbor
         # The computed embedding should be reasonably close to something in the database
-        assert len(vector_ids) == 1, "Should return exactly 1 nearest neighbor"
         assert distances[0] >= 0, "Distance should be non-negative"
         assert (
             computed_distance < 100.0
@@ -195,7 +193,9 @@ class TestEmbeddingData:
         ), "Distance should be a float"
 
         # See if the metadata on this cell matches that in the h5ad
-        neighbor_metadata = metadata_db.query().df[vector_ids]
+        neighbor_metadata = metadata_db.query().df[
+            nearest_vector_id:nearest_vector_id
+        ]
         print("Neighbor metadata")
         print(neighbor_metadata.iloc[0])
 
@@ -209,3 +209,7 @@ class TestEmbeddingData:
         print(
             "✅ Successfully computed embeddings and found nearest neighbor via IVFPQ"
         )
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s"])

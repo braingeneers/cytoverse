@@ -258,14 +258,13 @@ class PQDistance(nn.Module):
     """
     Optimized asymmetric distance computation for Product Quantization.
 
-    Computes distances between a query vector and PQ-encoded reference vectors
-    using precomputed distance tables and returns top-k nearest neighbors.
+    Computes distances between a query vector and a list of pq encoded
+    reference vectors using precomputed distance tables.
     Uses GatherElements optimization for ONNX compatibility.
     """
 
-    def __init__(self, k: int = 50):
+    def __init__(self):
         super().__init__()
-        self.k = k
 
     def forward(
         self,
@@ -274,7 +273,7 @@ class PQDistance(nn.Module):
         codebooks: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute top-k nearest neighbors using asymmetric distance.
+        Compute distance between a query vector and a list of pq encoded reference vectors.
 
         Args:
             query_vector: Query vector [d]
@@ -282,7 +281,7 @@ class PQDistance(nn.Module):
             codebooks: Codebooks [m, k_centroids, d_sub]
 
         Returns:
-            Tuple of (indices, distances) for k nearest neighbors
+            Tuple of (indices, distances)
         """
         N, m = reference_codes.shape
         _, k_centroids, d_sub = codebooks.shape
@@ -322,10 +321,10 @@ class PQDistance(nn.Module):
         gathered_distances = gathered_distances.view(N, m)  # [N, m]
         total_distances = gathered_distances.sum(dim=1)  # [N]
 
-        # Get top-k indices and distances
-        k_actual = min(self.k, N)
+        # Return all distances and indices sorted (let the caller decide how many to take)
+        # This allows merging results from multiple partitions
         top_distances, indices = torch.topk(
-            total_distances, k_actual, largest=False, sorted=True
+            total_distances, N, largest=False, sorted=True
         )
 
         return indices, top_distances
@@ -337,7 +336,6 @@ def create_pq_system(
     k: int = 256,
     max_iterations: int = 100,
     output_dir: Path = Path("."),
-    k_nn: int = 50,
 ) -> Dict:
     """
     Complete PQ system creation: train codebooks and export codebooks and ONNX models.
@@ -348,7 +346,6 @@ def create_pq_system(
         k: Number of centroids per subquantizer
         max_iterations: Maximum k-means iterations
         output_dir: Directory to save all outputs
-        k_nn: Number of nearest neighbors for distance model (default: 50)
 
     Returns:
         Dictionary with codebooks and metadata
@@ -380,11 +377,11 @@ def create_pq_system(
     )
 
     # Export PQDistance with optimized distance computation
-    distance_model = PQDistance(k=k_nn)
+    distance_model = PQDistance()
     distance_model.eval()
 
     dummy_query_vector = torch.randn(d)
-    dummy_reference_codes = torch.randint(0, k, (1000, m))
+    dummy_reference_codes = torch.randint(0, k, (1000, m), dtype=torch.uint8)
 
     torch.onnx.export(
         distance_model,
@@ -406,7 +403,7 @@ def create_pq_system(
     logger.info(f"Exported PQ models to {output_dir}")
     logger.info("- pq_encode.onnx: Encode vectors to PQ codes")
     logger.info(
-        f"- pq_distance.onnx: Optimized asymmetric distance computation with top-k (k={k_nn})"
+        "- pq_distance.onnx: Optimized asymmetric distance computation (returns all distances sorted)"
     )
 
     result = {

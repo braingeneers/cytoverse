@@ -33,7 +33,7 @@
         "--labels",
         "study",
         "--num-embeddings",
-        "100000",
+        "100_000",
         "--validate"
       ]
     },
@@ -48,9 +48,9 @@
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
         "${workspaceFolder}/public/models/dev/ivfpq",
         "--max-vectors",
-        "1_000_000",
-        "--max-vectors-for-training",
         "100_000",
+        "--max-vectors-for-training",
+        "10_000",
         "--pq-m",
         "32",
         "--pq-k",
@@ -76,30 +76,10 @@
       ]
     },
     {
-      "name": "ivfpq tune",
-      "type": "debugpy",
-      "justMyCode": false,
-      "request": "launch",
-      "env": {
-        "AWS_PROFILE": "braingeneers"
-      },
-      "program": "${workspaceFolder}/src/cytoverse/scripts/ivfpq_tune.py",
-      "console": "integratedTerminal",
-      "args": [
-        "${workspaceFolder}/data/references/scimilarity/embeddings.parquet",
-        "${workspaceFolder}/data/references/scimilarity/labels.parquet",
-        "--num-samples",
-        "1",
-        "--max-concurrent-trials",
-        "1",
-        "--debug"
-      ]
-    },
-    {
       "name": "pumap train",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
@@ -107,22 +87,22 @@
         "${workspaceFolder}/data/references/scimilarity/labels.parquet",
         "${workspaceFolder}/public/models/dev/pumap",
         "--num-vectors",
-        "10000"
+        "10_000"
       ]
     },
     {
       "name": "pumap map",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "map",
         "${workspaceFolder}/public/models/dev/pumap/model.onnx",
         "${workspaceFolder}/data/references/scimilarity/embeddings.npy",
-        "${workspaceFolder}/data/references/scimilarity/",
+        "${workspaceFolder}/data/references/dev",
         "--num-vectors",
-        "10000",
+        "10_000",
         "--export-png"
       ]
     },
@@ -130,11 +110,11 @@
       "name": "pumap export",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/scripts/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "export",
-        "${workspaceFolder}/data/scimilarity/",
+        "${workspaceFolder}/data/references/dev/",
         "${workspaceFolder}/public/models/dev/pumap"
       ]
     },
@@ -146,13 +126,38 @@
       "console": "integratedTerminal"
     },
     {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Vitest Tests",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": [
+        "run",
+        "${relativeFile}"
+      ],
+      "smartStep": true,
+      "console": "integratedTerminal"
+    },
+    {
       "type": "chrome",
       "request": "attach",
       "name": "Attach to Playwright Chrome",
       "port": 9222,
       "url": "http://localhost:5173/*",
       "webRoot": "${workspaceFolder}",
-      "timeout": 30000
+      "timeout": 30000,
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/ivfpq/typescript/dist/**/*.js"
+      ],
+      "sourceMapPathOverrides": {
+        "webpack:///./src/*": "${workspaceFolder}/src/*",
+        "webpack:///./*": "${workspaceFolder}/*",
+        "webpack:///src/*": "${workspaceFolder}/src/*",
+        "./src/*": "${workspaceFolder}/ivfpq/typescript/src/*",
+        "../src/*": "${workspaceFolder}/src/*",
+        "../../src/*": "${workspaceFolder}/src/*"
+      }
     }
   ]
 }

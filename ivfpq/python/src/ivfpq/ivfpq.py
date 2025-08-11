@@ -158,7 +158,6 @@ def _train_ivfpq(
         k=pq_k,
         max_iterations=max_iterations,
         output_dir=output_dir,
-        k_nn=max_iterations,
     )
     pq = PQ.load(output_dir)
 
@@ -419,7 +418,7 @@ class IVFPQ(nn.Module):
         query_vector: torch.Tensor,
         model_path: Path,
         n_probe: int = 4,
-        k_per_partition: int = 50,
+        k: int = 50,
     ) -> Tuple[List[int], List[float]]:
         """
         Search for nearest neighbors using the trained IVF index.
@@ -428,8 +427,7 @@ class IVFPQ(nn.Module):
             query_vector: Query vector of shape [d]
             model_path: Path to model artifacts
             n_probe: Number of partitions to search
-            k_per_partition: Number of neighbors to return
-            verbose: Whether to show progress
+            k: Number of neighbors to return
 
         Returns:
             Tuple of (vector_ids, distances)
@@ -443,7 +441,7 @@ class IVFPQ(nn.Module):
         # Step 2: Search each partition using PQ
         all_candidates = []
         partitions_dir = model_path / "partitions"
-        pq_distance_partition = PQDistance(k=k_per_partition)
+        pq_distance_partition = PQDistance()  # This k is now only used for initialization
 
         for partition_id in top_partitions:
             partition_id = partition_id.item()
@@ -454,24 +452,29 @@ class IVFPQ(nn.Module):
 
             vector_ids, pq_codes = _load_partition_binary(partition_file, self.pq.m)
 
-            if len(vector_ids) > 0:
-                # Compute query residual for this partition
-                query_residual = query_vector - self.centroids[partition_id]
+            assert len(vector_ids) > 0, f"Partition {partition_id} is empty"
 
-                # Use asymmetric PQ distance computation
-                top_indices, top_distances = pq_distance_partition(
-                    query_residual, pq_codes, self.pq.codebooks
-                )
+            # Compute query residual for this partition
+            query_residual = query_vector - self.centroids[partition_id]
 
-                # Add candidates with their distances
-                for relative_idx, dist in zip(top_indices, top_distances):
-                    if relative_idx < len(vector_ids):
-                        vec_id = vector_ids[relative_idx.item()]
-                        all_candidates.append((dist.item(), vec_id.item()))
+            # Use asymmetric PQ distance computation - now returns all sorted results
+            top_indices, top_distances = pq_distance_partition(
+                query_residual, pq_codes, self.pq.codebooks
+            )
 
-        # Step 3: Sort all candidates and return top k
+            # Take only top k from this partition to limit memory usage
+            # but we'll merge all partitions to get the global top k
+            partition_k = min(k, len(top_indices))
+            for i in range(partition_k):
+                relative_idx = top_indices[i]
+                dist = top_distances[i]
+                if relative_idx < len(vector_ids):
+                    vec_id = vector_ids[relative_idx.item()]
+                    all_candidates.append((dist.item(), vec_id.item()))
+
+        # Step 3: Sort all candidates from all partitions and return top k
         all_candidates.sort(key=lambda x: x[0])
-        top_candidates = all_candidates[:k_per_partition]
+        top_candidates = all_candidates[:k]
 
         distances = [dist for dist, _ in top_candidates]
         vector_ids = [vec_id for _, vec_id in top_candidates]

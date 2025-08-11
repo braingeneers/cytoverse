@@ -60,7 +60,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      '@ivfpq': '/ivfpq/ts',
+      '@ivfpq': '/ivfpq/typescript/src',
     },
   },
   build: {

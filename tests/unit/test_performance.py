@@ -139,7 +139,6 @@ def get_ivfpq_predictions_batch(
                 query_vector=query_vector,
                 model_path=model_path,
                 n_probe=n_partitions_search,
-                k_per_partition=k_neighbors,
             )
 
             # Get labels for nearest neighbors
@@ -241,7 +240,6 @@ def test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path):
                     query_vector=query_vector,
                     model_path=ivfpq_model_path,
                     n_probe=n_probe,
-                    k_per_partition=k_neighbors,
                 )
 
                 # Get labels for nearest neighbors
@@ -375,45 +373,4 @@ def test_ivfpq_accuracy(
 
 
 if __name__ == "__main__":
-    import sys
-
-    # Run test directly
-    test_data_path = (
-        Path(__file__).parent.parent / "fixtures" / "GSE136831_subsample_100.h5ad"
-    )
-    scimilarity_model_path = (
-        Path(__file__).parent.parent.parent
-        / "data"
-        / "models"
-        / "scimilarity"
-        / "model_v1.1"
-    )
-    ivfpq_model_path = (
-        Path(__file__).parent.parent.parent
-        / "public"
-        / "models"
-        / "scimilarity"
-        / "ivfpq"
-    )
-    reference_labels_path = (
-        Path(__file__).parent.parent.parent
-        / "data"
-        / "references"
-        / "scimilarity"
-        / "labels.parquet"
-    )
-
-    # Check command line arguments
-    if len(sys.argv) > 1 and sys.argv[1] == "self":
-        # Run self-accuracy test
-        print("Running IVFPQ self-accuracy test...")
-        test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path)
-    else:
-        # Run comparison test (default)
-        print("Running IVFPQ vs SCimilarity accuracy test...")
-        test_ivfpq_accuracy(
-            test_data_path,
-            scimilarity_model_path,
-            ivfpq_model_path,
-            reference_labels_path,
-        )
+    pytest.main([__file__, "-v", "-s"])

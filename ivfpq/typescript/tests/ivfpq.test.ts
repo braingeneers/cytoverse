@@ -74,12 +74,8 @@ describe('IVFPQ System', () => {
       centroidsView.setUint32(0, 4, true) // n_partitions
       centroidsView.setUint32(4, 128, true) // d
       
-      // Mock PQ codebooks binary
-      const codebooksBuffer = new ArrayBuffer(12 + 16 * 256 * 8 * 4)
-      const codebooksView = new DataView(codebooksBuffer)
-      codebooksView.setUint32(0, 16, true) // m
-      codebooksView.setUint32(4, 256, true) // k
-      codebooksView.setUint32(8, 8, true) // d_sub
+      // Mock PQ codebooks binary (raw float32 array without header)
+      const codebooksBuffer = new ArrayBuffer(16 * 256 * 8 * 4)
       
       // Setup fetch responses
       mockFetch.mockImplementation((url: string) => {
@@ -171,12 +167,8 @@ describe('IVFPQ System', () => {
       const centroidsData = new Float32Array(centroidsBuffer, 8)
       centroidsData.set([0, 0, 0, 0, 1, 1, 1, 1]) // Two centroids
       
-      // Create binary data for codebooks
-      const codebooksBuffer = new ArrayBuffer(12 + 2 * 4 * 2 * 4)
-      const codebooksView = new DataView(codebooksBuffer)
-      codebooksView.setUint32(0, 2, true) // m
-      codebooksView.setUint32(4, 4, true) // k
-      codebooksView.setUint32(8, 2, true) // d_sub
+      // Create binary data for codebooks (raw float32 array without header)
+      const codebooksBuffer = new ArrayBuffer(2 * 4 * 2 * 4)
       
       // Create partition data
       const partitionBuffer = new ArrayBuffer(8 + 3 * (4 + 2))
@@ -293,12 +285,8 @@ describe('IVFPQ System', () => {
       centroidsView.setUint32(0, 2, true)
       centroidsView.setUint32(4, 4, true)
       
-      // Create binary data for codebooks
-      const codebooksBuffer = new ArrayBuffer(12 + 2 * 4 * 2 * 4)
-      const codebooksView = new DataView(codebooksBuffer)
-      codebooksView.setUint32(0, 2, true)
-      codebooksView.setUint32(4, 4, true)
-      codebooksView.setUint32(8, 2, true)
+      // Create binary data for codebooks (raw float32 array without header)
+      const codebooksBuffer = new ArrayBuffer(2 * 4 * 2 * 4)
       
       mockFetch.mockImplementation((url: string) => {
         if (url.endsWith('/ivf_metadata.json')) {
@@ -382,11 +370,7 @@ describe('IVFPQ System', () => {
       centroidsView.setUint32(0, 1, true)
       centroidsView.setUint32(4, 4, true)
       
-      const codebooksBuffer = new ArrayBuffer(12 + 2 * 4 * 2 * 4)
-      const codebooksView = new DataView(codebooksBuffer)
-      codebooksView.setUint32(0, 2, true)
-      codebooksView.setUint32(4, 4, true)
-      codebooksView.setUint32(8, 2, true)
+      const codebooksBuffer = new ArrayBuffer(2 * 4 * 2 * 4)
       
       mockFetch.mockImplementation((url: string) => {
         if (url.endsWith('/ivf_metadata.json')) {

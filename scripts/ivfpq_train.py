@@ -199,7 +199,6 @@ def measure_recall(
                 query_vector=query_vector,
                 model_path=model_path,
                 n_probe=8,  # Use reasonable n_probe for accuracy
-                k_per_partition=50,
             )
 
             # Check if the first result is the query vector itself
@@ -251,7 +250,6 @@ def measure_recall(
                 query_vector=perturbed_vector,
                 model_path=model_path,
                 n_probe=8,
-                k_per_partition=50,
             )
 
             # Check if the first result is the original unperturbed vector

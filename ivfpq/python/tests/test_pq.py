@@ -142,7 +142,6 @@ class TestPQBasic:
             k=self.k,
             max_iterations=5,
             output_dir=output_dir,
-            k_nn=50,
         )
 
         # Check ONNX files were created
@@ -236,7 +235,7 @@ class TestPQONNXModels:
         reference_codes = torch.randint(0, self.k, (100, self.m))
 
         # Test PQDistance model
-        distance_model = PQDistance(k=10)
+        distance_model = PQDistance()
         distance_model.eval()
 
         with torch.no_grad():
@@ -244,7 +243,7 @@ class TestPQONNXModels:
                 query_vector, reference_codes, codebooks
             )
 
-        assert indices.shape[0] == min(10, 100)
+        assert indices.shape[0] == 100  # Returns all distances
         assert distances.shape == indices.shape
         assert indices.dtype == torch.long
         assert distances.dtype == torch.float32
@@ -362,7 +361,7 @@ class TestPQIntegration:
         query_vector = vectors[0]
         reference_codes = all_codes[1:21]  # Use codes 1-20 as references
 
-        distance_model = PQDistance(k=5)
+        distance_model = PQDistance()
         distance_model.eval()
 
         with torch.no_grad():
@@ -370,9 +369,13 @@ class TestPQIntegration:
                 query_vector, reference_codes, pq.codebooks.data
             )
 
-        # Verify results
-        assert len(indices) == 5
-        assert len(distances) == 5
+        # Verify results - now returns all distances, take top 5 for validation
+        assert len(indices) == 20  # Returns all 20 reference codes
+        assert len(distances) == 20
+        
+        # We can take top 5 if needed
+        top5_indices = indices[:5]
+        top5_distances = distances[:5]
 
         # Check that distances are reasonable
         assert torch.all(distances < 200.0), f"Distances too large: {distances}"
@@ -380,6 +383,9 @@ class TestPQIntegration:
         # Verify indices are valid
         assert torch.all(indices >= 0)
         assert torch.all(indices < 20)
+        
+        # Check that distances are sorted
+        assert torch.all(distances[:-1] <= distances[1:])
 
 
 class TestPQCompatibility:

@@ -7,7 +7,7 @@
  * Supports both HTTP and file system access for model artifacts.
  */
 
-import { PQDistance } from './pq'
+import { PQDistance, PQMetadata } from './pq'
 
 /**
  * IVFPQ metadata structure matching Python output
@@ -22,22 +22,6 @@ export interface IVFPQMetadata {
   inertia: number
   partition_sizes: { [key: string]: number }
   centroids_shape: number[]
-  version: string
-}
-
-/**
- * PQ metadata structure
- */
-export interface PQMetadata {
-  d: number
-  m: number
-  k: number
-  d_sub: number
-  compression_ratio: number
-  codebooks_shape: number[]
-  codebooks_size: number
-  training_samples: number
-  max_iterations: number
   version: string
 }
 
@@ -73,9 +57,7 @@ export class IVFPQ {
   private basePath: string
   private useHttp: boolean
   private metadata: IVFPQMetadata | null = null
-  private pqMetadata: PQMetadata | null = null
   private centroids: Float32Array | null = null
-  private codebooks: Float32Array | null = null
   private pqDistance: PQDistance | null = null
   private partitionCache: Map<number, PartitionData> = new Map()
   
@@ -96,21 +78,12 @@ export class IVFPQ {
     // Load IVF centroids
     await this.loadCentroids()
     
-    // Load PQ metadata
-    await this.loadPQMetadata()
-    
-    // Load PQ codebooks
-    await this.loadCodebooks()
-    
-    // Initialize PQ distance calculator
-    this.pqDistance = new PQDistance(
-      this.pqMetadata!.m,
-      this.pqMetadata!.k,
-      this.pqMetadata!.d_sub
-    )
+    // Initialize and load PQ distance calculator
+    this.pqDistance = new PQDistance(this.basePath)
+    await this.pqDistance.load()
     
     // Load PQ distance ONNX model
-    await this.loadPQDistanceModel()
+    await this.pqDistance.loadModel()
     
     console.log(`IVFPQ system loaded: ${this.metadata!.n_partitions} partitions, ${this.metadata!.d}D`)
   }
@@ -123,13 +96,6 @@ export class IVFPQ {
     this.metadata = data as IVFPQMetadata
   }
   
-  /**
-   * Load PQ metadata from JSON file
-   */
-  private async loadPQMetadata(): Promise<void> {
-    const data = await this.fetchData('pq_metadata.json', 'json')
-    this.pqMetadata = data as PQMetadata
-  }
   
   /**
    * Load IVF centroids from binary file
@@ -151,32 +117,7 @@ export class IVFPQ {
     this.centroids = new Float32Array(buffer, 8)
   }
   
-  /**
-   * Load PQ codebooks from binary file
-   */
-  private async loadCodebooks(): Promise<void> {
-    const buffer = await this.fetchData('pq_codebooks.bin', 'arraybuffer') as ArrayBuffer
-    
-    // The file contains raw float32 array without header
-    this.codebooks = new Float32Array(buffer)
-    
-    // Validate the size matches expected dimensions
-    const expectedSize = this.pqMetadata!.m * this.pqMetadata!.k * this.pqMetadata!.d_sub
-    if (this.codebooks.length !== expectedSize) {
-      throw new Error(
-        `Codebooks size mismatch: got ${this.codebooks.length}, expected ${expectedSize} ` +
-        `(m=${this.pqMetadata!.m}, k=${this.pqMetadata!.k}, d_sub=${this.pqMetadata!.d_sub})`
-      )
-    }
-  }
   
-  /**
-   * Load PQ distance ONNX model
-   */
-  private async loadPQDistanceModel(): Promise<void> {
-    const modelPath = `${this.basePath}/pq_distance.onnx`
-    await this.pqDistance!.loadModel(modelPath)
-  }
   
   /**
    * Load a partition from binary file
@@ -196,8 +137,9 @@ export class IVFPQ {
     const m = view.getUint32(4, true)
     
     // Validate m dimension
-    if (m !== this.pqMetadata!.m) {
-      throw new Error(`Partition m=${m} doesn't match PQ m=${this.pqMetadata!.m}`)
+    const pqDims = this.pqDistance!.getDimensions()!
+    if (m !== pqDims.m) {
+      throw new Error(`Partition m=${m} doesn't match PQ m=${pqDims.m}`)
     }
     
     // Read interleaved data
@@ -260,7 +202,7 @@ export class IVFPQ {
    * Search for k nearest neighbors
    */
   async search(queryVector: Float32Array, config: Partial<SearchConfig> = {}): Promise<SearchResults> {
-    if (!this.metadata || !this.pqMetadata || !this.centroids || !this.codebooks || !this.pqDistance) {
+    if (!this.metadata || !this.centroids || !this.pqDistance || !this.pqDistance.isReady()) {
       throw new Error('IVFPQ system not loaded')
     }
     
@@ -274,7 +216,7 @@ export class IVFPQ {
     // Step 1: Find nearest partitions
     const partitionIds = this.findNearestPartitions(queryVector, n_probe)
     
-    // Step 2: Search within each partition
+    // Step 2: Search within each partition and collect all distances
     const allCandidates: Array<{index: number, distance: number}> = []
     
     for (const partitionId of partitionIds) {
@@ -292,15 +234,15 @@ export class IVFPQ {
         queryResidual[i] = queryVector[i] - this.centroids[centroidOffset + i]
       }
       
-      // Use PQ distance to find nearest neighbors in this partition
+      // PQ codes are already Uint8Array, which is what the ONNX model expects
+      
+      // Use PQ distance to get distances to all vectors in this partition
       const partitionResults = await this.pqDistance.search(
         queryResidual,
-        partition.pq_codes,
-        this.codebooks,
-        Math.min(k, partition.size)
+        partition.pq_codes
       )
       
-      // Convert local indices to global indices
+      // Convert local indices to global indices and add all distances
       for (let i = 0; i < partitionResults.indices.length; i++) {
         const localIdx = partitionResults.indices[i]
         const globalIdx = partition.vector_ids[localIdx]
@@ -353,17 +295,21 @@ export class IVFPQ {
    * Get metadata
    */
   getMetadata(): { ivf: IVFPQMetadata, pq: PQMetadata } | null {
-    if (!this.metadata || !this.pqMetadata) {
+    if (!this.metadata || !this.pqDistance) {
       return null
     }
-    return { ivf: this.metadata, pq: this.pqMetadata }
+    const pqMetadata = this.pqDistance.getMetadata()
+    if (!pqMetadata) {
+      return null
+    }
+    return { ivf: this.metadata, pq: pqMetadata }
   }
   
   /**
    * Check if system is ready
    */
   isReady(): boolean {
-    return !!(this.metadata && this.pqMetadata && this.centroids && this.codebooks && this.pqDistance)
+    return !!(this.metadata && this.centroids && this.pqDistance && this.pqDistance.isReady())
   }
 }
 
