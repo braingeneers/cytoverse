@@ -24,7 +24,7 @@
             :disabled="!selectedFile || isLoadingData"
             @click="handleRunStopClick"
           >
-            <v-icon>{{ isRunning ? 'mdi-pause' : 'mdi-play' }}</v-icon>
+            <v-icon>{{ isRunning ? 'mdi-stop' : 'mdi-play' }}</v-icon>
           </v-btn>
         </div>
       </div>
@@ -155,9 +155,8 @@
           <v-btn
             color="primary"
             size="large"
-            :prepend-icon="isRunning ? 'mdi-pause' : 'mdi-play'"
+            :prepend-icon="isRunning ? 'mdi-stop' : 'mdi-play'"
             :disabled="!selectedFile || isLoadingData"
-            :loading="isRunning"
             data-testid="run-stop-button"
             block
             @click="handleRunStopClick"
@@ -227,6 +226,7 @@
             <div>Loading scatter plot data...</div>
           </div>
           <ScatterPlotWebGL
+            ref="scatterPlotRef"
             v-else-if="xTrainData && yTrainData && categoryData && categoryLabels.length > 0"
             :x-train-data="xTrainData"
             :y-train-data="yTrainData"
@@ -436,6 +436,9 @@ const maxRange = ref(1)
 let unifiedWorker: Worker | null = null
 const cellPositions = new Map<string, { x: number, y: number }>() // Track cell positions
 
+// ScatterPlot ref
+const scatterPlotRef = ref<{ startTimerUpdates: () => void, stopTimerUpdates: () => void, forceUpdate: () => void } | null>(null)
+
 // Site path calculation
 const sitePath = window.location.origin + window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'))
 
@@ -553,15 +556,17 @@ const createUnifiedWorker = () => {
       case 'finished':
         console.log('Worker finished processing')
         isRunning.value = false
+        scatterPlotRef.value?.stopTimerUpdates()
+        scatterPlotRef.value?.forceUpdate()
         if (startTime.value) {
           const endTime = Date.now()
           const totalElapsed = Math.round((endTime - startTime.value) / 1000)
           const minutes = Math.floor(totalElapsed / 60)
           const seconds = totalElapsed % 60
           const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
-          statusMessage.value = `Complete - Labeled ${totalProcessed.value.toLocaleString()} cells in ${timeStr}`
+          statusMessage.value = `Finished: Labeled ${totalProcessed.value.toLocaleString()} cells in ${timeStr}`
         } else {
-          statusMessage.value = 'Processing complete'
+          statusMessage.value = 'Finished'
         }
         break
       case 'error':
@@ -806,6 +811,9 @@ const start = async () => {
   progress.value = 0
   isRunning.value = true
 
+  // Start scatter plot timer updates
+  scatterPlotRef.value?.startTimerUpdates()
+
   // Create worker and start processing
   terminateWorker()
   createUnifiedWorker()
@@ -829,6 +837,10 @@ const stop = () => {
   statusMessage.value = 'Stopping processing...'
   isRunning.value = false
   progress.value = 0
+
+  // Stop scatter plot timer updates and do final refresh
+  scatterPlotRef.value?.stopTimerUpdates()
+  scatterPlotRef.value?.forceUpdate()
 
   // Calculate elapsed time when stopped
   if (startTime.value) {

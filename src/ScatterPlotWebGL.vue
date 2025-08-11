@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import createScatterplot from 'regl-scatterplot'
 import { Vector } from 'apache-arrow'
 
@@ -36,6 +36,7 @@ const canvasRef = ref<HTMLCanvasElement>()
 let scatterplotRef: ReturnType<typeof createScatterplot> | null = null
 const isInitializedRef = ref(false)
 const isDrawingRef = ref(false)
+let updateInterval: number | null = null
 
 // Generate distinct colors for categories + one extra color for test points
 // This function generates a set of colors that are evenly spaced in the HSL color space,
@@ -208,75 +209,12 @@ const initializeScatterplot = () => {
   drawInitialData()
 }
 
-// Handle test data updates - redraw everything when test data changes
-const updateTestData = () => {
-  if (
-    !scatterplotRef ||
-    !isInitializedRef.value ||
-    !props.xTrainData ||
-    !props.yTrainData ||
-    !props.categoryData
-  ) {
-    return
+// Build column data from current props
+const buildColumnData = () => {
+  if (!props.xTrainData || !props.yTrainData || !props.categoryData) {
+    return null
   }
 
-  // If test data was cleared, redraw with only training data
-  if (props.xTestData.length === 0 && props.yTestData.length === 0) {
-    const scatterplot = scatterplotRef
-    const numPoints = Math.min(props.xTrainData.length, props.yTrainData.length, props.categoryData.length)
-
-    // Get training data for redraw
-    let xArray: Float32Array
-    let yArray: Float32Array
-
-    if (props.xTrainData.data.length > 0 && props.xTrainData.data[0].values instanceof Float32Array) {
-      xArray = props.xTrainData.data[0].values as Float32Array
-    } else {
-      xArray = new Float32Array(numPoints)
-      for (let i = 0; i < numPoints; i++) {
-        xArray[i] = props.xTrainData.get(i) || 0
-      }
-    }
-
-    if (props.yTrainData.data.length > 0 && props.yTrainData.data[0].values instanceof Float32Array) {
-      yArray = props.yTrainData.data[0].values as Float32Array
-    } else {
-      yArray = new Float32Array(numPoints)
-      for (let i = 0; i < numPoints; i++) {
-        yArray[i] = props.yTrainData.get(i) || 0
-      }
-    }
-
-    let categoryArrayData: number[]
-    if (props.categoryData.data.length > 0 && props.categoryData.data[0].values) {
-      categoryArrayData = Array.from(props.categoryData.data[0].values)
-    } else {
-      categoryArrayData = Array.from(
-        { length: props.categoryData.length },
-        (_, i) => props.categoryData!.get(i) || 0
-      )
-    }
-
-    const trainX = Array.from(xArray)
-    const trainY = Array.from(yArray)
-    const trainSize = new Array(numPoints).fill(0)
-
-    const columnData = {
-      x: new Float32Array(trainX),
-      y: new Float32Array(trainY),
-      valueA: categoryArrayData,
-      valueB: trainSize,
-    }
-
-    // Redraw with only training data
-    scatterplot.draw(columnData).then(() => {
-      console.log('Cleared test data - showing only training points')
-    })
-
-    return
-  }
-
-  const scatterplot = scatterplotRef
   const numPoints = Math.min(props.xTrainData.length, props.yTrainData.length, props.categoryData.length)
 
   // Get training data
@@ -311,6 +249,16 @@ const updateTestData = () => {
     )
   }
 
+  // If no test data, return just training data
+  if (props.xTestData.length === 0 && props.yTestData.length === 0) {
+    return {
+      x: new Float32Array(xArray),
+      y: new Float32Array(yArray),
+      valueA: categoryArrayData,
+      valueB: new Array(numPoints).fill(0),
+    }
+  }
+
   // Combine training and test data
   const trainX = Array.from(xArray)
   const trainY = Array.from(yArray)
@@ -319,72 +267,77 @@ const updateTestData = () => {
 
   // Create category data for test points
   const categoryColors = generateCategoryColors(props.categoryLabels.length)
-
-  // Use actual labels when available, fallback to gray (last color) for unlabeled points
   const testCategories = props.xTestData.map((_, index) => {
     if (index < props.testDataLabels.length) {
       const labelIndex = props.testDataLabels[index]
-      // Use the actual label if valid, otherwise use gray (last color)
       return labelIndex >= 0 && labelIndex < props.categoryLabels.length
         ? labelIndex
         : categoryColors.length - 1
     }
-    return categoryColors.length - 1 // Default to gray for points without labels yet
+    return categoryColors.length - 1
   })
 
   const allCategories = [...categoryArrayData.slice(0, numPoints), ...testCategories]
 
-  // Create size data: 0 for training data (first pointSize), 1 for unlabeled test data (second pointSize), 2 for labeled test data (third pointSize)
+  // Create size data
   const trainSize = new Array(numPoints).fill(0)
   const testSize = props.xTestData.map((_, index) => {
     if (index < props.testDataLabels.length) {
       const labelIndex = props.testDataLabels[index]
-      // Use size 2 for labeled points (valid label), size 1 for unlabeled
       return labelIndex >= 0 && labelIndex < props.categoryLabels.length ? 2 : 1
     }
-    return 1 // Default to unlabeled size for points without labels yet
+    return 1
   })
   const allSizes = [...trainSize, ...testSize]
 
-  const columnData = {
+  return {
     x: allX,
     y: allY,
     valueA: allCategories,
     valueB: allSizes,
   }
-
-  // Redraw all points (training + test)
-  const redrawAllData = async () => {
-    if (isDrawingRef.value) {
-      console.log(
-        '❌ Skipping redraw - already drawing. Current test labels count:',
-        props.testDataLabels.filter((l) => l >= 0).length
-      )
-      return
-    }
-    isDrawingRef.value = true
-    try {
-      await scatterplot.draw(columnData)
-      console.log(
-        'Redrew all points:',
-        allX.length,
-        'total (',
-        numPoints,
-        'training +',
-        props.xTestData.length,
-        'test)'
-      )
-    } finally {
-      isDrawingRef.value = false
-    }
-  }
-  redrawAllData()
 }
 
-// Watchers for reactive updates
+// Timer-based update function
+const doTimerUpdate = async () => {
+  if (!scatterplotRef || !isInitializedRef.value || isDrawingRef.value) {
+    return
+  }
+
+  const columnData = buildColumnData()
+  if (!columnData) return
+
+  isDrawingRef.value = true
+  try {
+    await scatterplotRef.draw(columnData)
+  } finally {
+    isDrawingRef.value = false
+  }
+}
+
+// Start/stop timer updates
+const startTimerUpdates = () => {
+  if (updateInterval) return
+  updateInterval = window.setInterval(doTimerUpdate, 1000)
+}
+
+const stopTimerUpdates = () => {
+  if (updateInterval) {
+    clearInterval(updateInterval)
+    updateInterval = null
+  }
+}
+
+// Force immediate update (for final refresh)
+const forceUpdate = () => {
+  doTimerUpdate()
+}
+
+// Watch only training data changes (need to reinitialize)
 watch(
   [() => props.xTrainData, () => props.yTrainData, () => props.categoryData, () => props.categoryLabels],
   () => {
+    stopTimerUpdates()
     if (scatterplotRef) {
       scatterplotRef.destroy()
       scatterplotRef = null
@@ -394,13 +347,12 @@ watch(
   }
 )
 
-watch(
-  [() => props.xTestData, () => props.yTestData, () => props.testDataLabels],
-  () => {
-    updateTestData()
-  },
-  { deep: true }
-)
+// Expose control functions
+defineExpose({
+  startTimerUpdates,
+  stopTimerUpdates,
+  forceUpdate
+})
 
 onMounted(() => {
   initializeScatterplot()
@@ -409,6 +361,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  stopTimerUpdates()
   if (scatterplotRef) {
     scatterplotRef.destroy()
   }

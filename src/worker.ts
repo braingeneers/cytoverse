@@ -15,7 +15,7 @@ import { IVFPQ } from '@cytoverse/ivfpq'
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50
 const NUM_PARTITIONS_TO_SEARCH = 2
-const BATCH_SIZE = 64 
+const BATCH_SIZE = 32 
 
 // TypeScript interfaces
 interface ModelInfo {
@@ -129,7 +129,7 @@ async function instantiateModel(
   useWebGPU: boolean
 ): Promise<ModelInfo> {
   console.log(`Instantiating model ${modelID} from ${modelsURL}`)
-  self.postMessage({ type: 'status', message: 'Downloading model...' } as StatusMessage)
+  // self.postMessage({ type: 'status', message: 'Downloading model...' } as StatusMessage)
 
   // Fetch model genes
   let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`)
@@ -177,7 +177,7 @@ async function instantiateModel(
 
   // Configure ONNX Runtime
   self.postMessage({ type: 'status', message: 'Instantiating model...' } as StatusMessage)
-  env.wasm.numThreads = Math.max(1, navigator.hardwareConcurrency - 3)
+  env.wasm.numThreads = Math.max(1, navigator.hardwareConcurrency - 4)
   env.wasm.proxy = true
 
   let sessionOptions = {}
@@ -725,21 +725,22 @@ async function start(
           Number(mappingResults.output.data[startIndex + 1]),
         ])
       }
-
-      // First send unlabeled coordinates for immediate display
-      const unlabeledBatch: CellUpdate[] = []
-      for (let i = 0; i < currentBatchSize; i++) {
-        const cellIndex = batchStart + i
-        unlabeledBatch.push({
-          cellId: cellNames[cellIndex],
-          x: coordinates[i][0],
-          y: coordinates[i][1],
-        })
-      }
-      self.postMessage({
-        type: 'cell_batch_update',
-        cells: unlabeledBatch,
-      } as CellBatchUpdate)
+      
+      // Skip un-labelled updates to reduce overhead
+      // // Send unlabeled coordinates for immediate display
+      // const unlabeledBatch: CellUpdate[] = []
+      // for (let i = 0; i < currentBatchSize; i++) {
+      //   const cellIndex = batchStart + i
+      //   unlabeledBatch.push({
+      //     cellId: cellNames[cellIndex],
+      //     x: coordinates[i][0],
+      //     y: coordinates[i][1],
+      //   })
+      // }
+      // self.postMessage({
+      //   type: 'cell_batch_update',
+      //   cells: unlabeledBatch,
+      // } as CellBatchUpdate)
 
       // Label cells using IVFPQ
       const embeddingDim = embeddingResults.output.dims[1] as number
@@ -774,6 +775,7 @@ async function start(
       // Send progress
       self.postMessage({
         type: 'progress',
+        message: 'Labeling',
         countFinished: batchEnd,
         totalToProcess: cellNames.length,
       } as ProgressMessage)
