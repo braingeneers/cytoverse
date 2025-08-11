@@ -220,7 +220,7 @@
       <!-- Main Content -->
       <v-main>
         <div
-          class="main-content"
+          class="main-content     "
           :style="{ marginLeft: sidebarOpen ? 0 : (isMobile ? 0 : miniDrawerWidth + 'px') }"
         >
           <div v-if="isLoadingData" class="loading-container">
@@ -353,7 +353,6 @@ const miniDrawerWidth = 64
 
 // Types for cell updates
 interface CellUpdate {
-  type: 'cell_update'
   cellId: string
   x: number
   y: number
@@ -361,6 +360,11 @@ interface CellUpdate {
   labelId?: number
   confidence?: number
   trainVectorId?: number
+}
+
+interface CellBatchUpdate {
+  type: 'cell_batch_update'
+  cells: CellUpdate[]
 }
 
 // IndexedDB schema
@@ -455,50 +459,66 @@ const normalizeCoordinates = (x: number, y: number) => {
 const cellIdToIndex = new Map<string, number>()
 
 // Handle cell updates from unified worker
-const handleCellUpdate = (update: CellUpdate) => {
-  // Normalize coordinates
-  const [normalizedX, normalizedY] = normalizeCoordinates(update.x, update.y)
+const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
+  // Process all cells in batch
+  const newXData: number[] = []
+  const newYData: number[] = []
+  const newLabels: number[] = []
+  const updatedIndices: number[] = []
   
-  let cellIndex = cellIdToIndex.get(update.cellId)
-  
-  if (cellIndex === undefined) {
-    // New cell - add to arrays
-    cellIndex = xTestData.value.length
-    cellIdToIndex.set(update.cellId, cellIndex)
+  for (const update of batchUpdate.cells) {
+    // Normalize coordinates
+    const [normalizedX, normalizedY] = normalizeCoordinates(update.x, update.y)
     
-    xTestData.value.push(normalizedX)
-    yTestData.value.push(normalizedY)
-    testDataLabels.value.push(update.labelId ?? -1)
-  } else {
-    // Update existing cell
-    xTestData.value[cellIndex] = normalizedX
-    yTestData.value[cellIndex] = normalizedY
-    if (update.labelId !== undefined) {
-      testDataLabels.value[cellIndex] = update.labelId
+    let cellIndex = cellIdToIndex.get(update.cellId)
+    
+    if (cellIndex === undefined) {
+      // New cell - add to arrays
+      cellIndex = xTestData.value.length + newXData.length
+      cellIdToIndex.set(update.cellId, cellIndex)
+      
+      newXData.push(normalizedX)
+      newYData.push(normalizedY)
+      newLabels.push(update.labelId ?? -1)
+    } else {
+      // Update existing cell
+      updatedIndices.push(cellIndex)
+      xTestData.value[cellIndex] = normalizedX
+      yTestData.value[cellIndex] = normalizedY
+      if (update.labelId !== undefined) {
+        testDataLabels.value[cellIndex] = update.labelId
+      }
+    }
+    
+    // Update label counts if labeled
+    if (update.labelId !== undefined && update.labelId >= 0 && update.labelId < categoryLabels.value.length) {
+      const label = categoryLabels.value[update.labelId]
+      labelCounts.value[label] = (labelCounts.value[label] || 0) + 1
+      totalLabeled.value += 1
+      
+      // Store in IndexedDB if available
+      if (db) {
+        const tx = db.transaction('results', 'readwrite')
+        tx.store.put(
+          {
+            labelId: update.labelId,
+            x: normalizedX,
+            y: normalizedY,
+            confidence: update.confidence ?? 0,
+          },
+          update.cellId
+        ).catch((error) => {
+          console.error('Failed to store test result:', error)
+        })
+      }
     }
   }
   
-  // Update label counts if labeled
-  if (update.labelId !== undefined && update.labelId >= 0 && update.labelId < categoryLabels.value.length) {
-    const label = categoryLabels.value[update.labelId]
-    labelCounts.value[label] = (labelCounts.value[label] || 0) + 1
-    totalLabeled.value += 1
-    
-    // Store in IndexedDB if available
-    if (db) {
-      const tx = db.transaction('results', 'readwrite')
-      tx.store.put(
-        {
-          labelId: update.labelId,
-          x: normalizedX,
-          y: normalizedY,
-          confidence: update.confidence ?? 0,
-        },
-        update.cellId
-      ).catch((error) => {
-        console.error('Failed to store test result:', error)
-      })
-    }
+  // Batch append new data to arrays
+  if (newXData.length > 0) {
+    xTestData.value.push(...newXData)
+    yTestData.value.push(...newYData)
+    testDataLabels.value.push(...newLabels)
   }
 }
 
@@ -527,8 +547,8 @@ const createUnifiedWorker = () => {
         totalProcessed.value = evt.data.countFinished
         statusMessage.value = `${evt.data.message} ${evt.data.countFinished} of ${evt.data.totalToProcess}...`
         break
-      case 'cell_update':
-        handleCellUpdate(evt.data as CellUpdate)
+      case 'cell_batch_update':
+        handleCellBatchUpdate(evt.data as CellBatchUpdate)
         break
       case 'finished':
         console.log('Worker finished processing')
