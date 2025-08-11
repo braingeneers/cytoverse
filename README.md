@@ -111,6 +111,10 @@ npx playwright install
 npm run dev
 ```
 
+## Notes
+
+- We assume embeddings are normalized onto the unit sphere
+
 ## Benchmarks
 
 ### KMeans ONNX Browser Benchmark

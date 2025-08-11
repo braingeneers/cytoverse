@@ -525,7 +525,7 @@ const createUnifiedWorker = () => {
       case 'progress':
         progress.value = Math.min(100, Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
         totalProcessed.value = evt.data.countFinished
-        statusMessage.value = `Processed ${evt.data.countFinished} of ${evt.data.totalToProcess} cells...`
+        statusMessage.value = `${evt.data.message} ${evt.data.countFinished} of ${evt.data.totalToProcess}...`
         break
       case 'cell_update':
         handleCellUpdate(evt.data as CellUpdate)
@@ -798,7 +798,6 @@ const start = async () => {
       modelsURL: `${sitePath}/models`,
       modelID: selectedModel.value,
       h5File: selectedFile.value,
-      cellRangePercent: 100,
       useWebGPU: useWebGPU.value,
       categoryData: categoryData.value?.data[0].values || new Int32Array(0),
       categoryDataLength: categoryData.value?.length || 0,

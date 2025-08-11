@@ -15,7 +15,7 @@ import { IVFPQ } from '@cytoverse/ivfpq'
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50
 const NUM_PARTITIONS_TO_SEARCH = 2
-const BATCH_SIZE = 64
+const BATCH_SIZE = 16 
 
 // TypeScript interfaces
 interface ModelInfo {
@@ -31,7 +31,6 @@ interface StartMessage {
   modelID: string
   modelsURL: string
   h5File: File
-  cellRangePercent: number
   useWebGPU: boolean
   categoryData: Int32Array
   categoryDataLength: number
@@ -96,7 +95,6 @@ interface FinishedMessage {
   type: 'finished'
   datasetLabel: string
   totalProcessed: number
-  totalNumCells: number
 }
 
 // Global state
@@ -111,7 +109,6 @@ self.addEventListener('message', async function (event: MessageEvent<StartMessag
       event.data.modelID,
       event.data.modelsURL,
       event.data.h5File,
-      event.data.cellRangePercent,
       event.data.useWebGPU,
       event.data.categoryData,
       event.data.categoryDataLength
@@ -611,7 +608,6 @@ async function start(
   modelID: string,
   modelsURL: string,
   h5File: File,
-  cellRangePercent: number,
   useWebGPU: boolean,
   categoryDataIn: Int32Array,
   categoryDataLengthIn: number
@@ -663,9 +659,6 @@ async function start(
         `Failed to extract gene names: ${error instanceof Error ? error.message : String(error)}`
       )
     }
-
-    const totalNumCells = cellNames.length
-    cellNames = cellNames.slice(0, (cellRangePercent * cellNames.length) / 100)
 
     // Extract raw counts
     let rawCountsData: RawCountsData
@@ -784,7 +777,6 @@ async function start(
       type: 'finished',
       datasetLabel: h5File.name,
       totalProcessed: cellNames.length,
-      totalNumCells,
     } as FinishedMessage)
   } catch (error) {
     try {
