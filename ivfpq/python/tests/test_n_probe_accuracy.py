@@ -7,7 +7,7 @@ This test creates a sophisticated distribution of vectors with clear cluster str
 then verifies that self-recall (finding exact matches) improves monotonically with n_probe.
 
 The new IVFPQ implementation returns distances and vector IDs from all partitions probed,
-which are then merged and sorted. A consensus is computed from the top-k (default 50) 
+which are then merged and sorted. A consensus is computed from the top-k (default 50)
 results from this merged list to determine the final nearest neighbors.
 """
 
@@ -113,7 +113,9 @@ class TestNProbeAccuracy:
             )
 
             if verbose and i < 3:
-                print(f"    Query {query_idx}: returned {len(vector_ids)} results from {n_probe} partitions")
+                print(
+                    f"    Query {query_idx}: returned {len(vector_ids)} results from {n_probe} partitions"
+                )
 
             # Check if exact match is in the final top-k results after consensus
             if query_idx in vector_ids[:k]:
@@ -124,7 +126,9 @@ class TestNProbeAccuracy:
                         f"    Query {query_idx}: found at position {idx_pos}, distance={distances[idx_pos]:.3f}"
                     )
             elif verbose and i < 5:
-                print(f"    Query {query_idx}: NOT FOUND in top {k} (consensus from top {topk_consensus})")
+                print(
+                    f"    Query {query_idx}: NOT FOUND in top {k} (consensus from top {topk_consensus})"
+                )
 
         recall = found_count / len(query_indices)
         return recall
@@ -137,7 +141,7 @@ class TestNProbeAccuracy:
         print(
             f"\nTraining IVF with {self.n_vectors} vectors, {self.n_partitions} partitions"
         )
-        ivf = IVFPQ.build(
+        IVFPQ.build(
             vectors=self.vectors,
             n_partitions=self.n_partitions,
             output_dir=output_dir,
@@ -145,6 +149,7 @@ class TestNProbeAccuracy:
             pq_m=16,
             pq_k=256,
         )
+        ivf = IVFPQ.load(output_dir)
 
         # Create APPROXIMATE queries by perturbing existing vectors
         # This simulates real-world queries that are similar but not exact matches
@@ -205,12 +210,16 @@ class TestNProbeAccuracy:
                             f"    Query {i}: ground truth {gt_idx} found at position {idx_pos} (from {len(vector_ids)} consensus results), distance={distances[idx_pos]:.3f}"
                         )
                 elif n_probe in [1, 32] and i < 3:
-                    print(f"    Query {i}: ground truth {gt_idx} NOT FOUND in top 5 (from {len(vector_ids)} consensus results)")
+                    print(
+                        f"    Query {i}: ground truth {gt_idx} NOT FOUND in top 5 (from {len(vector_ids)} consensus results)"
+                    )
 
             recall = found_count / len(query_vectors)
 
             recalls.append(recall)
-            print(f"n_probe={n_probe:3d}: recall@5 = {recall:.3f} (consensus from top {topk_consensus})")
+            print(
+                f"n_probe={n_probe:3d}: recall@5 = {recall:.3f} (consensus from top {topk_consensus})"
+            )
 
         # Verify monotonic improvement (allowing for small fluctuations due to ties)
         for i in range(1, len(recalls)):
@@ -246,7 +255,7 @@ class TestNProbeAccuracy:
         output_dir = tmp_path
 
         # Train IVF
-        ivf = IVFPQ.build(
+        IVFPQ.build(
             vectors=self.vectors,
             n_partitions=self.n_partitions,
             output_dir=output_dir,
@@ -254,6 +263,7 @@ class TestNProbeAccuracy:
             pq_m=16,
             pq_k=256,
         )
+        ivf = IVFPQ.load(output_dir)
 
         centroids = ivf.centroids
 
