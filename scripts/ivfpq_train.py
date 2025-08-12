@@ -119,7 +119,7 @@ def train(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Train IVF with residual vectors (includes PQ training and export)
-    _ = IVFPQ.build(
+    IVFPQ.build(
         vectors=vectors_tensor,
         output_dir=output_dir,
         n_partitions=None,  # Use default partitioning

@@ -342,7 +342,9 @@ class IVFPQ(nn.Module):
         Returns:
             Tuple of (top_k_indices, top_k_distances)
         """
-        distances = torch.cdist(query_vector.unsqueeze(0), partition_centroids).squeeze(0)
+        distances = torch.cdist(query_vector.unsqueeze(0), partition_centroids).squeeze(
+            0
+        )
         top_k_distances, top_k_indices = torch.topk(distances, k=k, largest=False)
         return top_k_indices, top_k_distances
 
@@ -357,7 +359,7 @@ class IVFPQ(nn.Module):
         max_iterations: int = 100,
         pq_m: int = 16,
         pq_k: int = 256,
-    ) -> "IVFPQ":
+    ):
         """
         Build the IVFPQ index using residual vectors.
 
@@ -384,29 +386,30 @@ class IVFPQ(nn.Module):
         assert len(assignments) == vectors.shape[0]
         assert np.all(assignments >= 0)
 
+        # REMIND: Crashes! Not using...yet.
+        # # Export ONNX model for the forward method
+        # onnx_file = output_dir / "ivf_forward.onnx"
+        # dummy_query = torch.randn(vectors.shape[1])
+        # torch.onnx.export(
+        #     ivf,
+        #     (dummy_query, ivf.centroids.data, 4),  # Example inputs: query, partition_centroids, k
+        #     onnx_file,
+        #     export_params=True,
+        #     opset_version=11,
+        #     do_constant_folding=True,
+        #     input_names=["query_vector", "partition_centroids", "k"],
+        #     output_names=["top_k_indices", "top_k_distances"],
+        #     dynamic_axes={
+        #         "query_vector": {0: "d"},
+        #         "partition_centroids": {0: "n_partitions", 1: "d"},
+        #     },
+        # )
+
+        # Load the trained IVFPQ model just for verification
         ivf = IVFPQ.load(output_dir)
-
-        # Export ONNX model for the forward method
-        onnx_file = output_dir / "ivf_forward.onnx"
-        dummy_query = torch.randn(vectors.shape[1])
-        torch.onnx.export(
-            ivf,
-            (dummy_query, ivf.centroids.data, 4),  # Example inputs: query, partition_centroids, k
-            onnx_file,
-            export_params=True,
-            opset_version=11,
-            do_constant_folding=True,
-            input_names=["query_vector", "partition_centroids", "k"],
-            output_names=["top_k_indices", "top_k_distances"],
-            dynamic_axes={
-                "query_vector": {0: "d"},
-                "partition_centroids": {0: "n_partitions", 1: "d"},
-            },
-        )
-
         assert np.all(assignments < ivf.n_partitions)
 
-        return ivf
+        logger.info(f"Build completed of IVFPQ model into {output_dir}")
 
     def search(
         self,

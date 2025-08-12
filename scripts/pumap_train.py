@@ -27,7 +27,9 @@ app = typer.Typer(
 @app.command()
 def train(
     vectors_path: Path = typer.Argument(..., help="Path to embeddings.npy file"),
-    labels_path: Path = typer.Argument(..., help="Path to labels.parquet file for stratified sampling"),
+    labels_path: Path = typer.Argument(
+        ..., help="Path to labels.parquet file for stratified sampling"
+    ),
     output_path: Path = typer.Argument(..., help="Path to output the trained model"),
     num_vectors: Optional[int] = typer.Option(
         None,
@@ -58,35 +60,87 @@ def train(
             # Stratified sampling based on labels
             typer.echo(f"Loading labels from {labels_path}")
             labels_df = pd.read_parquet(labels_path)
-            
+
             if stratify_label not in labels_df.columns:
-                typer.echo(f"Error: Column '{stratify_label}' not found in labels file", err=True)
+                typer.echo(
+                    f"Error: Column '{stratify_label}' not found in labels file",
+                    err=True,
+                )
                 raise typer.Exit(1)
-            
+
             if len(labels_df) != vectors.shape[0]:
-                typer.echo(f"Error: Number of labels ({len(labels_df)}) doesn't match number of vectors ({vectors.shape[0]})", err=True)
+                typer.echo(
+                    f"Error: Number of labels ({len(labels_df)}) doesn't match number of vectors ({vectors.shape[0]})",
+                    err=True,
+                )
                 raise typer.Exit(1)
-            
-            print(f"Selecting {num_vectors} stratified vectors from {vectors.shape[0]} total vectors based on '{stratify_label}' column")
-            
-            # Create indices array for stratified splitting
-            indices = np.arange(vectors.shape[0])
+
+            # Check for NaN values in the stratify column
             stratify_values = labels_df[stratify_label].values
-            
-            # Use train_test_split for stratified sampling
-            selected_indices, _ = train_test_split(
-                indices,
-                test_size=1.0 - (num_vectors / vectors.shape[0]),
-                stratify=stratify_values,
-                random_state=42
+            nan_mask = pd.isna(stratify_values)
+            nan_count = nan_mask.sum()
+            nan_percentage = (nan_count / len(stratify_values)) * 100
+
+            typer.echo(
+                f"⚠️ NaN values in '{stratify_label}' column: {nan_count} ({nan_percentage:.2f}%)"
             )
-            
+
+            if nan_percentage >= 10:
+                typer.echo(
+                    f"❌ Error: Too many NaN values ({nan_percentage:.2f}%) in stratify column '{stratify_label}'. Maximum allowed is 10%.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+
+            # If there are NaN values but less than 10%, filter them out
+            if nan_count > 0:
+                typer.echo(
+                    f"Filtering out {nan_count} rows with NaN values for stratification"
+                )
+                valid_mask = ~nan_mask
+                valid_indices = np.arange(vectors.shape[0])[valid_mask]
+                valid_stratify_values = stratify_values[valid_mask]
+
+                # Adjust num_vectors to account for filtered rows
+                adjusted_num_vectors = min(num_vectors, len(valid_indices))
+                typer.echo(
+                    f"Adjusted selection size: {adjusted_num_vectors} vectors from {len(valid_indices)} valid vectors"
+                )
+
+                # Use train_test_split for stratified sampling on valid indices
+                selected_valid_indices, _ = train_test_split(
+                    valid_indices,
+                    test_size=1.0 - (adjusted_num_vectors / len(valid_indices)),
+                    stratify=valid_stratify_values,
+                    random_state=42,
+                )
+                selected_indices = selected_valid_indices
+            else:
+                print(
+                    f"Selecting {num_vectors} stratified vectors from {vectors.shape[0]} total vectors based on '{stratify_label}' column"
+                )
+
+                # Create indices array for stratified splitting
+                indices = np.arange(vectors.shape[0])
+
+                # Use train_test_split for stratified sampling
+                selected_indices, _ = train_test_split(
+                    indices,
+                    test_size=1.0 - (num_vectors / vectors.shape[0]),
+                    stratify=stratify_values,
+                    random_state=42,
+                )
+
             training_vector_ids = selected_indices
             vectors = vectors[selected_indices]
         else:
             # Random sampling (original behavior)
-            print(f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors")
-            selected_indices = random_state.choice(vectors.shape[0], num_vectors, replace=False)
+            print(
+                f"Selecting {num_vectors} random vectors from {vectors.shape[0]} total vectors"
+            )
+            selected_indices = random_state.choice(
+                vectors.shape[0], num_vectors, replace=False
+            )
             training_vector_ids = selected_indices
             vectors = vectors[selected_indices]
     else:
@@ -354,10 +408,13 @@ def export(
 
             # Create mapping from values to indices
             value_to_idx = {val: idx for idx, val in enumerate(categories)}
-            indices = np.array([
-                value_to_idx.get(str(x), -1) if pd.notna(x) else -1
-                for x in labels_df[col]
-            ], dtype=np.int16)
+            indices = np.array(
+                [
+                    value_to_idx.get(str(x), -1) if pd.notna(x) else -1
+                    for x in labels_df[col]
+                ],
+                dtype=np.int16,
+            )
 
         # Validate that the column doesn't have too many categories
         assert (

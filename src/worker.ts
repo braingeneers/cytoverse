@@ -163,8 +163,8 @@ async function instantiateModel(
     self.postMessage({
       type: 'progress',
       message: 'Downloading model...',
-      countFinished: loadedBytes,
-      totalToProcess: totalBytes,
+      countFinished: Math.round(loadedBytes / (1024 * 1024)),
+      totalToProcess: Math.round(totalBytes / (1024 * 1024)),
     } as ProgressMessage)
   }
 
@@ -613,7 +613,7 @@ async function start(
   modelsURL: string,
   h5File: File,
   useWebGPU: boolean,
-  categoryDataIn: Int32Array,
+  categoryDataIn: Int16Array,
   categoryDataLengthIn: number
 ): Promise<void> {
   console.log(`Starting unified worker for model ${modelID} with file ${h5File.name}`)

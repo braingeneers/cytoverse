@@ -22,10 +22,22 @@ update-models-list:
 	ls public/models | sort > public/models/models.txt
 
 scimilarity: model_id=scimilarity
-scimilarity: notice scimilarity-embeddings scimilarity-model ivfpq-train pumap update-models-list
+scimilarity: stratify_label=prediction
+scimilarity: notice scimilarity-model \
+	scimilarity-embeddings ivfpq-train pumap update-models-list
 
-# brain: model_id=brain
-# brain: notice brain-embeddings scimilarity-model pumap ivfpq
+sspsygene: model_id=sspsygene
+sspsygene: stratify_label=Type.v1
+# sspsygene: notice scimilarity-model \
+# 	sspsygene-embeddings ivfpq-train pumap update-models-list
+sspsygene: notice scimilarity-model \
+	pumap update-models-list
+
+# Embedding Model (only one for now)
+scimilarity-model:
+	python scripts/scimilarity_export_model.py \
+	data/models/scimilarity/model_v1.1 \
+	public/models/$(model_id)/embedding
 
 # Embeddings (Must be first as model uses these to validate the export)
 scimilarity-embeddings:
@@ -38,28 +50,16 @@ scimilarity-embeddings:
 	--labels study \
 	--validate
 
-# brain-embeddings:
-# 	python scripts/ingest_h5ad_as_reference.py \
-# 	data/brain.h5ad \
-# 	data/models/scimilarity/model_v1.1 \
-# 	data/brain \
-# 	--labels CellType \
-# 	--labels tissue_type
-
-# Embedding Model
-scimilarity-model:
-	python scripts/scimilarity_export_model.py \
+sspsygene-embeddings:
+	python scripts/h5ad_to_embeddings.py \
+	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
 	data/models/scimilarity/model_v1.1 \
-	public/models/$(model_id)/embedding
-
-
-# IVFPQ tune
-ivfpq-tune:
-	python scripts/ivfpq_tune.py \
-        data/references/scimilarity/embeddings.parquet \
-        data/references/scimilarity/labels.parquet \
-        --num-samples 16 \
-        --max-concurrent-trials 8
+	data/references/sspsygene \
+	--labels Dataset \
+	--labels Gestational_week \
+	--labels Class \
+	--labels Type.v1 \
+	--labels Subtype.v1
 
 # IVF
 ivfpq-train:
@@ -78,7 +78,7 @@ pumap-train:
 	data/references/$(model_id)/embeddings.npy \
 	data/references/$(model_id)/labels.parquet \
 	public/models/$(model_id)/pumap \
-	--stratify-label prediction \
+	--stratify-label $(stratify_label) \
 	--num-vectors 250000
 
 pumap-map:

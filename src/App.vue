@@ -52,7 +52,7 @@
               variant="text"
               icon
               size="small"
-              @click="window.open('https://github.com/braingeneers/cytoverse', '_blank')"
+              @click="openGithub"
             >
               <v-icon>mdi-github</v-icon>
             </v-btn>
@@ -545,7 +545,7 @@ const createUnifiedWorker = () => {
       case 'progress':
         progress.value = Math.min(100, Math.round((evt.data.countFinished / evt.data.totalToProcess) * 100))
         totalProcessed.value = evt.data.countFinished
-        statusMessage.value = `${evt.data.message} ${evt.data.countFinished} of ${evt.data.totalToProcess}...`
+        statusMessage.value = `${evt.data.message} ${evt.data.countFinished.toLocaleString()} of ${evt.data.totalToProcess.toLocaleString()}...`
         break
       case 'cell_batch_update':
         handleCellBatchUpdate(evt.data as CellBatchUpdate)
@@ -946,6 +946,10 @@ const handleFileSelect = (files: File | File[]) => {
   } else {
     selectedFile.value = null
   }
+}
+
+const openGithub = () => {
+  window.open('https://github.com/braingeneers/cytoverse', '_blank')
 }
 
 const updateIsMobile = () => {

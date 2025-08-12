@@ -143,19 +143,12 @@ def ingest(
     print(f"\nCreating output directory: {output_path}")
     os.makedirs(output_path, exist_ok=True)
 
-    # Save embeddings to embeddings.parquet
-    embeddings_path = output_path / "embeddings.parquet"
+    # Save embeddings to embeddings.npy
+    embeddings_path = output_path / "embeddings.npy"
     print(f"Saving embeddings to: {embeddings_path}")
 
-    # Convert embeddings to DataFrame
-    embeddings_df = pd.DataFrame(embeddings.astype(np.float32))
-
-    # Save to parquet without index
-    embeddings_df.to_parquet(
-        embeddings_path,
-        compression=None,
-        index=None,
-    )
+    # Save embeddings as numpy array
+    np.save(embeddings_path, embeddings.astype(np.float32))
 
     # Extract and save labels if specified
     if labels:
@@ -196,7 +189,7 @@ def ingest(
         try:
             _validate_outputs(
                 h5ad_path=h5ad_path,
-                parquet_dir=output_path,
+                output_dir=output_path,
                 model_path=model_path,
                 n_samples=10,
                 ce=ce,  # Pass the already loaded model
@@ -208,13 +201,13 @@ def ingest(
 
 def _validate_outputs(
     h5ad_path: Path,
-    parquet_dir: Path,
+    output_dir: Path,
     model_path: Path,
     n_samples: int = 10,
     ce: CellEmbedding = None,
 ) -> None:
     """
-    Validate that parquet files maintain correct row ordering and embeddings match.
+    Validate that output files maintain correct row ordering and embeddings match.
 
     This function:
     1. Loads random rows from the original h5ad
@@ -222,24 +215,24 @@ def _validate_outputs(
     3. Verifies embeddings match when regenerated through SCimilarity
     """
 
-    print(f"Validating parquet files against h5ad: {h5ad_path}")
+    print(f"Validating output files against h5ad: {h5ad_path}")
 
     # Load the h5ad file
     print(f"\nLoading h5ad file...")
     adata = sc.read_h5ad(h5ad_path)
     print(f"  Shape: {adata.shape}")
 
-    # Load parquet files
-    embeddings_path = parquet_dir / "embeddings.parquet"
-    labels_path = parquet_dir / "labels.parquet"
+    # Load output files
+    embeddings_path = output_dir / "embeddings.npy"
+    labels_path = output_dir / "labels.parquet"
 
     if not embeddings_path.exists():
         print(f"❌ Error: {embeddings_path} not found")
         raise typer.Exit(1)
 
     print(f"\nLoading embeddings from: {embeddings_path}")
-    embeddings_df = pd.read_parquet(embeddings_path)
-    print(f"  Embeddings shape: {embeddings_df.shape}")
+    embeddings_array = np.load(embeddings_path)
+    print(f"  Embeddings shape: {embeddings_array.shape}")
 
     # Check if labels file exists
     has_labels = labels_path.exists()
@@ -250,7 +243,7 @@ def _validate_outputs(
         print(f"  Label columns: {list(labels_df.columns)}")
 
     # Select random indices to validate
-    n_cells = min(adata.n_obs, embeddings_df.shape[0])
+    n_cells = min(adata.n_obs, embeddings_array.shape[0])
     n_samples = min(n_samples, n_cells)
     random_indices = np.random.choice(n_cells, size=n_samples, replace=False)
     random_indices.sort()
@@ -324,7 +317,7 @@ def _validate_outputs(
 
     for i, idx in enumerate(random_indices):
         regenerated = subset_embeddings[i]
-        stored = embeddings_df.iloc[idx].values
+        stored = embeddings_array[idx]
 
         # Calculate max absolute difference
         max_diff = np.max(np.abs(regenerated - stored))

@@ -91,7 +91,24 @@
       ]
     },
     {
-      "name": "pumap map",
+      "name": "pumap train sspsygene",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/pumap_train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "train",
+        "${workspaceFolder}/data/references/sspsygene/embeddings.npy",
+        "${workspaceFolder}/data/references/sspsygene/labels.parquet",
+        "${workspaceFolder}/public/models/sspsygene/pumap",
+        "--stratify-label",
+        "Type.v1",
+        "--num-vectors",
+        "10_000"
+      ]
+    },
+    {
+      "name": "pumap map dev",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/pumap_train.py",
