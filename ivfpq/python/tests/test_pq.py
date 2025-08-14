@@ -245,7 +245,7 @@ class TestPQONNXModels:
 
         assert indices.shape[0] == 100  # Returns all distances
         assert distances.shape == indices.shape
-        assert indices.dtype == torch.long
+        assert indices.dtype == torch.int32
         assert distances.dtype == torch.float32
         assert torch.all(indices >= 0)
         assert torch.all(indices < 100)

@@ -327,7 +327,7 @@ class PQDistance(nn.Module):
             total_distances, N, largest=False, sorted=True
         )
 
-        return indices, top_distances
+        return indices.to(torch.int32), top_distances
 
 
 def create_pq_system(

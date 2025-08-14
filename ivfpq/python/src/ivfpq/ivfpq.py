@@ -346,7 +346,7 @@ class IVFPQ(nn.Module):
             0
         )
         top_k_distances, top_k_indices = torch.topk(distances, k=k, largest=False)
-        return top_k_indices, top_k_distances
+        return top_k_indices.to(torch.int32), top_k_distances
 
     @classmethod
     def build(
@@ -386,28 +386,30 @@ class IVFPQ(nn.Module):
         assert len(assignments) == vectors.shape[0]
         assert np.all(assignments >= 0)
 
-        # REMIND: Crashes! Not using...yet.
-        # # Export ONNX model for the forward method
-        # onnx_file = output_dir / "ivf_forward.onnx"
-        # dummy_query = torch.randn(vectors.shape[1])
-        # torch.onnx.export(
-        #     ivf,
-        #     (dummy_query, ivf.centroids.data, 4),  # Example inputs: query, partition_centroids, k
-        #     onnx_file,
-        #     export_params=True,
-        #     opset_version=11,
-        #     do_constant_folding=True,
-        #     input_names=["query_vector", "partition_centroids", "k"],
-        #     output_names=["top_k_indices", "top_k_distances"],
-        #     dynamic_axes={
-        #         "query_vector": {0: "d"},
-        #         "partition_centroids": {0: "n_partitions", 1: "d"},
-        #     },
-        # )
-
         # Load the trained IVFPQ model just for verification
         ivf = IVFPQ.load(output_dir)
         assert np.all(assignments < ivf.n_partitions)
+
+        # Export ONNX model for the forward method
+        onnx_file = output_dir / "ivf_forward.onnx"
+        dummy_query = torch.randn(vectors.shape[1])
+        torch.onnx.export(
+            ivf,
+            (
+                dummy_query,
+                ivf.centroids.data,
+                4,
+            ),  # Example inputs: query, partition_centroids, k
+            onnx_file,
+            export_params=True,
+            opset_version=11,
+            do_constant_folding=True,
+            input_names=["query_vector", "partition_centroids", "k"],
+            output_names=["top_k_indices", "top_k_distances"],
+            # dynamic_axes={
+            #     "query_vector": {0: "d"},
+            # },
+        )
 
         logger.info(f"Build completed of IVFPQ model into {output_dir}")
 
@@ -480,46 +482,6 @@ class IVFPQ(nn.Module):
         vector_ids = [vec_id for _, vec_id in top_candidates]
 
         return vector_ids, distances
-
-    def save(self, path: Path) -> None:
-        """Save the trained IVF index to disk."""
-        if not self.is_trained:
-            raise RuntimeError("Cannot save untrained IVF index")
-
-        # Save centroids
-        centroids_file = path / "ivf_centroids.bin"
-        _export_centroids_binary(centroids_file, self.centroids.data)
-
-        # Save metadata
-        metadata = {
-            "d": self.d,
-            "n_partitions": self.n_partitions,
-        }
-        metadata_file = path / "ivf_metadata.json"
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        # Export ONNX model for the forward method
-        onnx_file = path / "ivf_forward.onnx"
-        dummy_query = torch.randn(self.d)
-        torch.onnx.export(
-            self,
-            (
-                dummy_query,
-                self.centroids.data,
-                4,
-            ),  # Example inputs: query, partition_centroids, k
-            onnx_file,
-            export_params=True,
-            opset_version=11,
-            do_constant_folding=True,
-            input_names=["query_vector", "partition_centroids", "k"],
-            output_names=["top_k_indices", "top_k_distances"],
-            dynamic_axes={
-                "query_vector": {0: "d"},
-                "partition_centroids": {0: "n_partitions", 1: "d"},
-            },
-        )
 
     @classmethod
     def load(cls, path: Path) -> "IVFPQ":
