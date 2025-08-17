@@ -3,7 +3,7 @@
 Test accuracy and performance of IVFPQ system compared to SCimilarity.
 
 This test:
-1. Uses tests/fixtures/GSE136831_subsample_100.h5ad as query file
+1. Uses data/GSE136831_subsample.h5ad as query file
 2. Generates embeddings and labels using SCimilarity
 3. Uses IVFPQ to generate labels for the same cells
 4. Compares accuracy between the two methods
@@ -301,7 +301,8 @@ def test_ivfpq_accuracy(
     adata = anndata.read_h5ad(test_data_path)
 
     # Use subset for faster testing
-    n_test_cells = 20  # Test with 20 cells for reasonable runtime
+    # n_test_cells = 20  # Test with 20 cells for reasonable runtime
+    n_test_cells = 100  # More comprehensive but time consuming
     adata = adata[:n_test_cells, :]
     print(f"Testing with {adata.shape[0]} cells, {adata.shape[1]} genes")
 
@@ -349,12 +350,12 @@ def test_ivfpq_accuracy(
 
     if len(mismatches_idx) > 0:
         print(f"\nMismatches ({len(mismatches_idx)} total):")
-        for idx in mismatches_idx[:5]:  # Show first 5 mismatches
+        for idx in mismatches_idx[:10]:  # Show first 10 mismatches
             print(
                 f"  Cell {idx}: SCimilarity='{scimilarity_predictions[idx]}', IVFPQ='{ivfpq_predictions[idx]}'"
             )
-        if len(mismatches_idx) > 5:
-            print(f"  ... and {len(mismatches_idx) - 5} more")
+        if len(mismatches_idx) > 10:
+            print(f"  ... and {len(mismatches_idx) - 10} more")
 
     # Assert minimum accuracy
     # Note: Using a lower threshold for initial implementation

@@ -21,16 +21,14 @@ This architecture ensures privacy, scalability, and collaborative potential with
 ## Data Flow
 
 ```
-35-60k dimension float32 gene expression 'test' vector (batch streamed from h5ad)
+35-60k dimension gene expression counts batch streamed from local h5ad
 ↓
-Embedding ONNX model (SCimilarity)
+Embedding via SCimilarity ONNX model
 ↓
 128-1024 dimension float32 embedding vector
 ↓
-PQ Encoding ONNX model to 16 byte quantized embedding
-+
 UMAP ONNX mapping model to 2d coordinates
-↓
++
 Approximate Nearest Neighor (ANN) search of an Inverted File System (IVF) via partitions over HTTP
 ↓
 List of cells in the training set and associated labels
@@ -38,7 +36,7 @@ List of cells in the training set and associated labels
 
 ## Install
 
-Download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into data/GSE136831_subsample.h5ad
+Download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/models/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into data/GSE136831_subsample.h5ad
 
 Install python dependencies and create a virtual env:
 
@@ -47,53 +45,51 @@ uv venv
 source .venv/bin/activate
 uv sync
 
-uv add --editable --dev .
-
-brew install go-parquet-tools
+npm install
+npx playwright install
 ```
 
 Export SCimilarity embeddings and labels, train a parametric umap model on a stratified subset of cells, train IVFPQ, populate partitions and export models to ONNX:
 
 ```
 make scimilarity
+cd web
 ```
 
 Verify that web/public/models/scimilarity is populated (~900MB Total):
 
 ```
-web/public/models/scimilarity
+> tree -L 2 web/public/models/scimilarity
+public/models/scimilarity
 ├── embedding
-│   ├── embedding.onnx
-│   ├── genes.txt
-│   ├── model.onnx
-│   └── preprocessing.onnx
-├── ivf
-│   ├── centroids.arrow
-│   ├── metadata.json
-│   └── model.pkl
+│   ├── embedding.onnx
+│   ├── genes.txt
+│   ├── model.onnx
+│   └── preprocessing.onnx
 ├── ivfpq
-│   ├── centroids.arrow
-│   ├── metadata.json
-│   └── partitions
-│       ├── partition_0000.arrow
-│       ├── partition_0001.arrow
-│       ├── ....
-│       ├── partition_0254.arrow
-│       └── partition_0255.arrow
-├── pq
-│   ├── codebooks.bin
-│   ├── metadata.json
-│   ├── model.onnx
-│   └── model.pkl
+│   ├── ivf_centroids.bin
+│   ├── ivf_forward.onnx
+│   ├── ivf_metadata.json
+│   ├── partitions
+│   ├── partitions
+│   │   ├── partition_0000.bin
+│   │   ├── partition_0001.bin
+│   │   ....
+│   │   ├── partition_4833.bin
+│   │   └── partition_4834.bin
+│   ├── pq_codebooks.bin
+│   ├── pq_distance.onnx
+│   ├── pq_encode.onnx
+│   └── pq_metadata.json
 └── pumap
-    ├── author_label.arrow
+    ├── author_label.bin
     ├── metadata.json
     ├── model.onnx
-    ├── prediction.arrow
-    ├── study.arrow
-    ├── tissue.arrow
-    ├── x.arrow
-    └── y.arrow
+    ├── prediction.bin
+    ├── study.bin
+    ├── tissue.bin
+    ├── x.bin
+    └── y.bin
 ```
 
 Run tests:
@@ -105,15 +101,10 @@ make test
 Install web app dependencies and run local dev server:
 
 ```
-cd web
-npm install
-npx playwright install
 npm run dev
 ```
 
 ## Notes
-
-- We assume embeddings are normalized onto the unit sphere
 
 ## Benchmarks
 

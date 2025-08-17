@@ -411,7 +411,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anndata" },
     { name = "ivfpq" },
-    { name = "onnxscript" },
+    { name = "pyarrow" },
     { name = "scanpy" },
     { name = "scimilarity" },
     { name = "typer" },
@@ -434,7 +434,7 @@ dev = [
 requires-dist = [
     { name = "anndata", specifier = ">=0.12.1" },
     { name = "ivfpq", editable = "ivfpq/python" },
-    { name = "onnxscript", specifier = ">=0.3.2" },
+    { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "scanpy", specifier = ">=1.11.4" },
     { name = "scimilarity", git = "https://github.com/Genentech/scimilarity.git" },
     { name = "typer", specifier = ">=0.16.0" },
@@ -833,11 +833,10 @@ name = "ivfpq"
 version = "0.1.0"
 source = { editable = "ivfpq/python" }
 dependencies = [
-    { name = "anndata" },
     { name = "numpy" },
     { name = "onnx" },
     { name = "onnxruntime" },
-    { name = "pyarrow" },
+    { name = "onnxscript" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "torch" },
@@ -846,11 +845,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anndata", specifier = ">=0.12.1" },
     { name = "numpy", specifier = ">=1.24,<2.3" },
     { name = "onnx", specifier = ">=1.18.0" },
     { name = "onnxruntime", specifier = ">=1.22.1" },
-    { name = "pyarrow", specifier = ">=21.0.0" },
+    { name = "onnxscript", specifier = ">=0.3.2" },
     { name = "scikit-learn", specifier = ">=1.7.1" },
     { name = "scipy", specifier = ">=1.16.1" },
     { name = "torch", specifier = ">=2.8.0" },

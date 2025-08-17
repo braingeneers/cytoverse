@@ -28,10 +28,8 @@ scimilarity: notice scimilarity-model \
 
 sspsygene: model_id=sspsygene
 sspsygene: stratify_label=Type.v1
-# sspsygene: notice scimilarity-model \
-# 	sspsygene-embeddings ivfpq-train pumap update-models-list
 sspsygene: notice scimilarity-model \
-	pumap update-models-list
+	sspsygene-embeddings ivfpq-train pumap update-models-list
 
 # Embedding Model (only one for now)
 scimilarity-model:
@@ -46,7 +44,6 @@ scimilarity-embeddings:
 	data/references/$(model_id)/ \
 	--labels prediction \
 	--labels tissue \
-	--labels author_label \
 	--labels study \
 	--validate
 
@@ -67,7 +64,7 @@ ivfpq-train:
 	data/references/$(model_id)/embeddings.npy \
 	public/models/$(model_id)/ivfpq \
 	--max-vectors-for-training 2_400_000 \
-	--pq-m 32 \
+	--pq-m 16 \
 	--pq-k 256 \
 	--sample-training-vectors \
 	--test
@@ -87,7 +84,7 @@ pumap-map:
 	data/references/$(model_id)/embeddings.npy \
 	data/references/$(model_id)/ \
 	--export-png \
-	--num-vectors 1000000
+	--num-vectors 1_000_000
 
 pumap-export:
 	python scripts/pumap_train.py export \
