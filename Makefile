@@ -47,17 +47,7 @@ scimilarity-all-embeddings:
 	--labels study \
 	--validate
 
-scimilarity-embeddings:
-	python scripts/scimilarity_to_embeddings.py embeddings \
-	data/models/scimilarity/model_v1.1/cellsearch \
-	data/references/$(model_id)/ \
-	--annotation-subset \
-	--labels prediction \
-	--labels tissue \
-	--labels study \
-	--validate
-
-scimilarity-embeddings-aligned:
+scimilarity-aligned-embeddings:
 	python scripts/scimilarity_to_embeddings.py annotation-aligned \
 	data/models/scimilarity/model_v1.1 \
 	data/references/$(model_id)
@@ -79,7 +69,7 @@ ivfpq-train:
 	data/references/$(model_id)/embeddings.npy \
 	public/models/$(model_id)/ivfpq \
 	--max-vectors-for-training 2_400_000 \
-	--pq-m 16 \
+	--pq-m 32 \
 	--pq-k 256 \
 	--sample-training-vectors \
 	--test
