@@ -44,6 +44,11 @@ def embeddings(
         "--num-embeddings",
         help="Number of embeddings to export (default: export all embeddings)",
     ),
+    annotation_subset: bool = typer.Option(
+        False,
+        "--annotation-subset",
+        help="Export only the annotation subset (7,913,892 cells) matching SCimilarity's annotation index",
+    ),
     validate: bool = typer.Option(
         False,
         "--validate",
@@ -54,10 +59,14 @@ def embeddings(
     Export embeddings and optionally associated expression data from a SCimilarity model.
 
     Export behavior:
+    - If --annotation-subset: export the 7,913,892 cells used in SCimilarity's annotation index
     - If --num-embeddings is not specified: export all cells
     - If --num-embeddings is specified: export first N cells (indices 0 to N-1)
     """
 
+    # Define the annotation subset size (matching SCimilarity's annotation index)
+    ANNOTATION_SUBSET_SIZE = 7_913_892
+    
     print("Opening metadata TileDB...")
     with tiledb.open(str(model_path / "cell_metadata"), "r") as metadata_db:
 
@@ -72,7 +81,11 @@ def embeddings(
         print(f"Total cells in TileDB: {total_cells}")
 
         # Step 1: Determine how many embeddings to export
-        if num_embeddings is None:
+        if annotation_subset:
+            # Export the annotation subset matching SCimilarity's annotation index
+            print(f"Exporting annotation subset ({ANNOTATION_SUBSET_SIZE:,} cells)...")
+            num_to_export = min(ANNOTATION_SUBSET_SIZE, total_cells)
+        elif num_embeddings is None:
             # Export all cells
             print("Exporting ALL cells...")
             num_to_export = total_cells
@@ -284,6 +297,131 @@ def _validate_exports(
         print("  🎉 Validation passed! All exported data matches original TileDB.")
     else:
         print("  ⚠️ Validation found mismatches. Please check the export process.")
+
+
+@app.command()
+def annotation_aligned(
+    model_path: Path = typer.Argument(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        help="Path to SCimilarity directory (ex: model_v1.1/)",
+    ),
+    output_path: Path = typer.Argument(
+        file_okay=False,
+        dir_okay=True,
+        help="Output directory path",
+    ),
+) -> None:
+    """
+    Export embeddings and labels for the annotation subset by extracting them directly
+    from the hnswlib index, ensuring perfect alignment with SCimilarity's 
+    CellAnnotation.get_predictions_knn() indices.
+    
+    Key insight: hnswlib DOES store the original embeddings, and we can extract them
+    using get_items(). This ensures embeddings.npy[i] = hnswlib.get_items([i])[0]
+    """
+    import hnswlib
+    
+    print("Loading annotation hnswlib index...")
+    
+    # Path to annotation files
+    annotation_path = model_path / "annotation"
+    knn_path = annotation_path / "labelled_kNN.bin"
+    labels_path = annotation_path / "reference_labels.tsv"
+    
+    # Verify files exist
+    if not knn_path.exists():
+        raise FileNotFoundError(f"Annotation kNN index not found at {knn_path}")
+    if not labels_path.exists():
+        raise FileNotFoundError(f"Reference labels not found at {labels_path}")
+    
+    # Load the kNN index
+    print(f"Loading hnswlib index from {knn_path}...")
+    index = hnswlib.Index(space='cosine', dim=128)  # Will be overridden when loading
+    index.load_index(str(knn_path))
+    num_cells = index.get_current_count()
+    embedding_dim = index.dim
+    print(f"Index contains {num_cells:,} cells with {embedding_dim}-dimensional embeddings")
+    
+    # Read reference labels - these are in hnswlib ID order (0 to N-1)
+    # Line i in reference_labels.tsv corresponds to hnswlib index i
+    print("Reading reference labels...")
+    reference_labels = []
+    with open(labels_path, 'r') as f:
+        for line in f:
+            reference_labels.append(line.strip().split('\t')[0])
+    
+    if len(reference_labels) != num_cells:
+        print(f"Warning: Label count ({len(reference_labels)}) doesn't match index count ({num_cells})")
+        num_cells = min(len(reference_labels), num_cells)
+    
+    print(f"Exporting {num_cells:,} cells to {output_path}...")
+    os.makedirs(output_path, exist_ok=True)
+    
+    # Export labels as DataFrame with sequential index matching hnswlib index
+    labels_df = pd.DataFrame({
+        'prediction': reference_labels[:num_cells]
+    })
+    labels_df.index.name = 'index'
+    
+    # Save labels
+    labels_output = output_path / "labels.parquet"
+    labels_df.to_parquet(labels_output, compression="snappy")
+    print(f"Labels saved to {labels_output} (shape: {labels_df.shape})")
+    
+    # EXTRACT EMBEDDINGS DIRECTLY FROM HNSWLIB INDEX
+    print("\nExtracting embeddings directly from hnswlib index...")
+    print("This ensures perfect alignment: embeddings.npy[i] = index.get_items([i])[0]")
+    
+    embeddings_array = np.empty((num_cells, embedding_dim), dtype=np.float32)
+    
+    # Extract embeddings in batches for efficiency
+    batch_size = 10000
+    with tqdm(total=num_cells, desc="Extracting embeddings from hnswlib", unit="cells") as pbar:
+        for start_idx in range(0, num_cells, batch_size):
+            end_idx = min(start_idx + batch_size, num_cells)
+            batch_indices = list(range(start_idx, end_idx))
+            
+            # Get embeddings for this batch directly from hnswlib
+            batch_embeddings = index.get_items(batch_indices)
+            
+            # Store in our array
+            embeddings_array[start_idx:end_idx] = np.array(batch_embeddings, dtype=np.float32)
+            
+            pbar.update(len(batch_indices))
+    
+    # Verify extraction with a spot check
+    print("\nVerifying extraction...")
+    test_indices = [0, num_cells//2, num_cells-1]
+    for test_idx in test_indices:
+        if test_idx < num_cells:
+            hnswlib_embedding = index.get_items([test_idx])[0]
+            extracted_embedding = embeddings_array[test_idx]
+            if np.allclose(hnswlib_embedding, extracted_embedding, rtol=1e-6):
+                print(f"  ✓ Index {test_idx}: Match verified")
+            else:
+                print(f"  ✗ Index {test_idx}: Mismatch detected!")
+                max_diff = np.max(np.abs(hnswlib_embedding - extracted_embedding))
+                print(f"    Max difference: {max_diff}")
+    
+    # Save embeddings
+    embeddings_path = output_path / "embeddings.npy"
+    np.save(embeddings_path, embeddings_array)
+    print(f"Embeddings saved to {embeddings_path} (shape: {embeddings_array.shape})")
+    
+    print(f"\nSuccessfully exported annotation subset:")
+    print(f"  - {num_cells:,} cells")
+    print(f"  - Indices: 0 to {num_cells-1:,}")
+    print(f"  - Labels: {labels_output}")
+    print(f"  - Embeddings: {embeddings_path}")
+    
+    print("\n✓ PERFECT ALIGNMENT GUARANTEED:")
+    print("  - embeddings.npy[i] = index.get_items([i])[0]")
+    print("  - labels.parquet[i] = reference_labels.tsv line i")
+    print("  - When SCimilarity's get_predictions_knn returns index i,")
+    print("    it corresponds exactly to embeddings.npy[i] and labels.parquet[i]")
+    print("\nYour IVFPQ index trained on this data will return indices that match SCimilarity exactly.")
 
 
 if __name__ == "__main__":

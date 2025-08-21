@@ -38,14 +38,29 @@ scimilarity-model:
 	public/models/$(model_id)/embedding
 
 # Embeddings (Must be first as model uses these to validate the export)
-scimilarity-embeddings:
-	python scripts/scimilarity_to_embeddings.py \
+scimilarity-all-embeddings:
+	python scripts/scimilarity_to_embeddings.py  embeddings \
 	data/models/scimilarity/model_v1.1/cellsearch \
 	data/references/$(model_id)/ \
 	--labels prediction \
 	--labels tissue \
 	--labels study \
 	--validate
+
+scimilarity-embeddings:
+	python scripts/scimilarity_to_embeddings.py embeddings \
+	data/models/scimilarity/model_v1.1/cellsearch \
+	data/references/$(model_id)/ \
+	--annotation-subset \
+	--labels prediction \
+	--labels tissue \
+	--labels study \
+	--validate
+
+scimilarity-embeddings-aligned:
+	python scripts/scimilarity_to_embeddings.py annotation-aligned \
+	data/models/scimilarity/model_v1.1 \
+	data/references/$(model_id)
 
 sspsygene-embeddings:
 	python scripts/h5ad_to_embeddings.py \
