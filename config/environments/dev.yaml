@@ -1,0 +1,43 @@
+# Development Environment Configuration
+
+# Override Python settings for development
+python:
+  ivfpq:
+    training:
+      num_training_vectors: 100_000  # Smaller dataset for faster development
+      max_iters: 10                  # Fewer iterations
+    
+    model:
+      n_partitions: 128             # Smaller model for faster training
+      
+  data:
+    size_to_sample_from: 500_000   # Smaller sample size
+    
+  logging:
+    level: "DEBUG"
+
+# Override frontend settings for development  
+frontend:
+  worker:
+    performance:
+      use_webgpu: false            # Use WebAssembly for better debugging
+      max_concurrent_batches: 2    # Lower concurrency for debugging
+      
+  debug:
+    enabled: true
+    log_level: "DEBUG"
+    performance_monitoring: true
+    memory_tracking: true
+    
+  models:
+    timeout_ms: 60000             # Longer timeout for development
+    
+# App-level development settings
+app:
+  environment: "dev"
+
+# Development server settings
+dev_server:
+  hot_reload: true
+  source_maps: true
+  minification: false

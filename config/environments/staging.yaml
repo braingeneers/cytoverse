@@ -1,0 +1,50 @@
+# Staging Environment Configuration
+
+# Override Python settings for staging
+python:
+  ivfpq:
+    training:
+      num_training_vectors: 2_000_000   # Mid-size dataset for realistic testing
+      max_iters: 30                     # Moderate iterations
+      
+    model:
+      n_partitions: 256                 # Standard model size
+      
+    search:
+      n_probe: 4                        # Standard search depth
+      
+  data:
+    size_to_sample_from: 5_000_000     # Mid-size sample
+    
+  ray_tune:
+    enabled: true                       # Enable for validation
+    num_samples: 10                     # Limited search for staging
+    
+  logging:
+    level: "INFO"
+
+# Override frontend settings for staging
+frontend:
+  worker:
+    performance:
+      use_webgpu: true                  # Test production features
+      max_concurrent_batches: 4         # Moderate concurrency
+      
+  debug:
+    enabled: true                       # Keep debugging for validation
+    log_level: "INFO"
+    performance_monitoring: true       # Monitor performance
+    memory_tracking: false
+    
+  models:
+    timeout_ms: 20000                   # Moderate timeout
+
+# App-level staging settings
+app:
+  environment: "staging"
+
+# Staging-specific settings
+staging:
+  testing: true
+  validation: true
+  performance_profiling: true

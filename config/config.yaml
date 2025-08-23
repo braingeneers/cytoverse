@@ -1,0 +1,21 @@
+# Main configuration file for Cytoverse
+# Uses Hydra/OmegaConf for configuration management
+
+defaults:
+  - python: default
+  - frontend: default
+  - environments: ${environment:dev}
+  - _self_
+
+# Global application settings
+app:
+  name: "cytoverse"
+  version: "0.1.0"
+  environment: ${environment:dev}
+
+# Override configuration directory for modular configs
+hydra:
+  searchpath:
+    - file://config/python
+    - file://config/frontend  
+    - file://config/environments

@@ -1,0 +1,63 @@
+# Python/ML Pipeline Configuration
+
+# IVFPQ Training Configuration
+ivfpq:
+  # Default training parameters
+  seed: 42
+  device: "auto"  # auto, cpu, cuda, mps
+  
+  # Model architecture
+  model:
+    n_partitions: 256  # Number of IVF partitions
+    pq_m: 16          # Product quantization subspaces
+    pq_k: 256         # Centroids per subspace
+    d_sub: null       # Auto-calculated from embedding dimension / pq_m
+  
+  # Training parameters
+  training:
+    max_iters: 20
+    tolerance: 1e-4
+    batch_size: 10000
+    num_training_vectors: 1_000_000
+    validation_split: 0.1
+  
+  # Search parameters
+  search:
+    n_probe: 4        # Number of partitions to search
+    k: 50            # Number of nearest neighbors to return
+
+# Ray Tune Hyperparameter Optimization
+ray_tune:
+  enabled: false
+  num_samples: 20
+  search_space:
+    n_partitions: [128, 256, 512]
+    pq_m: [8, 16, 32]
+    pq_k: [128, 256, 512]
+    n_probe: [1, 2, 4, 8]
+  
+  # Compute resources
+  resources:
+    cpu: 2
+    gpu: 0
+
+# Data processing
+data:
+  embeddings_path: "data/references/${model_id}/embeddings.npy"
+  labels_path: "data/references/${model_id}/labels.parquet"
+  output_dir: "public/models/${model_id}/ivfpq"
+  
+  # Sampling parameters
+  size_to_sample_from: 2_000_000
+  stratify_by: "prediction"
+
+# Export settings
+export:
+  format: "arrow"  # arrow, parquet (arrow is preferred for browser compatibility)
+  browser_assets: true
+  validate_export: true
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

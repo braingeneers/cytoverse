@@ -7,8 +7,12 @@
     "ivfpq/typescript"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode development",
+    "dev:staging": "vite --mode staging",
     "build": "vue-tsc && vite build",
+    "build:dev": "vue-tsc && vite build --mode development",
+    "build:staging": "vue-tsc && vite build --mode staging", 
+    "build:prod": "vue-tsc && vite build --mode production",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -16,7 +20,8 @@
     "test:ui": "vitest --ui",
     "serve-dist-python": "python3 -m http.server 4173 -d dist/",
     "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/",
-    "pull-model": "rsync -avh --delete rcurrie@hgwdev.gi.ucsc.edu:~/cytoverse/public/models/scimilarity/ public/models/scimilarity/"
+    "pull-model": "rsync -avh --delete rcurrie@hgwdev.gi.ucsc.edu:~/cytoverse/public/models/scimilarity/ public/models/scimilarity/",
+    "config:info": "node -e \"console.log('Environment configs available: dev, staging, prod')\""
   },
   "dependencies": {
     "@cytoverse/ivfpq": "workspace:*",

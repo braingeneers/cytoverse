@@ -24,12 +24,12 @@ update-models-list:
 scimilarity: model_id=scimilarity
 scimilarity: stratify_label=prediction
 scimilarity: notice scimilarity-model \
-	scimilarity-embeddings ivfpq-train pumap update-models-list
+	scimilarity-embeddings ivfpq-train-configured pumap update-models-list
 
 sspsygene: model_id=sspsygene
 sspsygene: stratify_label=Type.v1
 sspsygene: notice scimilarity-model \
-	sspsygene-embeddings ivfpq-train pumap update-models-list
+	sspsygene-embeddings ivfpq-train-configured pumap update-models-list
 
 # Embedding Model (only one for now)
 scimilarity-model:
@@ -63,7 +63,7 @@ sspsygene-embeddings:
 	--labels Type.v1 \
 	--labels Subtype.v1
 
-# IVF
+# IVF - Legacy training (deprecated)
 ivfpq-train:
 	python scripts/ivfpq_train.py train \
 	data/references/$(model_id)/embeddings.npy \
@@ -73,6 +73,21 @@ ivfpq-train:
 	--pq-k 256 \
 	--sample-training-vectors \
 	--test
+
+# IVF - Production configuration-based training
+ivfpq-train-prod:
+	CYTOVERSE_ENV=prod python scripts/ivfpq_train_configured.py train $(model_id)
+
+# IVF - Development configuration-based training  
+ivfpq-train-dev:
+	CYTOVERSE_ENV=dev python scripts/ivfpq_train_configured.py train $(model_id)
+
+# IVF - Staging configuration-based training
+ivfpq-train-staging:
+	CYTOVERSE_ENV=staging python scripts/ivfpq_train_configured.py train $(model_id)
+
+# IVF - Default to production training for make targets
+ivfpq-train-configured: ivfpq-train-prod
 
 # PUMAP
 pumap-train:
@@ -97,6 +112,21 @@ pumap-export:
 	public/models/$(model_id)/pumap/
 
 pumap: pumap-train pumap-map pumap-export
+
+# Configuration management commands
+config-info-dev:
+	python scripts/ivfpq_train_configured.py config-info --environment dev
+
+config-info-staging:
+	python scripts/ivfpq_train_configured.py config-info --environment staging
+
+config-info-prod:
+	python scripts/ivfpq_train_configured.py config-info --environment prod
+
+config-validate-all:
+	python scripts/ivfpq_train_configured.py validate-config --environment dev
+	python scripts/ivfpq_train_configured.py validate-config --environment staging  
+	python scripts/ivfpq_train_configured.py validate-config --environment prod
 
 # Testing
 update-validations:

@@ -1,0 +1,63 @@
+# Frontend/Worker Configuration
+
+# Web Worker Configuration
+worker:
+  # Processing parameters
+  batch_size: 32
+  
+  # IVFPQ search parameters
+  search:
+    num_nearest_neighbors: 50
+    num_partitions_to_search: 2
+    
+  # Performance settings
+  performance:
+    use_webgpu: true
+    fallback_to_wasm: true
+    max_concurrent_batches: 4
+    
+  # Memory management
+  memory:
+    max_embeddings_cache: 100_000
+    gc_threshold: 0.8
+
+# Model loading configuration
+models:
+  base_url: "./models"
+  timeout_ms: 30000
+  retry_attempts: 3
+  retry_delay_ms: 1000
+  
+  # Model types and their configurations
+  types:
+    embedding:
+      format: "onnx"
+      providers: ["webgpu", "wasm"]
+    mapping:
+      format: "onnx" 
+      providers: ["webgpu", "wasm"]
+    ivfpq:
+      format: "arrow"
+      lazy_loading: true
+
+# ONNX Runtime Configuration  
+onnx:
+  webgpu:
+    enabled: true
+    device_preference: "high-performance"
+  wasm:
+    num_threads: 4
+    simd: true
+  
+# Browser compatibility
+compatibility:
+  min_chrome_version: 90
+  min_firefox_version: 88
+  min_safari_version: 14
+
+# Debug settings
+debug:
+  enabled: false
+  log_level: "INFO"
+  performance_monitoring: false
+  memory_tracking: false

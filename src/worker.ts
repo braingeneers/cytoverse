@@ -11,11 +11,12 @@
 import h5wasm from 'h5wasm'
 import { InferenceSession, Tensor, env } from 'onnxruntime-web'
 import { IVFPQ } from '@cytoverse/ivfpq'
+import { workerConfig, onnxConfig, debugConfig } from './config'
 
-// Configuration
-const NUM_NEAREST_NEIGHBORS = 50
-const NUM_PARTITIONS_TO_SEARCH = 2
-const BATCH_SIZE = 32 
+// Get configuration values
+const NUM_NEAREST_NEIGHBORS = workerConfig.search.num_nearest_neighbors
+const NUM_PARTITIONS_TO_SEARCH = workerConfig.search.num_partitions_to_search
+const BATCH_SIZE = workerConfig.batch_size 
 
 // TypeScript interfaces
 interface ModelInfo {
@@ -175,27 +176,34 @@ async function instantiateModel(
     position += chunk.length
   }
 
-  // Configure ONNX Runtime
+  // Configure ONNX Runtime based on configuration
   self.postMessage({ type: 'status', message: 'Instantiating model...' } as StatusMessage)
-  env.wasm.numThreads = Math.max(1, navigator.hardwareConcurrency - 4)
+  env.wasm.numThreads = onnxConfig.wasm.num_threads
+  env.wasm.simd = onnxConfig.wasm.simd
   env.wasm.proxy = true
 
   let sessionOptions = {}
-  if (useWebGPU) {
-    console.log('Configuring ONNX Runtime to use WebGPU...')
+  const useWebGPUFromConfig = onnxConfig.webgpu.enabled && useWebGPU
+  
+  if (useWebGPUFromConfig) {
+    if (debugConfig.enabled) {
+      console.log('Configuring ONNX Runtime to use WebGPU...')
+    }
     sessionOptions = {
       executionProviders: [
         {
           name: 'webgpu',
           deviceType: 'gpu',
-          powerPreference: 'high-performance',
+          powerPreference: onnxConfig.webgpu.device_preference,
         },
         'wasm',
       ],
       graphOptimizationLevel: 'all',
     }
   } else {
-    console.log('Configuring ONNX Runtime to use WebAssembly...')
+    if (debugConfig.enabled) {
+      console.log('Configuring ONNX Runtime to use WebAssembly...')
+    }
     sessionOptions = {
       executionProviders: ['wasm'],
       executionMode: 'parallel',

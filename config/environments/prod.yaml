@@ -1,0 +1,56 @@
+# Production Environment Configuration
+
+# Override Python settings for production
+python:
+  ivfpq:
+    training:
+      num_training_vectors: 10_000_000  # Full dataset for production training
+      max_iters: 50                     # More iterations for better accuracy
+      
+    model:
+      n_partitions: 512                 # Larger model for better performance
+      pq_m: 32                         # Higher precision
+      
+    search:
+      n_probe: 8                       # Search more partitions for better recall
+      
+  data:
+    size_to_sample_from: 20_000_000    # Larger sample size
+    
+  ray_tune:
+    enabled: true                      # Enable hyperparameter optimization
+    num_samples: 50                    # More thorough search
+    
+  logging:
+    level: "INFO"                      # Less verbose logging
+
+# Override frontend settings for production
+frontend:
+  worker:
+    performance:
+      use_webgpu: true                 # Use WebGPU for better performance
+      max_concurrent_batches: 8        # Higher concurrency
+      
+    search:
+      num_partitions_to_search: 4      # Search more partitions for better results
+      
+  debug:
+    enabled: false                     # Disable debugging features
+    log_level: "WARN"
+    performance_monitoring: false
+    memory_tracking: false
+    
+  models:
+    timeout_ms: 15000                  # Shorter timeout for production
+    retry_attempts: 5                  # More retry attempts
+
+# App-level production settings  
+app:
+  environment: "prod"
+
+# Production optimizations
+production:
+  minification: true
+  compression: true
+  caching: true
+  cdn_assets: true

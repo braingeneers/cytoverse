@@ -29,9 +29,12 @@ build/
 
 # OS and environment
 .DS_Store
-*.env
-.env
+.env.local
 *.local
+
+# Configuration
+# Environment files are committed for sharing configs across team
+# Use .env.local for local overrides
 
 # # Logs
 # logs
