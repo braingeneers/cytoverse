@@ -430,7 +430,7 @@ class IVFPQ(nn.Module):
             k: Number of neighbors to return
 
         Returns:
-            Tuple of (vector_ids, distances)
+            Tuple of (vector_ids, distances, partition_paths_loaded)
         """
         assert self.is_trained, "IVF index must be trained before searching"
         assert self.pq is not None, "PQ must be initialized before searching"
@@ -445,6 +445,8 @@ class IVFPQ(nn.Module):
             PQDistance()
         )  # This k is now only used for initialization
 
+        partition_paths_loaded = set()
+
         for partition_id in top_partitions:
             partition_id = partition_id.item()
 
@@ -453,6 +455,7 @@ class IVFPQ(nn.Module):
             assert partition_file.exists(), f"Partition file {partition_file} not found"
 
             vector_ids, pq_codes = _load_partition_binary(partition_file, self.pq.m)
+            partition_paths_loaded.add(partition_file)
 
             assert len(vector_ids) > 0, f"Partition {partition_id} is empty"
 
@@ -481,7 +484,7 @@ class IVFPQ(nn.Module):
         distances = [dist for dist, _ in top_candidates]
         vector_ids = [vec_id for _, vec_id in top_candidates]
 
-        return vector_ids, distances
+        return vector_ids, distances, partition_paths_loaded
 
     @classmethod
     def load(cls, path: Path) -> "IVFPQ":
