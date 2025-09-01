@@ -105,7 +105,7 @@ class TestNProbeAccuracy:
             ivf = IVFPQ.load(model_path)
             # Search returns merged results from all probed partitions
             # The topk_consensus parameter determines how many results per partition to consider
-            vector_ids, distances = ivf.search(
+            vector_ids, distances, _ = ivf.search(
                 query_vector=query_vector,
                 model_path=model_path,
                 n_probe=n_probe,
@@ -192,7 +192,7 @@ class TestNProbeAccuracy:
                 zip(query_vectors, ground_truth_indices)
             ):
                 # Search returns merged and sorted results from all probed partitions
-                vector_ids, distances = ivf.search(
+                vector_ids, distances, _ = ivf.search(
                     query_vector=query_vector,
                     model_path=output_dir,
                     n_probe=n_probe,
@@ -278,7 +278,7 @@ class TestNProbeAccuracy:
 
         for n_probe in range(1, min(self.n_partitions + 1, 33)):
             # Search returns merged results from all probed partitions
-            vector_ids, distances = ivf.search(
+            vector_ids, distances, _ = ivf.search(
                 query_vector=query_vector,
                 model_path=output_dir,
                 n_probe=n_probe,

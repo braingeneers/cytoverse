@@ -15,6 +15,7 @@ import torch
 import numpy as np
 from pathlib import Path
 import json
+import onnxruntime as ort
 
 from ivfpq.pq import (
     PQ,
@@ -372,7 +373,7 @@ class TestPQIntegration:
         # Verify results - now returns all distances, take top 5 for validation
         assert len(indices) == 20  # Returns all 20 reference codes
         assert len(distances) == 20
-        
+
         # We can take top 5 if needed
         top5_indices = indices[:5]
         top5_distances = distances[:5]
@@ -383,7 +384,7 @@ class TestPQIntegration:
         # Verify indices are valid
         assert torch.all(indices >= 0)
         assert torch.all(indices < 20)
-        
+
         # Check that distances are sorted
         assert torch.all(distances[:-1] <= distances[1:])
 
@@ -511,6 +512,270 @@ class TestPQCompatibility:
         assert metadata["d_sub"] == d // m
         assert metadata["version"] == "1.0"
         assert metadata["compression_ratio"] == (d * 32) / (m * 8)
+
+
+class TestPQONNXVerification:
+    """Test ONNX model verification for exported PQ encode and decode models."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.d = 128
+        self.m = 16
+        self.k = 256
+        self.n_vectors = 500
+
+        torch.manual_seed(42)
+        self.vectors = torch.randn(self.n_vectors, self.d)
+
+    def test_pq_encode_onnx_model(self, tmp_path):
+        """Test that exported pq_encode.onnx model produces same results as PyTorch."""
+        # Create and train PQ system
+        create_pq_system(
+            training_vectors=self.vectors,
+            m=self.m,
+            k=self.k,
+            max_iterations=10,
+            output_dir=tmp_path,
+        )
+
+        # Load PyTorch model
+        pq = PQ.load(tmp_path)
+
+        # Test vectors
+        test_vectors = torch.randn(10, self.d)
+
+        # Get PyTorch results
+        with torch.no_grad():
+            pytorch_codes = pq(test_vectors)
+
+        # Load ONNX model
+        onnx_path = tmp_path / "pq_encode.onnx"
+        assert onnx_path.exists(), "pq_encode.onnx was not created"
+
+        ort_session = ort.InferenceSession(str(onnx_path))
+
+        # Run ONNX inference
+        onnx_outputs = ort_session.run(
+            None,
+            {"vectors": test_vectors.numpy()},
+        )
+        onnx_codes = onnx_outputs[0]
+
+        # Compare results
+        assert onnx_codes.shape == pytorch_codes.shape
+        np.testing.assert_array_equal(onnx_codes, pytorch_codes.numpy())
+
+    def test_pq_decode_onnx_model_export(self, tmp_path):
+        """Test that we can export and use a pq_decode.onnx model."""
+        # Create and train PQ system
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=10)
+        pq.save(tmp_path)
+
+        # Create a decode wrapper for ONNX export
+        class PQDecoder(torch.nn.Module):
+            def __init__(self, pq):
+                super().__init__()
+                self.pq = pq
+
+            def forward(self, codes):
+                return self.pq.decode(codes)
+
+        decoder = PQDecoder(pq)
+        decoder.eval()
+
+        # Export decode model
+        dummy_codes = torch.randint(0, self.k, (10, self.m), dtype=torch.long)
+        decode_onnx_path = tmp_path / "pq_decode.onnx"
+
+        torch.onnx.export(
+            decoder,
+            dummy_codes,
+            decode_onnx_path,
+            input_names=["codes"],
+            output_names=["decoded_vectors"],
+            dynamic_axes={
+                "codes": {0: "n_points"},
+                "decoded_vectors": {0: "n_points"},
+            },
+            opset_version=13,
+            do_constant_folding=True,
+            export_params=True,
+        )
+
+        assert decode_onnx_path.exists(), "pq_decode.onnx was not created"
+
+        # Test the exported model
+        test_codes = torch.randint(0, self.k, (5, self.m), dtype=torch.long)
+
+        # Get PyTorch results
+        with torch.no_grad():
+            pytorch_decoded = pq.decode(test_codes)
+
+        # Load and run ONNX model
+        ort_session = ort.InferenceSession(str(decode_onnx_path))
+        onnx_outputs = ort_session.run(
+            None,
+            {"codes": test_codes.numpy()},
+        )
+        onnx_decoded = onnx_outputs[0]
+
+        # Compare results
+        assert onnx_decoded.shape == pytorch_decoded.shape
+        np.testing.assert_allclose(
+            onnx_decoded, pytorch_decoded.numpy(), rtol=1e-5, atol=1e-6
+        )
+
+    def test_pq_distance_onnx_model(self, tmp_path):
+        """Test that exported pq_distance.onnx model produces same results as PyTorch."""
+        # Create and train PQ system
+        create_pq_system(
+            training_vectors=self.vectors,
+            m=self.m,
+            k=self.k,
+            max_iterations=10,
+            output_dir=tmp_path,
+        )
+
+        # Load PyTorch model
+        pq = PQ.load(tmp_path)
+
+        # Create test data
+        query_vector = torch.randn(self.d)
+        reference_codes = torch.randint(0, self.k, (20, self.m), dtype=torch.uint8)
+
+        # Get PyTorch results
+        distance_model = PQDistance()
+        distance_model.eval()
+
+        with torch.no_grad():
+            pytorch_indices, pytorch_distances = distance_model(
+                query_vector, reference_codes, pq.codebooks.data
+            )
+
+        # Load ONNX model
+        onnx_path = tmp_path / "pq_distance.onnx"
+        assert onnx_path.exists(), "pq_distance.onnx was not created"
+
+        ort_session = ort.InferenceSession(str(onnx_path))
+
+        # Run ONNX inference
+        onnx_outputs = ort_session.run(
+            None,
+            {
+                "query_vector": query_vector.numpy(),
+                "reference_codes": reference_codes.numpy(),
+                "codebooks": pq.codebooks.data.numpy(),
+            },
+        )
+        onnx_indices = onnx_outputs[0]
+        onnx_distances = onnx_outputs[1]
+
+        # Compare results
+        assert onnx_indices.shape == pytorch_indices.shape
+        assert onnx_distances.shape == pytorch_distances.shape
+
+        np.testing.assert_array_equal(onnx_indices, pytorch_indices.numpy())
+        np.testing.assert_allclose(
+            onnx_distances, pytorch_distances.numpy(), rtol=1e-5, atol=1e-6
+        )
+
+    def test_onnx_models_with_different_batch_sizes(self, tmp_path):
+        """Test ONNX models work with different batch sizes."""
+        # Create and train PQ system
+        create_pq_system(
+            training_vectors=self.vectors,
+            m=self.m,
+            k=self.k,
+            max_iterations=10,
+            output_dir=tmp_path,
+        )
+
+        # Load ONNX encode model
+        encode_session = ort.InferenceSession(str(tmp_path / "pq_encode.onnx"))
+
+        # Test with different batch sizes
+        for batch_size in [1, 5, 32, 100]:
+            test_vectors = torch.randn(batch_size, self.d)
+
+            onnx_outputs = encode_session.run(
+                None,
+                {"vectors": test_vectors.numpy()},
+            )
+            codes = onnx_outputs[0]
+
+            assert codes.shape == (batch_size, self.m)
+            assert codes.dtype == np.int64
+            assert np.all(codes >= 0)
+            assert np.all(codes < self.k)
+
+    def test_onnx_encode_decode_round_trip(self, tmp_path):
+        """Test encode-decode round trip using ONNX models."""
+        # Create and train PQ system
+        pq = PQ(self.d, self.m, self.k)
+        pq.train_pq(self.vectors, n_iterations=10)
+        pq.save(tmp_path)
+
+        # Export encode model
+        torch.onnx.export(
+            pq,
+            torch.zeros(10, self.d),
+            tmp_path / "pq_encode.onnx",
+            input_names=["vectors"],
+            output_names=["codes"],
+            dynamic_axes={"vectors": {0: "n_points"}, "codes": {0: "n_points"}},
+            opset_version=13,
+            do_constant_folding=True,
+            export_params=True,
+        )
+
+        # Export decode model
+        class PQDecoder(torch.nn.Module):
+            def __init__(self, pq):
+                super().__init__()
+                self.pq = pq
+
+            def forward(self, codes):
+                return self.pq.decode(codes)
+
+        decoder = PQDecoder(pq)
+        decoder.eval()
+
+        dummy_codes = torch.randint(0, self.k, (10, self.m), dtype=torch.long)
+        torch.onnx.export(
+            decoder,
+            dummy_codes,
+            tmp_path / "pq_decode.onnx",
+            input_names=["codes"],
+            output_names=["decoded_vectors"],
+            dynamic_axes={
+                "codes": {0: "n_points"},
+                "decoded_vectors": {0: "n_points"},
+            },
+            opset_version=13,
+            do_constant_folding=True,
+            export_params=True,
+        )
+
+        # Load ONNX models
+        encode_session = ort.InferenceSession(str(tmp_path / "pq_encode.onnx"))
+        decode_session = ort.InferenceSession(str(tmp_path / "pq_decode.onnx"))
+
+        # Test round trip
+        test_vectors = torch.randn(5, self.d)
+
+        # Encode
+        codes = encode_session.run(None, {"vectors": test_vectors.numpy()})[0]
+
+        # Decode
+        decoded = decode_session.run(None, {"codes": codes})[0]
+
+        # Check reconstruction
+        assert decoded.shape == test_vectors.shape
+
+        # Compute reconstruction error
+        mse = np.mean((test_vectors.numpy() - decoded) ** 2)
+        assert mse < 10.0  # Reasonable reconstruction error
 
 
 if __name__ == "__main__":

@@ -1,17 +1,22 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "useDefineForClassFields": true,
+    "target": "ES2021",
     "module": "ESNext",
+    "useDefineForClassFields": true,
     "jsx": "preserve",
     "allowImportingTsExtensions": true,
     "sourceMap": true,
-    "sourceRoot": "./src",
-    "rootDirs": ["src", "ivfpq/typescript/src"],
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "rootDirs": [
+      "src",
+      "ivfpq/typescript/src"
+    ],
+    "lib": [
+      "ES2021",
+      "DOM"
+    ],
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "Node",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
@@ -19,7 +24,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["@webgpu/types"]
+    "types": [
+      "@webgpu/types"
+    ]
   },
   "files": [],
   "references": [

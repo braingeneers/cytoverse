@@ -1,10 +1,11 @@
 /**
  * IVFPQ (Inverted File with Product Quantization) implementation for approximate nearest neighbor search.
  * 
- * This module uses pre-trained IVFPQ models from the Python pipeline to perform ANN search
- * using ONNX models for distance computation with residual vectors.
- * 
- * Supports both HTTP and file system access for model artifacts.
+ * - Uses pre-trained IVFPQ models from the Python pipeline to perform ANN search
+ * - Combines IVF partitioning with PQ compression
+ * - Supports using ONNX models for distance computation with residual vectors.
+ * - Supports both HTTP and file system access for model artifacts.
+ * - Support using a previously searched index as a 'user generated' index
  */
 
 import { PQDistance, PQMetadata } from './pq'
@@ -48,6 +49,30 @@ export interface SearchConfig {
 export interface SearchResults {
   indices: number[]
   distances: number[]
+  artifacts?: CellArtifact  // Optional artifacts when retainArtifacts is true
+}
+
+/**
+ * Minimal artifact for a single cell - can be used to build user IVFPQ index
+ */
+export interface CellArtifact {
+  partitionId: number      // Index of nearest centroid
+  pqCode: Uint8Array       // PQ encoded residual (m bytes)
+  labelIndex: number       // Index of assigned label via consensus
+}
+
+/**
+ * User IVFPQ index built from collected artifacts
+ */
+export interface UserIVFPQIndex {
+  modelId: string                              // Base model used
+  labelCategory?: string                       // Category used for consensus labeling (added by App.vue)
+  labels?: string[]                            // Actual label strings (added by App.vue)
+  partitions: Map<number, {                    // Partition ID -> cells in that partition
+    pqCodes: Uint8Array[]                     // PQ codes for cells
+    labelIndices: number[]                     // Label indices for cells
+  }>
+  cellCount: number                            // Total number of cells indexed
 }
 
 /**
@@ -84,6 +109,9 @@ export class IVFPQ {
     
     // Load PQ distance ONNX model
     await this.pqDistance.loadModel()
+
+    // Load PQ encode model for building user indexes
+    await this.pqDistance.loadEncodeModel()
     
     console.log(`IVFPQ system loaded: ${this.metadata!.n_partitions} partitions, ${this.metadata!.d}D`)
   }
@@ -199,9 +227,13 @@ export class IVFPQ {
   }
   
   /**
-   * Search for k nearest neighbors
+   * Search for k nearest neighbors with optional artifact retention
    */
-  async search(queryVector: Float32Array, config: Partial<SearchConfig> = {}): Promise<SearchResults> {
+  async search(
+    queryVector: Float32Array, 
+    config: Partial<SearchConfig> = {},
+    retainArtifacts: boolean = false
+  ): Promise<SearchResults> {
     if (!this.metadata || !this.centroids || !this.pqDistance || !this.pqDistance.isReady()) {
       throw new Error('IVFPQ system not loaded')
     }
@@ -215,6 +247,25 @@ export class IVFPQ {
     
     // Step 1: Find nearest partitions
     const partitionIds = this.findNearestPartitions(queryVector, n_probe)
+    const nearestPartition = partitionIds[0]  // Closest partition for artifacts
+    
+    // Prepare for artifact retention if requested
+    let artifactPqCode: Uint8Array | undefined
+    if (retainArtifacts && this.pqDistance['encodeSession']) {
+      // Compute residual for nearest partition
+      const centroidOffset = nearestPartition * d
+      const nearestResidual = new Float32Array(d)
+      for (let i = 0; i < d; i++) {
+        nearestResidual[i] = queryVector[i] - this.centroids[centroidOffset + i]
+      }
+      // Encode the residual
+      try {
+        artifactPqCode = await this.pqDistance.encode(nearestResidual)
+      } catch {
+        // Encode model might not be loaded, continue without artifact
+        console.warn('PQ encode model not loaded, artifacts will be incomplete')
+      }
+    }
     
     // Step 2: Search within each partition and collect all distances
     const allCandidates: Array<{index: number, distance: number}> = []
@@ -257,16 +308,28 @@ export class IVFPQ {
     allCandidates.sort((a, b) => a.distance - b.distance)
     const topK = allCandidates.slice(0, k)
     
-    return {
+    const result: SearchResults = {
       indices: topK.map(c => c.index),
       distances: topK.map(c => c.distance)
     }
+    
+    // Add artifacts if requested and available
+    if (retainArtifacts && artifactPqCode) {
+      // labelIndex will be set by the worker after consensus
+      result.artifacts = {
+        partitionId: nearestPartition,
+        pqCode: artifactPqCode,
+        labelIndex: -1  // Placeholder, will be set by worker after consensus
+      }
+    }
+    
+    return result
   }
   
   /**
    * Fetch data from HTTP or file system
    */
-  private async fetchData(path: string, type: 'json' | 'arraybuffer'): Promise<any> {
+  private async fetchData(path: string, type: 'json' | 'arraybuffer'): Promise<unknown> {
     const fullPath = `${this.basePath}/${path}`
     
     if (this.useHttp) {
@@ -310,6 +373,26 @@ export class IVFPQ {
    */
   isReady(): boolean {
     return !!(this.metadata && this.centroids && this.pqDistance && this.pqDistance.isReady())
+  }
+  
+  /**
+   * Get reference components for UserIVFPQ initialization
+   */
+  getReferenceComponents(): {
+    centroids: Float32Array
+    pqDistance: PQDistance
+    d: number
+    n_partitions: number
+  } | null {
+    if (!this.metadata || !this.centroids || !this.pqDistance) {
+      return null
+    }
+    return {
+      centroids: this.centroids,
+      pqDistance: this.pqDistance,
+      d: this.metadata.d,
+      n_partitions: this.metadata.n_partitions
+    }
   }
 }
 

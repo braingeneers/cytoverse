@@ -10,7 +10,7 @@
 
 import h5wasm from 'h5wasm'
 import { InferenceSession, Tensor, env } from 'onnxruntime-web'
-import { IVFPQ } from '@cytoverse/ivfpq'
+import { IVFPQ, CellArtifact, UserIVFPQIndex } from '@cytoverse/ivfpq'
 
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50
@@ -34,6 +34,7 @@ interface StartMessage {
   useWebGPU: boolean
   categoryData: Int16Array
   categoryDataLength: number
+  buildUserIndex?: boolean
 }
 
 interface H5DataSet {
@@ -99,12 +100,17 @@ interface FinishedMessage {
   type: 'finished'
   datasetLabel: string
   totalProcessed: number
+  userIndex?: UserIVFPQIndex
 }
 
 // Global state
 let model: ModelInfo | null = null
 let categoryData: Int16Array | null = null
 let categoryDataLength = 0
+
+// User IVFPQ index building
+let collectArtifacts = false  // Set to true to collect artifacts for user index
+let userIndex: UserIVFPQIndex | null = null
 
 // Handle messages from main thread
 self.addEventListener('message', async function (event: MessageEvent<StartMessage>) {
@@ -115,7 +121,8 @@ self.addEventListener('message', async function (event: MessageEvent<StartMessag
       event.data.h5File,
       event.data.useWebGPU,
       event.data.categoryData,
-      event.data.categoryDataLength
+      event.data.categoryDataLength,
+      event.data.buildUserIndex || false
     )
   }
 })
@@ -554,11 +561,11 @@ async function labelCells(
         queryVector[j] = embeddings[offset + j]
       }
 
-      // Search using IVFPQ
+      // Search using IVFPQ with optional artifact retention
       const searchResults = await model!.ivfpq.search(queryVector, {
         n_probe: NUM_PARTITIONS_TO_SEARCH,
         k: NUM_NEAREST_NEIGHBORS
-      })
+      }, collectArtifacts)
 
       const nearestTrainVectorId = searchResults.indices.length > 0 ? searchResults.indices[0] : -1
 
@@ -594,6 +601,25 @@ async function labelCells(
       trainVectorIds.push(nearestTrainVectorId)
       labelIds.push(consensusLabelId)
       confidences.push(consensusConfidence)
+      
+      // Collect artifacts if enabled and available
+      if (collectArtifacts && searchResults.artifacts && userIndex) {
+        // Update the artifact with the consensus label index
+        searchResults.artifacts.labelIndex = consensusLabelId
+        
+        // Add to the appropriate partition in the user index
+        const partitionId = searchResults.artifacts.partitionId
+        if (!userIndex.partitions.has(partitionId)) {
+          userIndex.partitions.set(partitionId, {
+            pqCodes: [],
+            labelIndices: []
+          })
+        }
+        const partition = userIndex.partitions.get(partitionId)!
+        partition.pqCodes.push(searchResults.artifacts.pqCode)
+        partition.labelIndices.push(searchResults.artifacts.labelIndex)
+        userIndex.cellCount++
+      }
     } catch (error) {
       console.error(`Error processing vector ${i}:`, error)
       trainVectorIds.push(-1)
@@ -614,13 +640,25 @@ async function start(
   h5File: File,
   useWebGPU: boolean,
   categoryDataIn: Int16Array,
-  categoryDataLengthIn: number
+  categoryDataLengthIn: number,
+  buildUserIndex: boolean = false
 ): Promise<void> {
   console.log(`Starting unified worker for model ${modelID} with file ${h5File.name}`)
   
   // Store category data
   categoryData = categoryDataIn
   categoryDataLength = categoryDataLengthIn
+  
+  // Initialize user index if requested
+  collectArtifacts = buildUserIndex
+  if (collectArtifacts) {
+    userIndex = {
+      modelId: modelID,
+      partitions: new Map(),
+      cellCount: 0
+    }
+    console.log('User IVFPQ index collection enabled')
+  }
   
   self.postMessage({ type: 'status', message: 'Loading libraries...' } as StatusMessage)
   const Module = await h5wasm.ready
@@ -789,11 +827,19 @@ async function start(
     annData.close()
     FS.unmount('/work')
 
-    self.postMessage({
+    const finishedMessage: FinishedMessage = {
       type: 'finished',
       datasetLabel: h5File.name,
       totalProcessed: cellNames.length,
-    } as FinishedMessage)
+    }
+    
+    // Include user index if it was built
+    if (userIndex && userIndex.cellCount > 0) {
+      finishedMessage.userIndex = userIndex
+      console.log(`User IVFPQ index built with ${userIndex.cellCount} cells across ${userIndex.partitions.size} partitions`)
+    }
+    
+    self.postMessage(finishedMessage)
   } catch (error) {
     try {
       FS.unmount('/work')

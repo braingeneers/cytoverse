@@ -139,6 +139,78 @@ describe('PQDistance', () => {
     })
   })
   
+  describe('PQ Encoding with ONNX', () => {
+    it('should encode residual vectors using ONNX model', async () => {
+      const mockMetadata = { 
+        d: 4, m: 2, k: 4, d_sub: 2, compression_ratio: 2, 
+        codebooks_shape: [2, 4, 2], codebooks_size: 16, 
+        training_samples: 1000, max_iterations: 100, version: '1.0' 
+      }
+      const mockCodebooks = new Float32Array(16)
+      
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockMetadata) })
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: () => Promise.resolve(mockCodebooks.buffer) })
+      
+      const pqDistance = new PQDistance('http://example.com')
+      await pqDistance.load()
+      await pqDistance.loadEncodeModel()
+      
+      // Mock ONNX encode output
+      mockSession.run.mockResolvedValue({
+        codes: { data: new Uint8Array([2, 3]) }  // m=2, so 2 codes
+      })
+      
+      const residualVector = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      const codes = await pqDistance.encode(residualVector)
+      
+      expect(codes).toBeInstanceOf(Uint8Array)
+      expect(codes.length).toBe(2)  // m=2
+      expect(codes[0]).toBe(2)
+      expect(codes[1]).toBe(3)
+      
+      // Verify correct tensors were passed to ONNX
+      expect(mockSession.run).toHaveBeenCalledWith({
+        vectors: expect.objectContaining({
+          type: 'float32',
+          dims: [1, 4],
+          data: residualVector
+        })
+      })
+    })
+    
+    it('should throw error if encode model not loaded', async () => {
+      const mockMetadata = { 
+        d: 4, m: 2, k: 4, d_sub: 2, compression_ratio: 2, 
+        codebooks_shape: [2, 4, 2], codebooks_size: 16, 
+        training_samples: 1000, max_iterations: 100, version: '1.0' 
+      }
+      const mockCodebooks = new Float32Array(16)
+      
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockMetadata) })
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: () => Promise.resolve(mockCodebooks.buffer) })
+      
+      const pqDistance = new PQDistance('http://example.com')
+      await pqDistance.load()
+      
+      const residualVector = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      
+      await expect(pqDistance.encode(residualVector))
+        .rejects.toThrow('Encode model not loaded. Call loadEncodeModel() first.')
+    })
+    
+    it('should throw error if PQ system not loaded for encoding', async () => {
+      const pqDistance = new PQDistance('http://example.com')
+      await pqDistance.loadEncodeModel()
+      
+      const residualVector = new Float32Array([0.1, 0.2, 0.3, 0.4])
+      
+      await expect(pqDistance.encode(residualVector))
+        .rejects.toThrow('PQ system not loaded. Call load() first.')
+    })
+  })
+  
   describe('CPU Search Fallback', () => {
     it('should compute asymmetric distances on CPU', async () => {
       const mockMetadata = { 

@@ -146,7 +146,9 @@
       "type": "node",
       "request": "launch",
       "name": "Debug Vitest Tests",
-      "skipFiles": ["<node_internals>/**"],
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
       "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
       "args": [
         "run",
@@ -171,10 +173,10 @@
         "webpack:///./src/*": "${workspaceFolder}/src/*",
         "webpack:///./*": "${workspaceFolder}/*",
         "webpack:///src/*": "${workspaceFolder}/src/*",
-        "./src/*": "${workspaceFolder}/ivfpq/typescript/src/*",
-        "../src/*": "${workspaceFolder}/src/*",
-        "../../src/*": "${workspaceFolder}/src/*"
-      }
+        "../src/*": "${workspaceFolder}/ivfpq/typescript/src/*",
+        "../../ivfpq/typescript/src/*": "${workspaceFolder}/ivfpq/typescript/src/*"
+      },
+      "sourceMaps": true
     }
   ]
 }

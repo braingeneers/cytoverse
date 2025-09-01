@@ -105,7 +105,8 @@ class PQ(nn.Module):
             # Find nearest centroid indices
             codes[:, i] = torch.argmin(distances, dim=1)
 
-        return codes
+        # Cast to uint8 for ONNX export (we always use 256 centroids max)
+        return codes.to(torch.uint8)
 
     def decode(self, codes: torch.Tensor) -> torch.Tensor:
         """

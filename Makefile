@@ -38,7 +38,7 @@ scimilarity-model:
 	public/models/$(model_id)/embedding
 
 # Embeddings (Must be first as model uses these to validate the export)
-scimilarity-all-embeddings:
+scimilarity-embeddings:
 	python scripts/scimilarity_to_embeddings.py  embeddings \
 	data/models/scimilarity/model_v1.1/cellsearch \
 	data/references/$(model_id)/ \

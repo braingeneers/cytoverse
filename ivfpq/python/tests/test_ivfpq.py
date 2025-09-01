@@ -168,7 +168,7 @@ class TestIVFResidualBasic:
 
         # Search merges ALL vectors from ALL probed partitions, sorts them globally,
         # then returns the top k from this complete sorted list
-        vector_ids, distances = ivf.search(
+        vector_ids, distances, _ = ivf.search(
             query_vector=query_vector,
             model_path=output_dir,
             n_probe=4,
@@ -202,7 +202,7 @@ class TestIVFResidualBasic:
         noise = torch.randn_like(query_vector) * 0.05
         perturbed_query = query_vector + noise
 
-        perturbed_ids, perturbed_distances = ivf.search(
+        perturbed_ids, perturbed_distances, _ = ivf.search(
             query_vector=perturbed_query,
             model_path=output_dir,
             n_probe=4,
@@ -279,7 +279,7 @@ class TestIVFResidualIntegration:
         for n_probe in [1, 2, 4, 8]:
             # Search merges ALL vectors from ALL n_probe partitions,
             # sorts them globally by distance, then returns top k
-            vector_ids, distances = ivf.search(
+            vector_ids, distances, _ = ivf.search(
                 query_vector=query_vector,
                 model_path=output_dir,
                 n_probe=n_probe,
@@ -348,7 +348,7 @@ class TestIVFResidualIntegration:
         print(f"\nTesting that search returns ALL vectors from probed partitions")
 
         # Test with n_probe=1: should get ALL vectors from 1 partition
-        vector_ids_1, distances_1 = ivf.search(
+        vector_ids_1, distances_1, _ = ivf.search(
             query_vector=query_vector,
             model_path=output_dir,
             n_probe=1,
@@ -358,7 +358,7 @@ class TestIVFResidualIntegration:
         print(f"  n_probe=1: Got {len(vector_ids_1)} vectors from 1 partition")
 
         # Test with n_probe=2: should get ALL vectors from 2 partitions
-        vector_ids_2, distances_2 = ivf.search(
+        vector_ids_2, distances_2, _ = ivf.search(
             query_vector=query_vector,
             model_path=output_dir,
             n_probe=2,
@@ -373,7 +373,7 @@ class TestIVFResidualIntegration:
         ), f"n_probe=2 should return more vectors than n_probe=1"
 
         # Test with n_probe=4 (all partitions): should get ALL vectors
-        vector_ids_all, distances_all = ivf.search(
+        vector_ids_all, distances_all, _ = ivf.search(
             query_vector=query_vector,
             model_path=output_dir,
             n_probe=n_partitions,  # Search all partitions
@@ -403,7 +403,7 @@ class TestIVFResidualIntegration:
                 ), f"Distances not globally sorted at index {i}"
 
         # Test that limiting k works correctly
-        vector_ids_limited, distances_limited = ivf.search(
+        vector_ids_limited, distances_limited, _ = ivf.search(
             query_vector=query_vector,
             model_path=output_dir,
             n_probe=n_partitions,  # Search all partitions
@@ -456,7 +456,7 @@ class TestIVFResidualIntegration:
 
         # Search merges ALL vectors from ALL probed partitions,
         # sorts them globally, and returns the top k_results
-        vector_ids, distances = ivf.search(
+        vector_ids, distances, _ = ivf.search(
             query_vector=query_vector,
             model_path=output_dir,
             n_probe=n_probe,
@@ -573,7 +573,7 @@ class TestIVFResidualIntegration:
 
             # Search merges ALL vectors from ALL probed partitions,
             # sorts them globally, and returns top k_results
-            vector_ids, distances = ivf.search(
+            vector_ids, distances, _ = ivf.search(
                 query_vector=query_vector,
                 model_path=output_dir,
                 n_probe=4,
@@ -601,7 +601,7 @@ class TestIVFResidualIntegration:
             noise = torch.randn_like(query_vector) * 0.05
             perturbed_query = query_vector + noise
 
-            perturbed_ids, perturbed_distances = ivf.search(
+            perturbed_ids, perturbed_distances, _ = ivf.search(
                 query_vector=perturbed_query,
                 model_path=output_dir,
                 n_probe=4,
