@@ -99,6 +99,13 @@ interface FinishedMessage {
   type: 'finished';
   datasetLabel: string;
   totalProcessed: number;
+  userIndexArtifacts?: {
+    partitionIds: Int32Array;
+    pqCodes: Uint8Array[];
+    labelIndices: Int32Array;
+    x: Float32Array;
+    y: Float32Array;
+  };
 }
 
 // Global state
@@ -910,6 +917,13 @@ async function start(
       type: 'finished',
       datasetLabel: h5File.name,
       totalProcessed: cellNames.length,
+      userIndexArtifacts: {
+        partitionIds: new Int32Array(userIndex.partitionIds),
+        pqCodes: userIndex.pqCodes,
+        labelIndices: new Int32Array(userIndex.labelIndices),
+        x: new Float32Array(userIndex.x),
+        y: new Float32Array(userIndex.y),
+      },
     };
 
     self.postMessage(finishedMessage);

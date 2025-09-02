@@ -91,7 +91,22 @@
               :disabled="isRunning"
               variant="outlined"
               density="comfortable"
-            />
+            >
+              <template #item="{ item, props }">
+                <v-list-item v-bind="props">
+                  <template v-if="item.raw.isUserIndex" #append>
+                    <v-btn
+                      icon
+                      size="x-small"
+                      variant="text"
+                      @click.stop.prevent="confirmDeleteUserIndex(item.raw.value, item.raw.title)"
+                    >
+                      <v-icon size="small">mdi-delete</v-icon>
+                    </v-btn>
+                  </template>
+                </v-list-item>
+              </template>
+            </v-select>
           </div>
 
           <!-- Category Selection -->
@@ -110,12 +125,12 @@
           <!-- Dataset Statistics -->
           <v-card class="stats-card" variant="outlined">
             <v-card-text>
-              <template v-if="xTrainData && yTrainData && categoryLabels && categoryData">
+              <template v-if="xReferenceData && yReferenceData && categoryLabels && categoryData">
                 <div class="stat-item">
                   <strong>Reference Cells:</strong> {{ categoryData.length.toLocaleString() }}
                 </div>
                 <div class="stat-item">
-                  <strong>Plotted Cells:</strong> {{ xTrainData.length.toLocaleString() }}
+                  <strong>Plotted Cells:</strong> {{ xReferenceData.length.toLocaleString() }}
                 </div>
                 <div class="stat-item">
                   <strong>Labels:</strong> {{ categoryLabels.length }}
@@ -162,6 +177,19 @@
             @click="handleRunStopClick"
           >
             {{ isRunning ? 'Stop' : 'Start' }}
+          </v-btn>
+
+          <!-- Create Index Button -->
+          <v-btn
+            v-if="canCreateIndex"
+            color="primary"
+            size="large"
+            prepend-icon="mdi-database-plus"
+            block
+            class="mt-2"
+            @click="createIndexModalOpen = true"
+          >
+            Create Index
           </v-btn>
 
           <!-- Progress and Status -->
@@ -227,9 +255,9 @@
           </div>
           <ScatterPlotWebGL
             ref="scatterPlotRef"
-            v-else-if="xTrainData && yTrainData && categoryData && categoryLabels.length > 0"
-            :x-train-data="xTrainData"
-            :y-train-data="yTrainData"
+            v-else-if="xReferenceData && yReferenceData && categoryData && categoryLabels.length > 0"
+            :x-train-data="xReferenceData"
+            :y-train-data="yReferenceData"
             :category-data="categoryData"
             :category-labels="categoryLabels"
             :x-test-data="xTestData"
@@ -335,6 +363,61 @@
           </v-card-actions>
         </v-card>
       </v-dialog>
+
+      <!-- Create Index Modal -->
+      <v-dialog
+        v-model="createIndexModalOpen"
+        max-width="500px"
+      >
+        <v-card>
+          <v-card-title>Create User Index</v-card-title>
+          <v-card-text>
+            <p>Save the current labeled cells as a user index for future reference labeling.</p>
+            <v-text-field
+              v-model="newIndexName"
+              label="Index Name"
+              placeholder="Enter a name for your index"
+              variant="outlined"
+              density="comfortable"
+              class="mt-4"
+            />
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn @click="createIndexModalOpen = false">Cancel</v-btn>
+            <v-btn 
+              color="primary" 
+              :disabled="!newIndexName.trim()"
+              @click="saveUserIndex"
+            >
+              Save Index
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- Delete Index Confirmation Modal -->
+      <v-dialog
+        v-model="deleteIndexModalOpen"
+        max-width="400px"
+      >
+        <v-card>
+          <v-card-title>Delete User Index</v-card-title>
+          <v-card-text>
+            Are you sure you want to delete the user index "{{ indexToDelete?.name?.replace('👤 ', '') }}"?
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn @click="deleteIndexModalOpen = false">Cancel</v-btn>
+            <v-btn 
+              color="error" 
+              @click="deleteUserIndex"
+            >
+              Delete
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-layout>
   </v-app>
 </template>
@@ -345,6 +428,7 @@ import { openDB, deleteDB, DBSchema, IDBPDatabase } from 'idb'
 
 import Worker from './worker?worker'
 import ScatterPlotWebGL from './ScatterPlotWebGL.vue'
+import { userIndexService, type UserIndex } from './userIndexService'
 
 // Constants
 const drawerWidth = 320
@@ -390,15 +474,21 @@ const fileList = ref<File[]>([])
 const statusMessage = ref('')
 const progress = ref(0)
 const selectedModel = ref('scimilarity')
-const availableModels = ref<{ title: string; value: string }[]>([])
+const availableModels = ref<{ 
+  title: string
+  value: string
+  isUserIndex: boolean
+  baseModelId?: string
+  cellCount?: number
+}[]>([])
 const isRunning = ref(false)
 const hasWebGPU = ref(false)
 const useWebGPU = ref(false)
 const isMobile = ref(window.innerWidth < 768)
 
-// Scatter plot data state - training data (static)
-const xTrainData = ref<Float32Array | null>(null)
-const yTrainData = ref<Float32Array | null>(null)
+// Scatter plot data state - reference data (static)
+const xReferenceData = ref<Float32Array | null>(null)
+const yReferenceData = ref<Float32Array | null>(null)
 const categoryData = ref<Int16Array | null>(null)
 const categoryLabels = ref<string[]>([])
 const isLoadingData = ref(false)
@@ -425,6 +515,20 @@ const shareEmail = ref('')
 const helpModalOpen = ref(false)
 const errorModalOpen = ref(false)
 const errorMessage = ref('')
+const createIndexModalOpen = ref(false)
+const newIndexName = ref('')
+const deleteIndexModalOpen = ref(false)
+const indexToDelete = ref<{ id: string; name: string } | null>(null)
+
+// User Index state
+const canCreateIndex = ref(false)
+const currentUserIndexArtifacts = ref<{
+  partitionIds: Int32Array
+  pqCodes: Uint8Array[]
+  labelIndices: Int32Array
+  x: Float32Array
+  y: Float32Array
+} | null>(null)
 
 // Normalization parameters from metadata
 const xCenter = ref(0)
@@ -555,6 +659,16 @@ const createUnifiedWorker = () => {
         isRunning.value = false
         scatterPlotRef.value?.stopTimerUpdates()
         scatterPlotRef.value?.forceUpdate()
+        
+        // Store user index artifacts if available and we're using a reference model
+        if (evt.data.userIndexArtifacts) {
+          const selectedModelInfo = availableModels.value.find(m => m.value === selectedModel.value)
+          const isUsingReferenceModel = !selectedModelInfo?.isUserIndex
+          
+          currentUserIndexArtifacts.value = evt.data.userIndexArtifacts
+          canCreateIndex.value = isUsingReferenceModel  // Only allow creating from reference models
+        }
+        
         if (startTime.value) {
           const endTime = Date.now()
           const totalElapsed = Math.round((endTime - startTime.value) / 1000)
@@ -583,28 +697,44 @@ const createUnifiedWorker = () => {
 // WebGPU detection
 const loadAvailableModels = async () => {
   try {
+    // Load reference models
     const response = await fetch('models/models.txt')
     const text = await response.text()
     const modelNames = text.split('\n').filter(name => name.trim())
     
-    availableModels.value = modelNames.map(name => ({
-      // title: name.charAt(0).toUpperCase() + name.slice(1),
+    const referenceModels = modelNames.map(name => ({
       title: name,
-      value: name
+      value: name,
+      isUserIndex: false
     }))
     
-    // Set default to 'scimilarity' if available, otherwise first model
-    if (modelNames.includes('scimilarity')) {
-      selectedModel.value = 'scimilarity'
-    } else if (modelNames.length > 0) {
-      selectedModel.value = modelNames[0]
+    // Load user indexes from IndexedDB
+    const userIndexes = await userIndexService.getUserIndexMetadata()
+    const userModels = userIndexes.map(index => ({
+      title: `👤 ${index.name}`,
+      value: index.id,
+      isUserIndex: true,
+      baseModelId: index.baseModelId,
+      cellCount: index.cellCount
+    }))
+    
+    // Combine both lists
+    availableModels.value = [...referenceModels, ...userModels]
+    
+    // Set default to 'scimilarity' if available and no model is selected
+    if (!selectedModel.value || !availableModels.value.find(m => m.value === selectedModel.value)) {
+      if (modelNames.includes('scimilarity')) {
+        selectedModel.value = 'scimilarity'
+      } else if (modelNames.length > 0) {
+        selectedModel.value = modelNames[0]
+      }
     }
   } catch (error) {
     console.error('Error loading models:', error)
     // Fallback to hardcoded models
     availableModels.value = [
-      {title: 'Brain', value: 'brain'}, 
-      {title: 'SCimilarity', value: 'scimilarity'}
+      {title: 'Brain', value: 'brain', isUserIndex: false}, 
+      {title: 'SCimilarity', value: 'scimilarity', isUserIndex: false}
     ]
   }
 }
@@ -664,6 +794,34 @@ async function fetchSampleFile() {
 const loadCategoriesFromMetadata = async () => {
   try {
     const modelID = selectedModel.value
+    
+    // Check if this is a user index
+    const selectedModelInfo = availableModels.value.find(m => m.value === modelID)
+    if (selectedModelInfo?.isUserIndex) {
+      // For user indexes, load categories from the base model
+      const baseModelId = selectedModelInfo.baseModelId
+      const metadataResponse = await fetch(`${sitePath}/models/${baseModelId}/pumap/metadata.json`)
+      const metadata = await metadataResponse.json()
+      
+      if (metadata.categories && typeof metadata.categories === 'object') {
+        const categories = Object.keys(metadata.categories)
+        availableCategories.value = categories
+        
+        // Set default category
+        if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
+          if (baseModelId === 'scimilarity' && categories.includes('prediction')) {
+            selectedCategory.value = 'prediction'
+          } else if (baseModelId === 'brain' && categories.includes('CellType')) {
+            selectedCategory.value = 'CellType'
+          } else if (categories.length > 0) {
+            selectedCategory.value = categories[0]
+          }
+        }
+      }
+      return
+    }
+    
+    // Original logic for reference models
     const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)
     const metadata = await metadataResponse.json()
 
@@ -690,7 +848,50 @@ const loadCategoriesFromMetadata = async () => {
   }
 }
 
-const loadTrainingData = async () => {
+const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
+  // Load the user index from IndexedDB
+  const userIndex = await userIndexService.getUserIndex(userIndexId)
+  if (!userIndex) {
+    throw new Error('User index not found')
+  }
+  
+  // Load metadata from base model for normalization parameters
+  const metadataResponse = await fetch(`${sitePath}/models/${baseModelId}/pumap/metadata.json`)
+  const metadata = await metadataResponse.json()
+  
+  // Store normalization parameters
+  xCenter.value = metadata.xCenter || 0
+  yCenter.value = metadata.yCenter || 0
+  maxRange.value = metadata.maxRange || 1
+  
+  // Use the user index's coordinates and labels
+  xReferenceData.value = userIndex.coordinates.x
+  yReferenceData.value = userIndex.coordinates.y
+  categoryLabels.value = userIndex.labels
+  
+  // Create category data by extracting label indices from all partitions
+  // We need to maintain the same order as the coordinates
+  const categoryIndices = new Int16Array(userIndex.cellCount)
+  const cellToLabel = new Map<number, number>()
+  
+  // Build a map from cell index to label index
+  for (const partition of Object.values(userIndex.partitions)) {
+    for (let i = 0; i < partition.cellIndices.length; i++) {
+      cellToLabel.set(partition.cellIndices[i], partition.labelIndices[i])
+    }
+  }
+  
+  // Fill the category array in order
+  for (let i = 0; i < userIndex.cellCount; i++) {
+    categoryIndices[i] = cellToLabel.get(i) ?? 0
+  }
+  
+  categoryData.value = categoryIndices
+  
+  console.log(`Loaded user index: ${userIndex.cellCount} points, ${userIndex.labels.length} labels`)
+}
+
+const loadReferenceData = async () => {
   if (!selectedCategory.value) {
     return
   }
@@ -698,6 +899,15 @@ const loadTrainingData = async () => {
   isLoadingData.value = true
   try {
     const modelID = selectedModel.value
+    
+    // Check if this is a user index
+    const selectedModelInfo = availableModels.value.find(m => m.value === modelID)
+    if (selectedModelInfo?.isUserIndex) {
+      // Load user index data instead
+      await loadUserIndexData(modelID, selectedModelInfo.baseModelId!)
+      isLoadingData.value = false
+      return
+    }
 
     // Load metadata to get categories information
     const metadataResponse = await fetch(`${sitePath}/models/${modelID}/pumap/metadata.json`)
@@ -750,16 +960,16 @@ const loadTrainingData = async () => {
     const yData = new Float32Array(yBuffer)
     const categoryIndices = new Int16Array(categoryBuffer)
 
-    xTrainData.value = xData
-    yTrainData.value = yData
+    xReferenceData.value = xData
+    yReferenceData.value = yData
     categoryData.value = categoryIndices
     categoryLabels.value = labels
 
-    console.log(`Loaded training data: ${xData.length} points, ${labels.length} category labels`)
+    console.log(`Loaded reference data: ${xData.length} points, ${labels.length} category labels`)
   } catch (error) {
-    console.error('Error loading training data:', error)
+    console.error('Error loading reference data:', error)
     // Switch to an available category silently
-    // errorMessage.value = `Failed to load training data: ${error}`
+    // errorMessage.value = `Failed to load reference data: ${error}`
     // errorModalOpen.value = true
   } finally {
     isLoadingData.value = false
@@ -777,6 +987,8 @@ const start = async () => {
   totalLabeled.value = 0
   totalNumCells.value = 0
   totalProcessed.value = 0
+  canCreateIndex.value = false
+  currentUserIndexArtifacts.value = null
   cellPositions.clear()
   cellIdToIndex.clear()
 
@@ -830,11 +1042,19 @@ const start = async () => {
 
   // Start the worker
   console.log(`Starting unified worker with modelID: ${selectedModel.value}`)
+  
+  // Check if this is a user index
+  const selectedModelInfo = availableModels.value.find(m => m.value === selectedModel.value)
+  const isUserIndex = selectedModelInfo?.isUserIndex || false
+  const baseModelId = isUserIndex ? selectedModelInfo?.baseModelId : selectedModel.value
+  
   if (unifiedWorker) {
     unifiedWorker.postMessage({
       type: 'start',
       modelsURL: `${sitePath}/models`,
-      modelID: selectedModel.value,
+      modelID: baseModelId,  // Always use the base model ID for loading models
+      userIndexId: isUserIndex ? selectedModel.value : null,  // Pass user index ID if applicable
+      isUserIndex,
       h5File: selectedFile.value,
       useWebGPU: useWebGPU.value,
       categoryData: categoryData.value || new Int16Array(0),
@@ -923,6 +1143,82 @@ const handleDrawerToggle = () => {
   sidebarOpen.value = !sidebarOpen.value
 }
 
+const confirmDeleteUserIndex = (indexId: string, indexName: string) => {
+  indexToDelete.value = { id: indexId, name: indexName }
+  deleteIndexModalOpen.value = true
+}
+
+const deleteUserIndex = async () => {
+  if (!indexToDelete.value) return
+  
+  try {
+    await userIndexService.deleteUserIndex(indexToDelete.value.id)
+    await loadAvailableModels()
+    
+    // If the deleted index was selected, reset to default
+    if (selectedModel.value === indexToDelete.value.id) {
+      selectedModel.value = availableModels.value.find(m => !m.isUserIndex)?.value || ''
+    }
+    
+    statusMessage.value = 'User index deleted successfully'
+    deleteIndexModalOpen.value = false
+    indexToDelete.value = null
+  } catch (error) {
+    console.error('Error deleting user index:', error)
+    errorMessage.value = `Failed to delete user index: ${error}`
+    errorModalOpen.value = true
+    deleteIndexModalOpen.value = false
+  }
+}
+
+const saveUserIndex = async () => {
+  if (!currentUserIndexArtifacts.value || !newIndexName.value.trim()) {
+    return
+  }
+
+  try {
+    // Transform artifacts to user index format
+    const userIndex = userIndexService.transformArtifactsToUserIndex(
+      newIndexName.value.trim(),
+      selectedModel.value,
+      currentUserIndexArtifacts.value,
+      categoryLabels.value
+    )
+    
+    // Debug: Check the structure before saving
+    console.log('User index structure:', {
+      id: userIndex.id,
+      name: userIndex.name,
+      baseModelId: userIndex.baseModelId,
+      cellCount: userIndex.cellCount,
+      partitionCount: Object.keys(userIndex.partitions).length,
+      labelsType: typeof userIndex.labels,
+      labelsIsArray: Array.isArray(userIndex.labels),
+      coordinatesXType: userIndex.coordinates.x?.constructor?.name,
+      coordinatesYType: userIndex.coordinates.y?.constructor?.name,
+    })
+    
+    // Save to IndexedDB
+    await userIndexService.saveUserIndex(userIndex)
+    
+    // Clear the form and close modal
+    newIndexName.value = ''
+    createIndexModalOpen.value = false
+    canCreateIndex.value = false
+    currentUserIndexArtifacts.value = null
+    
+    // Reload models list to include the new user index
+    await loadAvailableModels()
+    
+    // Show success message
+    statusMessage.value = `User index "${userIndex.name}" created successfully`
+  } catch (error) {
+    console.error('Error saving user index:', error)
+    errorMessage.value = `Failed to save user index: ${error}`
+    errorModalOpen.value = true
+  }
+}
+
 const handleRunStopClick = () => {
   if (isRunning.value) {
     stop()
@@ -983,8 +1279,8 @@ watch(selectedModel, async () => {
   cellIdToIndex.clear()
   
   // Clear training data to refresh scatter plot
-  xTrainData.value = null
-  yTrainData.value = null
+  xReferenceData.value = null
+  yReferenceData.value = null
   categoryData.value = null
   categoryLabels.value = []
   
@@ -993,19 +1289,23 @@ watch(selectedModel, async () => {
   
   // Load training data for the new model/category
   if (selectedCategory.value) {
-    await loadTrainingData()
+    await loadReferenceData()
   }
 })
 
 // Reload training data when selectedCategory changes
 watch(selectedCategory, () => {
   if (selectedCategory.value) {
-    loadTrainingData()
+    loadReferenceData()
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   console.log('App mounted')
+  
+  // Initialize user index service
+  await userIndexService.init()
+  
   fetchSampleFile()
   detectWebGPU()
   loadAvailableModels()

@@ -19,7 +19,7 @@ notice:
 	@echo "- Web Artificats to web/public/models/$(model_id)"
 
 update-models-list:
-	ls public/models | sort > public/models/models.txt
+	ls -d public/models/*/ | while read -r dir; do basename "$$dir"; done > public/models/models.txt
 
 scimilarity: model_id=scimilarity
 scimilarity: stratify_label=prediction
