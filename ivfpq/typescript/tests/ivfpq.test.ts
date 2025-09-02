@@ -106,6 +106,9 @@ describe('IVFPQ System', () => {
         if (url.endsWith('/pq_distance.onnx')) {
           return Promise.resolve({ ok: true })
         }
+        if (url.endsWith('/pq_encode.onnx')) {
+          return Promise.resolve({ ok: true })
+        }
         return Promise.reject(new Error(`Unexpected URL: ${url}`))
       })
       
@@ -218,6 +221,9 @@ describe('IVFPQ System', () => {
         if (url.endsWith('/pq_distance.onnx')) {
           return Promise.resolve({ ok: true })
         }
+        if (url.endsWith('/pq_encode.onnx')) {
+          return Promise.resolve({ ok: true })
+        }
         if (url.includes('/partitions/partition_0000.bin')) {
           return Promise.resolve({
             ok: true,
@@ -227,10 +233,23 @@ describe('IVFPQ System', () => {
         return Promise.reject(new Error(`Unexpected URL: ${url}`))
       })
       
-      // Mock ONNX session run for PQ distance
-      mockSession.run.mockResolvedValue({
-        indices: { data: new BigInt64Array([0n, 1n]) },
-        distances: { data: new Float32Array([0.1, 0.2]) }
+      // Mock ONNX session run for both encode and distance operations
+      mockSession.run.mockImplementation(() => {
+        // Check if this is an encode operation (has 'vectors' input) or distance operation
+        // For simplicity, we'll return appropriate mock data for each type
+        // First call will be encode, subsequent calls will be distance
+        if (mockSession.run.mock.calls.length <= 1) {
+          // This is the encode operation
+          return Promise.resolve({
+            codes: { data: new Uint8Array([0, 1]) }  // m=2, so 2 codes
+          })
+        } else {
+          // This is the distance operation
+          return Promise.resolve({
+            indices: { data: new BigInt64Array([0n, 1n]) },
+            distances: { data: new Float32Array([0.1, 0.2]) }
+          })
+        }
       })
       
       const ivfpq = new IVFPQ('http://example.com/models')
@@ -316,6 +335,9 @@ describe('IVFPQ System', () => {
         if (url.endsWith('/pq_distance.onnx')) {
           return Promise.resolve({ ok: true })
         }
+        if (url.endsWith('/pq_encode.onnx')) {
+          return Promise.resolve({ ok: true })
+        }
         if (url.includes('/partitions/')) {
           return Promise.resolve({
             ok: true,
@@ -323,6 +345,23 @@ describe('IVFPQ System', () => {
           })
         }
         return Promise.reject(new Error(`Unexpected URL: ${url}`))
+      })
+      
+      // Mock ONNX session run for both encode and distance operations
+      mockSession.run.mockImplementation(() => {
+        // First call will be encode, subsequent calls will be distance
+        if (mockSession.run.mock.calls.length <= 1) {
+          // This is the encode operation
+          return Promise.resolve({
+            codes: { data: new Uint8Array([0, 1]) }  // m=2, so 2 codes
+          })
+        } else {
+          // This is the distance operation - return empty results for empty partitions
+          return Promise.resolve({
+            indices: { data: new BigInt64Array([]) },
+            distances: { data: new Float32Array([]) }
+          })
+        }
       })
       
       const ivfpq = new IVFPQ('http://example.com/models')
@@ -398,6 +437,9 @@ describe('IVFPQ System', () => {
           })
         }
         if (url.endsWith('/pq_distance.onnx')) {
+          return Promise.resolve({ ok: true })
+        }
+        if (url.endsWith('/pq_encode.onnx')) {
           return Promise.resolve({ ok: true })
         }
         return Promise.reject(new Error(`Unexpected URL: ${url}`))

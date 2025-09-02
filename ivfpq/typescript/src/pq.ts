@@ -169,7 +169,7 @@ export class PQDistance {
       this.distanceSession = await ort.InferenceSession.create(path, {
         executionProviders: ['wasm'],
         // logSeverityLevel: 0,
-        logIdSeverityLevel: 3,
+        // logIdSeverityLevel: 3,
         // logVerbosityLevel: 0,
       });
       console.log(`Loaded PQ distance model from ${path}`);
@@ -187,7 +187,7 @@ export class PQDistance {
     try {
       this.encodeSession = await ort.InferenceSession.create(path, {
         executionProviders: ['wasm'],
-        logSeverityLevel: 3,
+        // logSeverityLevel: 3,
         // logSeverityLevel: 0,
         // logVerbosityLevel: 0,
       });
@@ -225,7 +225,7 @@ export class PQDistance {
         vectors: residualTensor,
       },
       {
-        logSeverityLevel: 3,
+        // logSeverityLevel: 3,
         // logSeverityLevel: 0,
         // logVerbosityLevel: 0,
       }

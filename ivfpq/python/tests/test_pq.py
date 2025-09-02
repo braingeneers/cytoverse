@@ -89,9 +89,9 @@ class TestPQBasic:
         codes = pq(test_vectors)
 
         assert codes.shape == (100, self.m)
-        assert codes.dtype == torch.long
+        assert codes.dtype == torch.uint8
         assert torch.all(codes >= 0)
-        assert torch.all(codes < self.k)
+        assert torch.all(codes <= (self.k - 1))
 
         # Test decoding
         decoded_vectors = pq.decode(codes)
@@ -205,9 +205,9 @@ class TestPQONNXModels:
             codes = pq(test_vectors)
 
         assert codes.shape == (10, self.m)
-        assert codes.dtype == torch.long
+        assert codes.dtype == torch.uint8
         assert torch.all(codes >= 0)
-        assert torch.all(codes < self.k)
+        assert torch.all(codes <= (self.k - 1))
 
     def test_pq_decode_function(self, tmp_path):
         """Test PQ decode with vectors."""
@@ -585,7 +585,7 @@ class TestPQONNXVerification:
         decoder.eval()
 
         # Export decode model
-        dummy_codes = torch.randint(0, self.k, (10, self.m), dtype=torch.long)
+        dummy_codes = torch.randint(0, self.k, (10, self.m), dtype=torch.uint8)
         decode_onnx_path = tmp_path / "pq_decode.onnx"
 
         torch.onnx.export(
@@ -606,7 +606,7 @@ class TestPQONNXVerification:
         assert decode_onnx_path.exists(), "pq_decode.onnx was not created"
 
         # Test the exported model
-        test_codes = torch.randint(0, self.k, (5, self.m), dtype=torch.long)
+        test_codes = torch.randint(0, self.k, (5, self.m), dtype=torch.uint8)
 
         # Get PyTorch results
         with torch.no_grad():
@@ -705,7 +705,7 @@ class TestPQONNXVerification:
             codes = onnx_outputs[0]
 
             assert codes.shape == (batch_size, self.m)
-            assert codes.dtype == np.int64
+            assert codes.dtype == np.uint8
             assert np.all(codes >= 0)
             assert np.all(codes < self.k)
 
@@ -741,7 +741,7 @@ class TestPQONNXVerification:
         decoder = PQDecoder(pq)
         decoder.eval()
 
-        dummy_codes = torch.randint(0, self.k, (10, self.m), dtype=torch.long)
+        dummy_codes = torch.randint(0, self.k, (10, self.m), dtype=torch.uint8)
         torch.onnx.export(
             decoder,
             dummy_codes,

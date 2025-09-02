@@ -839,7 +839,6 @@ const start = async () => {
       useWebGPU: useWebGPU.value,
       categoryData: categoryData.value || new Int16Array(0),
       categoryDataLength: categoryData.value?.length || 0,
-      buildUserIndex: true,
     })
   }
 }

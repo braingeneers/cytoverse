@@ -171,12 +171,12 @@ describe('PQDistance', () => {
       
       // Verify correct tensors were passed to ONNX
       expect(mockSession.run).toHaveBeenCalledWith({
-        vectors: expect.objectContaining({
+        vectors: {
           type: 'float32',
           dims: [1, 4],
           data: residualVector
-        })
-      })
+        }
+      }, {})
     })
     
     it('should throw error if encode model not loaded', async () => {

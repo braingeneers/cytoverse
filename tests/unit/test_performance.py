@@ -135,7 +135,7 @@ def get_ivfpq_predictions_batch(
             query_vector = torch.from_numpy(embedding).float()
 
             # Search using IVFPQ
-            vector_ids, distances = ivf.search(
+            vector_ids, distances, _ = ivf.search(
                 query_vector=query_vector,
                 model_path=model_path,
                 n_probe=n_partitions_search,
@@ -236,7 +236,7 @@ def test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path):
 
             try:
                 # Search using IVFPQ
-                vector_ids, distances = ivf.search(
+                vector_ids, distances, _ = ivf.search(
                     query_vector=query_vector,
                     model_path=ivfpq_model_path,
                     n_probe=n_probe,
