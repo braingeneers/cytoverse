@@ -110,13 +110,13 @@ let categoryDataLength = 0;
 const userIndex: {
   partitionIds: number[];
   pqCodes: Uint8Array[];
-  labelIndexs: number[];
+  labelIndices: number[];
   x: number[];
   y: number[];
 } = {
   partitionIds: [],
   pqCodes: [],
-  labelIndexs: [],
+  labelIndices: [],
   x: [],
   y: [],
 };
@@ -863,7 +863,7 @@ async function start(
       // Retain artifacts for user index
       userIndex.partitionIds.push(...partitionIds);
       userIndex.pqCodes.push(...pqCodes);
-      userIndex.labelIndexs.push(...labelIds);
+      userIndex.labelIndices.push(...labelIds);
       userIndex.x.push(...coordinates.map((coord) => coord[0]));
       userIndex.y.push(...coordinates.map((coord) => coord[1]));
 
