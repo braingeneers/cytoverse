@@ -101,19 +101,25 @@ interface FinishedMessage {
   totalProcessed: number;
 }
 
-interface SearchArtifacts {
-  partitionId: number;
-  pqCode: Uint8Array;
-  labelIndex: number;
-}
-
 // Global state
 let model: ModelInfo | null = null;
 let categoryData: Int16Array | null = null;
 let categoryDataLength = 0;
 
 // Artifacts from calling search we can use to generate a user index
-const searchArtifacts: SearchArtifacts[] = [];
+const userIndex: {
+  partitionIds: number[];
+  pqCodes: Uint8Array[];
+  labelIndexs: number[];
+  x: number[];
+  y: number[];
+} = {
+  partitionIds: [],
+  pqCodes: [],
+  labelIndexs: [],
+  x: [],
+  y: [],
+};
 
 // Handle messages from main thread
 self.addEventListener(
@@ -607,10 +613,14 @@ async function labelCells(
   labelIds: number[];
   confidences: number[];
   trainVectorIds: number[];
+  partitionIds: number[];
+  pqCodes: Uint8Array[];
 }> {
   const labelIds: number[] = [];
   const confidences: number[] = [];
   const trainVectorIds: number[] = [];
+  const partitionIds: number[] = [];
+  const pqCodes: Uint8Array[] = [];
 
   for (let i = 0; i < batchSize; i++) {
     try {
@@ -666,21 +676,20 @@ async function labelCells(
       labelIds.push(consensusLabelId);
       confidences.push(consensusConfidence);
 
-      // Collect artifacts so we can create a user index if the user wants
-      searchArtifacts.push({
-        partitionId: searchResults.partitionId,
-        pqCode: searchResults.pqCode,
-        labelIndex: consensusLabelId,
-      });
+      // Additional artifacts to create a user index
+      partitionIds.push(searchResults.partitionId);
+      pqCodes.push(searchResults.pqCode);
     } catch (error) {
       console.error(`Error processing vector ${i}:`, error);
       trainVectorIds.push(-1);
       labelIds.push(-1);
       confidences.push(0);
+      partitionIds.push(-1);
+      pqCodes.push(new Uint8Array());
     }
   }
 
-  return { labelIds, confidences, trainVectorIds };
+  return { labelIds, confidences, trainVectorIds, partitionIds, pqCodes };
 }
 
 /**
@@ -844,11 +853,19 @@ async function start(
 
       // Label cells using IVFPQ
       const embeddingDim = embeddingResults.output.dims[1] as number;
-      const { labelIds, confidences, trainVectorIds } = await labelCells(
-        embeddingResults.output.data as Float32Array,
-        currentBatchSize,
-        embeddingDim
-      );
+      const { labelIds, confidences, trainVectorIds, partitionIds, pqCodes } =
+        await labelCells(
+          embeddingResults.output.data as Float32Array,
+          currentBatchSize,
+          embeddingDim
+        );
+
+      // Retain artifacts for user index
+      userIndex.partitionIds.push(...partitionIds);
+      userIndex.pqCodes.push(...pqCodes);
+      userIndex.labelIndexs.push(...labelIds);
+      userIndex.x.push(...coordinates.map((coord) => coord[0]));
+      userIndex.y.push(...coordinates.map((coord) => coord[1]));
 
       // Send labeled updates as batch
       const labeledBatch: CellUpdate[] = [];
