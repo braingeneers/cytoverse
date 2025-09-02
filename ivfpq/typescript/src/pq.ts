@@ -7,8 +7,8 @@
 
 import * as ort from 'onnxruntime-web';
 
-ort.env.logLevel = 'verbose';
-ort.env.debug = true;
+// ort.env.logLevel = 'verbose';
+// ort.env.debug = true;
 
 /**
  * PQ metadata structure
@@ -168,8 +168,9 @@ export class PQDistance {
     try {
       this.distanceSession = await ort.InferenceSession.create(path, {
         executionProviders: ['wasm'],
-        logSeverityLevel: 0,
-        logVerbosityLevel: 0,
+        // logSeverityLevel: 0,
+        logIdSeverityLevel: 3,
+        // logVerbosityLevel: 0,
       });
       console.log(`Loaded PQ distance model from ${path}`);
     } catch (error) {
@@ -186,8 +187,9 @@ export class PQDistance {
     try {
       this.encodeSession = await ort.InferenceSession.create(path, {
         executionProviders: ['wasm'],
-        logSeverityLevel: 0,
-        logVerbosityLevel: 0,
+        logSeverityLevel: 3,
+        // logSeverityLevel: 0,
+        // logVerbosityLevel: 0,
       });
       console.log(`Loaded PQ encode model from ${path}`);
     } catch (error) {
@@ -223,8 +225,9 @@ export class PQDistance {
         vectors: residualTensor,
       },
       {
-        logSeverityLevel: 0,
-        logVerbosityLevel: 0,
+        logSeverityLevel: 3,
+        // logSeverityLevel: 0,
+        // logVerbosityLevel: 0,
       }
     );
 
