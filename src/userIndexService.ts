@@ -86,11 +86,6 @@ class UserIndexService {
     return await db.get('userIndexes', id)
   }
 
-  async getAllUserIndexes(): Promise<UserIndex[]> {
-    const db = this.ensureDb()
-    return await db.getAll('userIndexes')
-  }
-
   async deleteUserIndex(id: string): Promise<void> {
     const db = this.ensureDb()
     await db.delete('userIndexes', id)
@@ -103,7 +98,8 @@ class UserIndexService {
     created: Date
     cellCount: number
   }>> {
-    const indexes = await this.getAllUserIndexes()
+    const db = this.ensureDb()
+    const indexes = await db.getAll('userIndexes')
     return indexes.map(index => ({
       id: index.id,
       name: index.name,

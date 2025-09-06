@@ -112,22 +112,22 @@
             <v-card-text>
               <template
                 v-if="
-                  xReferenceData &&
-                  yReferenceData &&
-                  categoryLabels &&
-                  categoryData
+                  baseRef.x &&
+                  baseRef.y &&
+                  baseRef.labels &&
+                  baseRef.labelIndices
                 "
               >
                 <div class="stat-item">
                   <strong>Reference Cells:</strong>
-                  {{ categoryData.length.toLocaleString() }}
+                  {{ baseRef.labelIndices.value.length.toLocaleString() }}
                 </div>
                 <div class="stat-item">
                   <strong>Plotted Cells:</strong>
-                  {{ xReferenceData.length.toLocaleString() }}
+                  {{ baseRef.x.value.length.toLocaleString() }}
                 </div>
                 <div class="stat-item">
-                  <strong>Labels:</strong> {{ categoryLabels.length }}
+                  <strong>Labels:</strong> {{ baseRef.labels.value.length }}
                 </div>
               </template>
               <template v-else-if="isLoadingData">
@@ -188,6 +188,7 @@
             color="primary"
             size="large"
             prepend-icon="mdi-database-plus"
+            data-testid="create-index-button"
             block
             class="mt-2"
             @click="createIndexModalOpen = true"
@@ -266,18 +267,21 @@
           <ScatterPlotWebGL
             ref="scatterPlotRef"
             v-else-if="
-              xReferenceData &&
-              yReferenceData &&
-              categoryData &&
-              categoryLabels.length > 0
+              baseRef.x.value &&
+              baseRef.y.value &&
+              baseRef.labelIndices.value &&
+              baseRef.labels.value.length > 0
             "
-            :x-train-data="xReferenceData"
-            :y-train-data="yReferenceData"
-            :category-data="categoryData"
-            :category-labels="categoryLabels"
-            :x-test-data="xTestData"
-            :y-test-data="yTestData"
-            :test-data-labels="testDataLabels"
+            :base-ref-x="baseRef.x.value"
+            :base-ref-y="baseRef.y.value"
+            :base-ref-label-indices="baseRef.labelIndices.value"
+            :base-ref-labels="baseRef.labels.value"
+            :user-ref-x="userRef.x.value"
+            :user-ref-y="userRef.y.value"
+            :user-ref-label-indices="userRef.labelIndices.value"
+            :query-x="query.x.value"
+            :query-y="query.y.value"
+            :query-label-indices="query.labelIndices.value"
           />
           <div v-else class="loading-container">
             <div>No data available</div>
@@ -393,6 +397,7 @@
               v-model="newIndexName"
               label="Index Name"
               placeholder="Enter a name for your index"
+              data-testid="new-index-name"
               variant="outlined"
               density="comfortable"
               class="mt-4"
@@ -404,6 +409,7 @@
             <v-btn
               color="primary"
               :disabled="!newIndexName.trim()"
+              data-testid="save-index-button"
               @click="saveUserIndex"
             >
               Save Index
@@ -497,20 +503,32 @@ const isRunning = ref(false);
 const hasWebGPU = ref(false);
 const useWebGPU = ref(false);
 const isMobile = ref(window.innerWidth < 768);
-
-// Scatter plot data state - reference data (static)
-const xReferenceData = ref<Float32Array | null>(null);
-const yReferenceData = ref<Float32Array | null>(null);
-const categoryData = ref<Int16Array | null>(null);
-const categoryLabels = ref<string[]>([]);
 const isLoadingData = ref(false);
-const selectedCategory = ref('');
-const availableCategories = ref<string[]>([]);
 
-// Test data state - pre-allocated arrays for correct positioning
-const xTestData = ref<number[]>([]);
-const yTestData = ref<number[]>([]);
-const testDataLabels = ref<number[]>([]);
+const availableCategories = ref<string[]>([]);
+const selectedCategory = ref('');
+
+// Base reference
+const baseRef = {
+  labels: ref<string[]>([]),
+  labelIndices: ref<Int16Array>(new Int16Array()),
+  x: ref<Float32Array>(new Float32Array()),
+  y: ref<Float32Array>(new Float32Array()),
+};
+
+// User reference based on base reference
+const userRef = {
+  x: ref<Float32Array>(new Float32Array()),
+  y: ref<Float32Array>(new Float32Array()),
+  labelIndices: ref<Int16Array>(new Int16Array()),
+};
+
+// Query
+const query = {
+  x: ref<Float32Array>(new Float32Array()),
+  y: ref<Float32Array>(new Float32Array()),
+  labelIndices: ref<Int16Array>(new Int16Array()),
+};
 
 // Processing state
 const totalNumCells = ref(0);
@@ -535,9 +553,9 @@ const indexToDelete = ref<{ id: string; name: string } | null>(null);
 // User Index state
 const canCreateIndex = ref(false);
 const currentUserIndexArtifacts = ref<{
-  partitionIds: Int32Array;
+  partitionIds: Int16Array;
   pqCodes: Uint8Array[];
-  labelIndices: Int32Array;
+  labelIndices: Int16Array;
   x: Float32Array;
   y: Float32Array;
 } | null>(null);
@@ -596,7 +614,7 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
 
     if (cellIndex === undefined) {
       // New cell - add to arrays
-      cellIndex = xTestData.value.length + newXData.length;
+      cellIndex = query.x.value.length + newXData.length;
       cellIdToIndex.set(update.cellId, cellIndex);
 
       newXData.push(normalizedX);
@@ -605,10 +623,10 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
     } else {
       // Update existing cell
       updatedIndices.push(cellIndex);
-      xTestData.value[cellIndex] = normalizedX;
-      yTestData.value[cellIndex] = normalizedY;
+      query.x.value[cellIndex] = normalizedX;
+      query.y.value[cellIndex] = normalizedY;
       if (update.labelId !== undefined) {
-        testDataLabels.value[cellIndex] = update.labelId;
+        query.labelIndices.value[cellIndex] = update.labelId;
       }
     }
 
@@ -616,9 +634,9 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
     if (
       update.labelId !== undefined &&
       update.labelId >= 0 &&
-      update.labelId < categoryLabels.value.length
+      update.labelId < baseRef.labels.value.length
     ) {
-      const label = categoryLabels.value[update.labelId];
+      const label = baseRef.labels.value[update.labelId];
       labelCounts.value[label] = (labelCounts.value[label] || 0) + 1;
       totalLabeled.value += 1;
 
@@ -636,17 +654,21 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
             update.cellId
           )
           .catch((error) => {
-            console.error('Failed to store test result:', error);
+            console.error('Failed to store query result:', error);
           });
       }
     }
   }
 
   // Batch append new data to arrays
+  // REMIND: Switch to set() as its more efficient
   if (newXData.length > 0) {
-    xTestData.value.push(...newXData);
-    yTestData.value.push(...newYData);
-    testDataLabels.value.push(...newLabels);
+    query.x.value = new Float32Array([...query.x.value, ...newXData]);
+    query.y.value = new Float32Array([...query.y.value, ...newYData]);
+    query.labelIndices.value = new Int16Array([
+      ...query.labelIndices.value,
+      ...newLabels,
+    ]);
   }
 };
 
@@ -737,6 +759,7 @@ const loadAvailableModels = async () => {
       title: name,
       value: name,
       isUserIndex: false,
+      baseModelId: name,
     }));
 
     // Load user indexes from IndexedDB
@@ -765,11 +788,6 @@ const loadAvailableModels = async () => {
     }
   } catch (error) {
     console.error('Error loading models:', error);
-    // Fallback to hardcoded models
-    availableModels.value = [
-      { title: 'Brain', value: 'brain', isUserIndex: false },
-      { title: 'SCimilarity', value: 'scimilarity', isUserIndex: false },
-    ];
   }
 };
 
@@ -845,7 +863,7 @@ const loadCategoriesFromMetadata = async () => {
 
       if (metadata.categories && typeof metadata.categories === 'object') {
         const categories = Object.keys(metadata.categories);
-        availableCategories.value = categories;
+        categories.value = categories;
 
         // Set default category
         if (
@@ -909,71 +927,22 @@ const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
     throw new Error('User index not found');
   }
 
-  // Load metadata from base model for normalization parameters
-  const metadataResponse = await fetch(
-    `${sitePath}/models/${baseModelId}/pumap/metadata.json`
-  );
-  const metadata = await metadataResponse.json();
+  // // Load metadata from base model for normalization parameters
+  // const metadataResponse = await fetch(
+  //   `${sitePath}/models/${baseModelId}/pumap/metadata.json`
+  // );
+  // const metadata = await metadataResponse.json();
 
-  // Store normalization parameters
-  xCenter.value = metadata.xCenter || 0;
-  yCenter.value = metadata.yCenter || 0;
-  maxRange.value = metadata.maxRange || 1;
+  // // Store normalization parameters
+  // xCenter.value = metadata.xCenter || 0;
+  // yCenter.value = metadata.yCenter || 0;
+  // maxRange.value = metadata.maxRange || 1;
 
-  // Use the normalized user index coordinates directly
-  // They are already normalized to [0,1] range when saved
-  xReferenceData.value = userIndex.coordinates.x;
-  yReferenceData.value = userIndex.coordinates.y;
-  categoryLabels.value = userIndex.labels;
-
-  console.log('Normalization params from metadata:', {
-    xCenter: xCenter.value,
-    yCenter: yCenter.value,
-    maxRange: maxRange.value,
-  });
-  console.log('All user index coordinates:', {
-    x: Array.from(userIndex.coordinates.x),
-    y: Array.from(userIndex.coordinates.y),
-  });
-  console.log('Coordinate ranges:', {
-    x: [
-      Math.min(...userIndex.coordinates.x),
-      Math.max(...userIndex.coordinates.x),
-    ],
-    y: [
-      Math.min(...userIndex.coordinates.y),
-      Math.max(...userIndex.coordinates.y),
-    ],
-  });
-  console.log('Expected coordinate space based on metadata:', {
-    xRange: [xCenter.value - maxRange.value, xCenter.value + maxRange.value],
-    yRange: [yCenter.value - maxRange.value, yCenter.value + maxRange.value],
-  });
-
-  // Check for any outlier coordinates
-  const outliers: Array<{ i: number; x: number; y: number }> = [];
-  for (let i = 0; i < userIndex.coordinates.x.length; i++) {
-    const x = userIndex.coordinates.x[i];
-    const y = userIndex.coordinates.y[i];
-    const expectedMinX = xCenter.value - maxRange.value;
-    const expectedMaxX = xCenter.value + maxRange.value;
-    const expectedMinY = yCenter.value - maxRange.value;
-    const expectedMaxY = yCenter.value + maxRange.value;
-
-    if (
-      x < expectedMinX - 10 ||
-      x > expectedMaxX + 10 ||
-      y < expectedMinY - 10 ||
-      y > expectedMaxY + 10
-    ) {
-      outliers.push({ i, x, y });
-    }
-  }
-  if (outliers.length > 0) {
-    console.warn('Outlier coordinates found:', outliers);
-  } else {
-    console.log('All coordinates are within expected bounds');
-  }
+  // // Use the normalized user index coordinates directly
+  // // They are already normalized to [0,1] range when saved
+  userRef.x.value = userIndex.coordinates.x;
+  userRef.y.value = userIndex.coordinates.y;
+  // categoryLabels.value = userIndex.labels;
 
   // Create category data by extracting label indices from all partitions
   // The coordinates are stored in the same order as they were originally processed
@@ -1010,21 +979,10 @@ const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
     `Unique labels in categoryIndices: ${new Set(categoryIndices).size}`
   );
 
-  categoryData.value = categoryIndices;
-
-  console.log(
-    `Loaded user index visualization: ${userIndex.cellCount} points, ${userIndex.labels.length} labels`
-  );
-  console.log(
-    `User index coordinates range: x=[${Math.min(
-      ...userIndex.coordinates.x
-    )}, ${Math.max(...userIndex.coordinates.x)}], y=[${Math.min(
-      ...userIndex.coordinates.y
-    )}, ${Math.max(...userIndex.coordinates.y)}]`
-  );
-  console.log('xReferenceData length:', xReferenceData.value?.length);
-  console.log('yReferenceData length:', yReferenceData.value?.length);
-  console.log('categoryData length:', categoryData.value?.length);
+  baseRef.labelIndices.value = [
+    ...baseRef.labelIndices.value,
+    ...categoryIndices,
+  ];
 
   // Force scatter plot update
   setTimeout(() => {
@@ -1033,50 +991,41 @@ const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
 };
 
 const loadReferenceData = async () => {
-  if (!selectedCategory.value) {
-    return;
-  }
-
   isLoadingData.value = true;
   try {
-    const modelID = selectedModel.value;
-
-    // Check if this is a user index
     const selectedModelInfo = availableModels.value.find(
-      (m) => m.value === modelID
+      (m) => m.value === selectedModel.value
     );
-    if (selectedModelInfo?.isUserIndex) {
-      // Load user index data instead
-      await loadUserIndexData(modelID, selectedModelInfo.baseModelId!);
-      isLoadingData.value = false;
+
+    if (!selectedModelInfo) {
+      throw new Error('Selected model not found');
       return;
     }
 
+    // Load the base reference model first
+
     // Load metadata to get categories information
     const metadataResponse = await fetch(
-      `${sitePath}/models/${modelID}/pumap/metadata.json`
+      `${sitePath}/models/${selectedModelInfo?.baseModelId}/pumap/metadata.json`
     );
     const metadata = await metadataResponse.json();
 
     // Get category labels from metadata
-    const labels = metadata.categories?.[selectedCategory.value];
-    if (!labels || !Array.isArray(labels)) {
-      throw new Error(
-        `Category '${selectedCategory.value}' not found in metadata or invalid format`
-      );
-    }
+    const labels: string[] = metadata.categories?.[
+      selectedCategory.value
+    ] as string[];
 
-    // Store normalization parameters for test data
+    // Store normalization parameters for query data
     xCenter.value = metadata.xCenter || 0;
     yCenter.value = metadata.yCenter || 0;
     maxRange.value = metadata.maxRange || 1;
 
     // Load binary files in parallel
-    const [xResponse, yResponse, categoryResponse] = await Promise.all([
-      fetch(`${sitePath}/models/${modelID}/pumap/x.bin`),
-      fetch(`${sitePath}/models/${modelID}/pumap/y.bin`),
+    const [xResponse, yResponse, labelIndicesResponse] = await Promise.all([
+      fetch(`${sitePath}/models/${selectedModelInfo?.baseModelId}/pumap/x.bin`),
+      fetch(`${sitePath}/models/${selectedModelInfo?.baseModelId}/pumap/y.bin`),
       fetch(
-        `${sitePath}/models/${modelID}/pumap/${selectedCategory.value}.bin`
+        `${sitePath}/models/${selectedModelInfo?.baseModelId}/pumap/${selectedCategory.value}.bin`
       ),
     ]);
 
@@ -1085,20 +1034,20 @@ const loadReferenceData = async () => {
       throw new Error(`Failed to fetch x.bin: ${xResponse.status}`);
     if (!yResponse.ok)
       throw new Error(`Failed to fetch y.bin: ${yResponse.status}`);
-    if (!categoryResponse.ok)
+    if (!labelIndicesResponse.ok)
       throw new Error(
-        `Failed to fetch ${selectedCategory.value}.bin: ${categoryResponse.status}`
+        `Failed to fetch ${selectedCategory.value}.bin: ${labelIndicesResponse.status}`
       );
 
-    const [xBuffer, yBuffer, categoryBuffer] = await Promise.all([
+    const [xBuffer, yBuffer, labelIndicesBuffer] = await Promise.all([
       xResponse.arrayBuffer(),
       yResponse.arrayBuffer(),
-      categoryResponse.arrayBuffer(),
+      labelIndicesResponse.arrayBuffer(),
     ]);
 
     // Convert binary buffers to typed arrays
     console.log(
-      `Buffer sizes: x=${xBuffer.byteLength}, y=${yBuffer.byteLength}, category=${categoryBuffer.byteLength}`
+      `Buffer sizes: x=${xBuffer.byteLength}, y=${yBuffer.byteLength}, labelIndices=${labelIndicesBuffer.byteLength}`
     );
 
     // Check if buffer sizes are valid
@@ -1112,46 +1061,31 @@ const loadReferenceData = async () => {
         `Y buffer size ${yBuffer.byteLength} is not a multiple of 4`
       );
     }
-    if (categoryBuffer.byteLength % 2 !== 0) {
+    if (labelIndicesBuffer.byteLength % 2 !== 0) {
       throw new Error(
-        `Category buffer size ${categoryBuffer.byteLength} is not a multiple of 2`
+        `LabelIndices buffer size ${labelIndicesBuffer.byteLength} is not a multiple of 2`
       );
     }
 
-    const xData = new Float32Array(xBuffer);
-    const yData = new Float32Array(yBuffer);
-    const categoryIndices = new Int16Array(categoryBuffer);
-
-    xReferenceData.value = xData;
-    yReferenceData.value = yData;
-    categoryData.value = categoryIndices;
-    categoryLabels.value = labels;
+    baseRef.x.value = new Float32Array(xBuffer);
+    baseRef.y.value = new Float32Array(yBuffer);
+    baseRef.labelIndices.value = new Int16Array(labelIndicesBuffer);
+    baseRef.labels.value = labels;
 
     console.log(
-      `Loaded reference data: ${xData.length} points, ${labels.length} category labels`
+      `Loaded reference data: ${baseRef.x.value.length} points, ${labels.length} label indices`
     );
-    // Calculate ranges without spread operator to avoid call stack issues
-    let xMin = xData[0], xMax = xData[0]
-    let yMin = yData[0], yMax = yData[0]
-    for (let i = 0; i < Math.min(1000, xData.length); i++) {
-      if (xData[i] < xMin) xMin = xData[i]
-      if (xData[i] > xMax) xMax = xData[i]
-      if (yData[i] < yMin) yMin = yData[i] 
-      if (yData[i] > yMax) yMax = yData[i]
+
+    // Now load the user index data if applicable
+    if (selectedModelInfo?.isUserIndex) {
+      // Load user index data instead
+      await loadUserIndexData(
+        selectedModel.value,
+        selectedModelInfo.baseModelId!
+      );
     }
-    console.log('Reference data coordinate ranges:', {
-      x: [xMin, xMax],
-      y: [yMin, yMax]
-    })
-    // console.log('First 5 reference coordinates:', {
-    //   x: Array.from(xData.slice(0, 5)),
-    //   y: Array.from(yData.slice(0, 5))
-    // })
   } catch (error) {
     console.error('Error loading reference data:', error);
-    // Switch to an available category silently
-    // errorMessage.value = `Failed to load reference data: ${error}`
-    // errorModalOpen.value = true
   } finally {
     isLoadingData.value = false;
   }
@@ -1160,10 +1094,10 @@ const loadReferenceData = async () => {
 const start = async () => {
   console.log('Starting processing...', selectedFile.value?.name);
 
-  // Clear any existing test data and state
-  xTestData.value = [];
-  yTestData.value = [];
-  testDataLabels.value = [];
+  // Clear any existing query data and state
+  query.x.value = new Float32Array();
+  query.y.value = new Float32Array();
+  query.labelIndices.value = new Int16Array();
   labelCounts.value = {};
   totalLabeled.value = 0;
   totalNumCells.value = 0;
@@ -1190,7 +1124,7 @@ const start = async () => {
           db.createObjectStore('labels');
         }
 
-        // Create testResults store
+        // Create query results store
         if (!db.objectStoreNames.contains('results')) {
           db.createObjectStore('results');
         }
@@ -1199,8 +1133,8 @@ const start = async () => {
 
     // Store category labels
     const categoryTx = db.transaction('labels', 'readwrite');
-    for (let i = 0; i < categoryLabels.value.length; i++) {
-      await categoryTx.store.put(categoryLabels.value[i], i);
+    for (let i = 0; i < baseRef.labels.value.length; i++) {
+      await categoryTx.store.put(baseRef.labels.value[i], i);
     }
     await categoryTx.done;
   } catch (error) {
@@ -1236,14 +1170,13 @@ const start = async () => {
   if (unifiedWorker) {
     unifiedWorker.postMessage({
       type: 'start',
-      modelsURL: `${sitePath}/models`,
       modelID: baseModelId, // Always use the base model ID for loading models
-      userIndexId: isUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
-      isUserIndex,
+      modelsURL: `${sitePath}/models`,
+      // userIndexId: isUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
+      // isUserIndex,
       h5File: selectedFile.value,
       useWebGPU: useWebGPU.value,
-      categoryData: categoryData.value || new Int16Array(0),
-      categoryDataLength: categoryData.value?.length || 0,
+      labelIndices: baseRef.labelIndices.value,
     });
   }
 };
@@ -1284,8 +1217,8 @@ const exportResultsToCSV = async () => {
     await categoryTx.done;
 
     const resultsTx = db.transaction('results', 'readonly');
-    const testResults = await resultsTx.store.getAll();
-    const testResultKeys = await resultsTx.store.getAllKeys();
+    const queryResults = await resultsTx.store.getAll();
+    const queryResultKeys = await resultsTx.store.getAllKeys();
     await resultsTx.done;
 
     // Create label lookup map
@@ -1298,8 +1231,8 @@ const exportResultsToCSV = async () => {
     // Generate CSV content
     let csv = 'cell_id,category_label,confidence\n';
 
-    testResults.forEach((result, index) => {
-      const vectorId = testResultKeys[index];
+    queryResults.forEach((result, index) => {
+      const vectorId = queryResultKeys[index];
       const label =
         result.labelId >= 0 ? labelMap[result.labelId] || 'Unknown' : 'Unknown';
       const confidence =
@@ -1326,7 +1259,7 @@ const exportResultsToCSV = async () => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    console.log(`Exported ${testResults.length} results to CSV`);
+    console.log(`Exported ${queryResults.length} results to CSV`);
   } catch (error) {
     console.error('Failed to export results:', error);
   }
@@ -1376,11 +1309,11 @@ const saveUserIndex = async () => {
       newIndexName.value.trim(),
       selectedModel.value,
       currentUserIndexArtifacts.value,
-      categoryLabels.value,
+      baseRef.labels.value,
       {
         xCenter: xCenter.value,
         yCenter: yCenter.value,
-        maxRange: maxRange.value
+        maxRange: maxRange.value,
       }
     );
 
@@ -1468,20 +1401,20 @@ watch(selectedModel, () => {
 
 // Load categories when model changes
 watch(selectedModel, async () => {
-  // Clear existing test data and artifacts when model changes
-  xTestData.value = [];
-  yTestData.value = [];
-  testDataLabels.value = [];
+  // Clear existing query data and artifacts when model changes
+  query.x.value = new Float32Array();
+  query.y.value = new Float32Array();
+  query.labelIndices.value = new Int16Array();
   labelCounts.value = {};
   totalLabeled.value = 0;
   cellPositions.clear();
   cellIdToIndex.clear();
 
   // Clear training data to refresh scatter plot
-  xReferenceData.value = null;
-  yReferenceData.value = null;
-  categoryData.value = null;
-  categoryLabels.value = [];
+  baseRef.x.value = new Float32Array();
+  baseRef.y.value = new Float32Array();
+  baseRef.labelIndices.value = new Int16Array();
+  baseRef.labels.value = [];
 
   // Load categories for the new model
   await loadCategoriesFromMetadata();
@@ -1507,8 +1440,8 @@ onMounted(async () => {
 
   fetchSampleFile();
   detectWebGPU();
-  loadAvailableModels();
-  loadCategoriesFromMetadata();
+  await loadAvailableModels();
+  await loadCategoriesFromMetadata();
 
   window.addEventListener('resize', updateIsMobile);
 });

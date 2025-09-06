@@ -32,8 +32,8 @@ interface StartMessage {
   modelsURL: string;
   h5File: File;
   useWebGPU: boolean;
-  categoryData: Int16Array;
-  categoryDataLength: number;
+  labelIndices: Int16Array;
+  labelIndicesLength: number;
 }
 
 interface H5DataSet {
@@ -110,8 +110,7 @@ interface FinishedMessage {
 
 // Global state
 let model: ModelInfo | null = null;
-let categoryData: Int16Array | null = null;
-let categoryDataLength = 0;
+// let labelIndices: Int16Array | null = null;
 
 // Artifacts from calling search we can use to generate a user index
 const userIndex: {
@@ -138,8 +137,7 @@ self.addEventListener(
         event.data.modelsURL,
         event.data.h5File,
         event.data.useWebGPU,
-        event.data.categoryData,
-        event.data.categoryDataLength
+        event.data.labelIndices,
       );
     }
   }
@@ -615,7 +613,8 @@ function fillBatchData(
 async function labelCells(
   embeddings: Float32Array,
   batchSize: number,
-  embeddingDim: number
+  embeddingDim: number,
+  labelIndices: Int16Array,
 ): Promise<{
   labelIds: number[];
   confidences: number[];
@@ -654,12 +653,12 @@ async function labelCells(
       let consensusLabelId = -1;
       let consensusConfidence = 0;
 
-      if (searchResults.indices.length > 0 && categoryData) {
+      if (searchResults.indices.length > 0 && labelIndices) {
         const labelVotes: { [labelId: number]: number } = {};
 
         for (const trainVectorId of searchResults.indices) {
-          if (trainVectorId !== -1 && trainVectorId < categoryDataLength) {
-            const labelId = categoryData[trainVectorId];
+          if (trainVectorId !== -1 && trainVectorId < labelIndices.length) {
+            const labelId = labelIndices[trainVectorId];
             if (labelId >= 0) {
               labelVotes[labelId] = (labelVotes[labelId] || 0) + 1;
             }
@@ -707,16 +706,11 @@ async function start(
   modelsURL: string,
   h5File: File,
   useWebGPU: boolean,
-  categoryDataIn: Int16Array,
-  categoryDataLengthIn: number
+  labelIndices: Int16Array,
 ): Promise<void> {
   console.log(
     `Starting unified worker for model ${modelID} with file ${h5File.name}`
   );
-
-  // Store category data
-  categoryData = categoryDataIn;
-  categoryDataLength = categoryDataLengthIn;
 
   self.postMessage({
     type: 'status',
@@ -864,7 +858,8 @@ async function start(
         await labelCells(
           embeddingResults.output.data as Float32Array,
           currentBatchSize,
-          embeddingDim
+          embeddingDim,
+          labelIndices,
         );
 
       // Retain artifacts for user index

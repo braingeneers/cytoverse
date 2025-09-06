@@ -4,6 +4,7 @@
  * 
  * This wrapper implements a custom IVFPQ-like interface for user indexes
  * while reusing the base model's centroids and PQ codebooks through composition.
+ * 
  */
 
 import { IVFPQ, SearchConfig, SearchResults, IVFPQMetadata } from '@cytoverse/ivfpq'

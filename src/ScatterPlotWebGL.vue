@@ -1,108 +1,116 @@
 <template>
-  <div
-    ref="containerRef"
-    class="scatterplot-container"
-  >
-    <canvas
-      ref="canvasRef"
-      class="scatterplot-canvas"
-    />
+  <div ref="containerRef" class="scatterplot-container">
+    <canvas ref="canvasRef" class="scatterplot-canvas" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import createScatterplot from 'regl-scatterplot'
+/**
+ * High performance scatter plot that displays:
+ * BaseReference - base underlying reference dataset i.e SCimilarity training data
+ * UserReference - optional user reference based on a former query against this base ref
+ * Query - current query set of cells being labeled against either the base or user
+ *
+ * NOTE: We DEPEND that the x/y Base Ref points are the first N reference cells and
+ * correspond to the first N baseRefLabelIndices. The overall base reference
+ * needs the indices for every cell in the base reference to do labeling, but for
+ * plotting we only show the first N (see pumap_train.py)
+ */
+import { ref, onMounted, onUnmounted, watch } from 'vue';
+import createScatterplot from 'regl-scatterplot';
 
 // Props interface
 interface Props {
-  xTrainData: Float32Array | null
-  yTrainData: Float32Array | null
-  xTestData: number[]
-  yTestData: number[]
-  testDataLabels: number[]
-  categoryData: Int16Array | null
-  categoryLabels: string[]
+  baseRefX: Float32Array;
+  baseRefY: Float32Array;
+  baseRefLabelIndices: Int16Array;
+  baseRefLabels: string[];
+  userRefX: Float32Array;
+  userRefY: Float32Array;
+  userRefLabelIndices: Int16Array;
+  queryX: Float32Array;
+  queryY: Float32Array;
+  queryLabelIndices: Int16Array;
 }
 
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 
 // Template refs
-const containerRef = ref<HTMLDivElement>()
-const canvasRef = ref<HTMLCanvasElement>()
+const containerRef = ref<HTMLDivElement>();
+const canvasRef = ref<HTMLCanvasElement>();
 
 // Component state
-let scatterplotRef: ReturnType<typeof createScatterplot> | null = null
-const isInitializedRef = ref(false)
-const isDrawingRef = ref(false)
-let updateInterval: number | null = null
+let scatterplotRef: ReturnType<typeof createScatterplot> | null = null;
+const isInitializedRef = ref(false);
+const isDrawingRef = ref(false);
+let updateInterval: number | null = null;
 
-// Generate distinct colors for categories + one extra color for test points
+// Generate distinct colors for labels + one extra color for test points
 // This function generates a set of colors that are evenly spaced in the HSL color space,
-// avoiding bright red (hue 0) to ensure good visibility and distinction between categories.
+// avoiding bright red (hue 0) to ensure good visibility and distinction between labels.
 // It returns an array of hex color strings.
-// The number of categories is passed as an argument, and it generates colors starting from hue 30 (yellow) to hue 360 (red), ensuring that the colors are visually distinct and not too bright or saturated.
+// The number of labels is passed as an argument, and it generates colors starting from hue 30 (yellow) to hue 360 (red), ensuring that the colors are visually distinct and not too bright or saturated.
 // The colors are generated in HSL format and converted to hex format for use in the scatterplot.
-const generateCategoryColors = (numCategories: number): string[] => {
-  const colors: string[] = []
+const generateLabelColors = (numLabels: number): string[] => {
+  const colors: string[] = [];
 
   // Use HSL to generate evenly spaced colors, avoiding bright red (hue 0)
-  for (let i = 0; i < numCategories; i++) {
+  for (let i = 0; i < numLabels; i++) {
     // Skip hue 0 (red) and start from 30 degrees to avoid bright red
-    const hue = 30 + (i * 330) / numCategories
-    const saturation = 0.7
-    const lightness = 0.5
+    const hue = 30 + (i * 330) / numLabels;
+    const saturation = 0.7;
+    const lightness = 0.5;
 
     // Convert HSL to RGB
-    const c = (1 - Math.abs(2 * lightness - 1)) * saturation
-    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1))
-    const m = lightness - c / 2
+    const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = lightness - c / 2;
 
-    let r: number, g: number, b: number
+    let r: number, g: number, b: number;
 
     if (hue >= 0 && hue < 60) {
-      r = c
-      g = x
-      b = 0
+      r = c;
+      g = x;
+      b = 0;
     } else if (hue >= 60 && hue < 120) {
-      r = x
-      g = c
-      b = 0
+      r = x;
+      g = c;
+      b = 0;
     } else if (hue >= 120 && hue < 180) {
-      r = 0
-      g = c
-      b = x
+      r = 0;
+      g = c;
+      b = x;
     } else if (hue >= 180 && hue < 240) {
-      r = 0
-      g = x
-      b = c
+      r = 0;
+      g = x;
+      b = c;
     } else if (hue >= 240 && hue < 300) {
-      r = x
-      g = 0
-      b = c
+      r = x;
+      g = 0;
+      b = c;
     } else {
-      r = c
-      g = 0
-      b = x
+      r = c;
+      g = 0;
+      b = x;
     }
 
     const rHex = Math.round((r + m) * 255)
       .toString(16)
-      .padStart(2, '0')
+      .padStart(2, '0');
     const gHex = Math.round((g + m) * 255)
       .toString(16)
-      .padStart(2, '0')
+      .padStart(2, '0');
     const bHex = Math.round((b + m) * 255)
       .toString(16)
-      .padStart(2, '0')
+      .padStart(2, '0');
 
-    colors.push(`#${rHex}${gHex}${bHex}`)
+    colors.push(`#${rHex}${gHex}${bHex}`);
   }
 
-  colors.push('#999999') // Add gray for un-labeled query cells
+  colors.push('#999999'); // Add gray for un-labeled query cells
 
-  return colors
-}
+  return colors;
+};
 
 // Handle resize
 const handleResize = () => {
@@ -110,201 +118,210 @@ const handleResize = () => {
     scatterplotRef.set({
       width: containerRef.value.clientWidth,
       height: containerRef.value.clientHeight,
-    })
+    });
   }
-}
+};
 
-// Initial setup and training data rendering
+// Initial setup and reference rendering
 const initializeScatterplot = () => {
-  if (!containerRef.value || !canvasRef.value || !props.xTrainData || !props.yTrainData || !props.categoryData)
-    return
+  if (
+    !containerRef.value ||
+    !canvasRef.value ||
+    !props.baseRefX ||
+    !props.baseRefY ||
+    !props.baseRefLabelIndices
+  )
+    return;
 
   // Generate colors for each category + one extra color for test points
-  const categoryColors = generateCategoryColors(props.categoryLabels.length)
+  const labelColors = generateLabelColors(props.baseRefLabels.length);
 
   // Create the scatterplot instance
   const scatterplot = createScatterplot({
     canvas: canvasRef.value,
     width: containerRef.value.clientWidth,
     height: containerRef.value.clientHeight,
-    pointSize: [1, 6, 4], // Use a range for point sizes: training, unlabeled test, labeled test
+    // Use a range for point sizes: base reference, user reference, query
+    pointSize: [1, 3, 6],
     // performanceMode: true, // Enable performance mode for better rendering
-  })
+  });
 
-  // Set up categorical coloring and sizing
+  // Set up label coloring and sizing
   scatterplot.set({
-    pointColor: categoryColors,
+    pointColor: labelColors,
     colorBy: 'valueA',
     sizeBy: 'valueB',
-  })
+  });
 
-  scatterplotRef = scatterplot
-
-  // Use typed arrays directly - they're already Float32Array and Int16Array
-  const numPoints = Math.min(props.xTrainData.length, props.yTrainData.length, props.categoryData.length)
-
-  // Direct access to typed arrays
-  const xArray = props.xTrainData
-  const yArray = props.yTrainData
-  const categoryArrayData = Array.from(props.categoryData)
-
-  // Initial render with only training data
-  const trainX = Array.from(xArray)
-  const trainY = Array.from(yArray)
-  const trainSize = new Array(numPoints).fill(0) // Training data uses first size
+  scatterplotRef = scatterplot;
 
   const initialColumnData = {
-    x: new Float32Array(trainX),
-    y: new Float32Array(trainY),
-    valueA: categoryArrayData,
-    valueB: trainSize,
-  }
+    x: new Float32Array([...props.baseRefX, ...props.userRefX]),
+    y: new Float32Array([...props.baseRefY, ...props.userRefY]),
+    valueA: [...props.baseRefLabelIndices, ...props.userRefLabelIndices],
+    valueB: [
+      ...new Array(props.baseRefX.length).fill(0),
+      ...new Array(props.userRefX.length).fill(1),
+    ],
+  };
 
-  // Draw the initial training points
+  // Draw the initial reference points
   const drawInitialData = async () => {
-    await scatterplot.draw(initialColumnData)
-    isInitializedRef.value = true
+    await scatterplot.draw(initialColumnData);
+    isInitializedRef.value = true;
     console.log(
       'Drew',
-      numPoints,
-      'training points with',
-      categoryColors.length,
-      'category colors'
-    )
-  }
-  drawInitialData()
-}
+      props.baseRefX.length + props.userRefX.length,
+      'points with',
+      labelColors.length,
+      'label colors'
+    );
+  };
+  drawInitialData();
+};
 
 // Build column data from current props
 const buildColumnData = () => {
-  if (!props.xTrainData || !props.yTrainData || !props.categoryData) {
-    return null
+  if (!props.baseRefX || !props.baseRefY || !props.baseRefLabelIndices) {
+    return null;
   }
 
-  const numPoints = Math.min(props.xTrainData.length, props.yTrainData.length, props.categoryData.length)
+  const numPoints = Math.min(
+    props.baseRefX.length,
+    props.baseRefY.length,
+    props.baseRefLabelIndices.length
+  );
 
   // Direct access to typed arrays
-  const xArray = props.xTrainData
-  const yArray = props.yTrainData
-  const categoryArrayData = Array.from(props.categoryData)
+  const xArray = props.baseRefX;
+  const yArray = props.baseRefY;
+  const categoryArrayData = Array.from(props.baseRefLabelIndices);
 
-  // If no test data, return just training data
-  if (props.xTestData.length === 0 && props.yTestData.length === 0) {
+  // If no query data, return just reference data
+  if (props.queryX.length === 0 && props.queryY.length === 0) {
     return {
       x: new Float32Array(xArray),
       y: new Float32Array(yArray),
       valueA: categoryArrayData,
       valueB: new Array(numPoints).fill(0),
-    }
+    };
   }
 
-  // Combine training and test data
-  const trainX = Array.from(xArray)
-  const trainY = Array.from(yArray)
-  const allX = new Float32Array([...trainX, ...props.xTestData])
-  const allY = new Float32Array([...trainY, ...props.yTestData])
+  // Combine reference and query data
+  const trainX = Array.from(xArray);
+  const trainY = Array.from(yArray);
+  const allX = new Float32Array([...trainX, ...props.queryX]);
+  const allY = new Float32Array([...trainY, ...props.queryY]);
 
   // Create category data for test points
-  const categoryColors = generateCategoryColors(props.categoryLabels.length)
-  const testCategories = props.xTestData.map((_, index) => {
-    if (index < props.testDataLabels.length) {
-      const labelIndex = props.testDataLabels[index]
-      return labelIndex >= 0 && labelIndex < props.categoryLabels.length
+  const categoryColors = generateLabelColors(props.baseRefLabels.length);
+  const testCategories = props.queryX.map((_, index) => {
+    if (index < props.queryLabelIndices.length) {
+      const labelIndex = props.queryLabelIndices[index];
+      return labelIndex >= 0 && labelIndex < props.baseRefLabels.length
         ? labelIndex
-        : categoryColors.length - 1
+        : categoryColors.length - 1;
     }
-    return categoryColors.length - 1
-  })
+    return categoryColors.length - 1;
+  });
 
-  const allCategories = [...categoryArrayData.slice(0, numPoints), ...testCategories]
+  const allCategories = [
+    ...categoryArrayData.slice(0, numPoints),
+    ...testCategories,
+  ];
 
   // Create size data
-  const trainSize = new Array(numPoints).fill(0)
-  const testSize = props.xTestData.map((_, index) => {
-    if (index < props.testDataLabels.length) {
-      const labelIndex = props.testDataLabels[index]
-      return labelIndex >= 0 && labelIndex < props.categoryLabels.length ? 2 : 1
+  const trainSize = new Array(numPoints).fill(0);
+  const testSize = props.queryX.map((_, index) => {
+    if (index < props.queryLabelIndices.length) {
+      const labelIndex = props.queryLabelIndices[index];
+      return labelIndex >= 0 && labelIndex < props.baseRefLabels.length ? 2 : 1;
     }
-    return 1
-  })
-  const allSizes = [...trainSize, ...testSize]
+    return 1;
+  });
+  const allSizes = [...trainSize, ...testSize];
 
   return {
     x: allX,
     y: allY,
     valueA: allCategories,
     valueB: allSizes,
-  }
-}
+  };
+};
 
 // Timer-based update function
 const doTimerUpdate = async () => {
   if (!scatterplotRef || !isInitializedRef.value || isDrawingRef.value) {
-    return
+    return;
   }
 
-  const columnData = buildColumnData()
-  if (!columnData) return
+  const columnData = buildColumnData();
+  if (!columnData) return;
 
-  isDrawingRef.value = true
+  isDrawingRef.value = true;
   try {
-    await scatterplotRef.draw(columnData)
+    await scatterplotRef.draw(columnData);
   } finally {
-    isDrawingRef.value = false
+    isDrawingRef.value = false;
   }
-}
+};
 
 // Start/stop timer updates
 const startTimerUpdates = () => {
-  if (updateInterval) return
-  updateInterval = window.setInterval(doTimerUpdate, 1000)
-}
+  if (updateInterval) return;
+  updateInterval = window.setInterval(doTimerUpdate, 1000);
+};
 
 const stopTimerUpdates = () => {
   if (updateInterval) {
-    clearInterval(updateInterval)
-    updateInterval = null
+    clearInterval(updateInterval);
+    updateInterval = null;
   }
-}
+};
 
 // Force immediate update (for final refresh)
 const forceUpdate = () => {
-  doTimerUpdate()
-}
+  doTimerUpdate();
+};
 
-// Watch only training data changes (need to reinitialize)
+// Watch only reference data changes (need to reinitialize)
 watch(
-  [() => props.xTrainData, () => props.yTrainData, () => props.categoryData, () => props.categoryLabels],
+  [
+    () => props.baseRefX,
+    () => props.baseRefY,
+    () => props.baseRefLabelIndices,
+    () => props.baseRefLabels,
+  ],
   () => {
-    stopTimerUpdates()
+    stopTimerUpdates();
     if (scatterplotRef) {
-      scatterplotRef.destroy()
-      scatterplotRef = null
-      isInitializedRef.value = false
+      scatterplotRef.destroy();
+      scatterplotRef = null;
+      isInitializedRef.value = false;
     }
-    initializeScatterplot()
+    initializeScatterplot();
   }
-)
+);
 
 // Expose control functions
 defineExpose({
   startTimerUpdates,
   stopTimerUpdates,
-  forceUpdate
-})
+  forceUpdate,
+});
 
 onMounted(() => {
-  initializeScatterplot()
-  window.addEventListener('resize', handleResize)
-})
+  initializeScatterplot();
+  window.addEventListener('resize', handleResize);
+});
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  stopTimerUpdates()
+  window.removeEventListener('resize', handleResize);
+  stopTimerUpdates();
   if (scatterplotRef) {
-    scatterplotRef.destroy()
+    scatterplotRef.destroy();
   }
-})
+});
 </script>
 
 <style scoped>
