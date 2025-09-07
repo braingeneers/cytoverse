@@ -710,12 +710,16 @@ const createUnifiedWorker = () => {
         scatterPlotRef.value?.forceUpdate();
 
         // Store user index artifacts if available and we're using a reference model
-        if (evt.data.userIndexArtifacts) {
+        if (evt.data.partitionIds && evt.data.pqCodes) {
           const selectedModelInfo = availableModels.value.find(
             (m) => m.value === selectedModel.value
           );
           const isUsingReferenceModel = !selectedModelInfo?.isUserIndex;
-          currentUserIndexArtifacts.value = evt.data.userIndexArtifacts;
+          currentUserIndexArtifacts.value = {
+            partitionIds: evt.data.partitionIds,
+            pqCodes: evt.data.pqCodes,
+          };
+          // currentUserIndexArtifacts.value?.pqCodes = evt.data.pqCodes;
           canCreateIndex.value = isUsingReferenceModel; // Only allow creating from reference models
         }
 
@@ -968,19 +972,10 @@ const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
     }
   }
 
-  console.log(
-    `CategoryIndices sample: [${Array.from(categoryIndices.slice(0, 10)).join(
-      ', '
-    )}]`
-  );
-  console.log(
-    `Unique labels in categoryIndices: ${new Set(categoryIndices).size}`
-  );
-
-  baseRef.labelIndices.value = [
-    ...baseRef.labelIndices.value,
-    ...categoryIndices,
-  ];
+  // baseRef.labelIndices.value = [
+  //   ...baseRef.labelIndices.value,
+  //   ...categoryIndices,
+  // ];
 
   // Force scatter plot update
   setTimeout(() => {
@@ -1164,10 +1159,18 @@ const start = async () => {
   const selectedModelInfo = availableModels.value.find(
     (m) => m.value === selectedModel.value
   );
-  const isUserIndex = selectedModelInfo?.isUserIndex || false;
-  const baseModelId = isUserIndex
+  const useUserIndex = selectedModelInfo?.isUserIndex || false;
+  const baseModelId = useUserIndex
     ? selectedModelInfo?.baseModelId
     : selectedModel.value;
+
+  if (useUserIndex) {
+    console.log(
+      `Using user index: ${selectedModel.value} based on ${baseModelId}`
+    );
+  } else {
+    console.log(`Using reference model: ${selectedModel.value}`);
+  }
 
   if (unifiedWorker) {
     unifiedWorker.postMessage(
@@ -1175,16 +1178,16 @@ const start = async () => {
         type: 'start',
         modelID: baseModelId, // Always use the base model ID for loading models
         modelsURL: `${sitePath}/models`,
-        // userIndexId: isUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
-        // isUserIndex,
+        useUserIndex: useUserIndex,
+        userIndexId: useUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
         h5File: selectedFile.value,
         useWebGPU: useWebGPU.value,
         labelIndices: baseRef.labelIndices.value,
-      }
-      // [
-      //   // Objects listed in the second argument are transferred, not copied
-      //   baseRef.labelIndices.value.buffer,
-      // ]
+      },
+      [
+        // Objects listed in the second argument are transferred, not copied
+        baseRef.labelIndices.value.buffer,
+      ]
     );
   }
 };

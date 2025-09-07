@@ -30,6 +30,7 @@ interface StartMessage {
   type: 'start';
   modelID: string;
   modelsURL: string;
+  useUserIndex: boolean;
   h5File: File;
   useWebGPU: boolean;
   labelIndices: Int16Array;
@@ -98,24 +99,13 @@ interface FinishedMessage {
   type: 'finished';
   datasetLabel: string;
   totalProcessed: number;
-  userIndexArtifacts?: {
-    partitionIds: Int32Array;
-    pqCodes: Uint8Array[];
-  };
+  partitionIds: Uint16Array;
+  pqCodes: Uint8Array[];
 }
 
 // Global state
 let model: ModelInfo | null = null;
 // let labelIndices: Int16Array | null = null;
-
-// Artifacts from calling search we can use to generate a user index
-const userIndex: {
-  partitionIds: number[];
-  pqCodes: Uint8Array[];
-} = {
-  partitionIds: [],
-  pqCodes: [],
-};
 
 // Handle messages from main thread
 self.addEventListener(
@@ -609,14 +599,14 @@ async function labelCells(
   labelIds: number[];
   confidences: number[];
   trainVectorIds: number[];
-  partitionIds: number[];
+  partitionIds: Uint16Array;
   pqCodes: Uint8Array[];
 }> {
   const labelIds: number[] = [];
   const confidences: number[] = [];
   const trainVectorIds: number[] = [];
-  const partitionIds: number[] = [];
-  const pqCodes: Uint8Array[] = [];
+  const partitionIds: Uint16Array = new Uint16Array(batchSize);
+  const pqCodes: Uint8Array[] = new Array(batchSize);
 
   for (let i = 0; i < batchSize; i++) {
     try {
@@ -673,15 +663,10 @@ async function labelCells(
       confidences.push(consensusConfidence);
 
       // Additional artifacts to create a user index
-      partitionIds.push(searchResults.partitionId);
-      pqCodes.push(searchResults.pqCode);
+      partitionIds[i] = searchResults.partitionId;
+      pqCodes[i] = searchResults.pqCode;
     } catch (error) {
       console.error(`Error processing vector ${i}:`, error);
-      trainVectorIds.push(-1);
-      labelIds.push(-1);
-      confidences.push(0);
-      partitionIds.push(-1);
-      pqCodes.push(new Uint8Array());
     }
   }
 
@@ -778,6 +763,9 @@ async function start(
       message: 'Processing cells...',
     } as StatusMessage);
 
+    const allPartitionIds: Uint16Array = new Uint16Array(cellNames.length);
+    const allPQCodes: Uint8Array[] = new Array(cellNames.length);
+
     // Process batches
     for (
       let batchStart = 0;
@@ -854,8 +842,8 @@ async function start(
         );
 
       // Retain artifacts for user index
-      userIndex.partitionIds.push(...partitionIds);
-      userIndex.pqCodes.push(...pqCodes);
+      allPartitionIds.set(partitionIds, batchStart);
+      allPQCodes.splice(batchStart, currentBatchSize, ...pqCodes);
 
       // Send labeled updates as batch
       const labeledBatch: CellUpdate[] = [];
@@ -901,10 +889,8 @@ async function start(
       type: 'finished',
       datasetLabel: h5File.name,
       totalProcessed: cellNames.length,
-      userIndexArtifacts: {
-        partitionIds: new Int32Array(userIndex.partitionIds),
-        pqCodes: userIndex.pqCodes,
-      },
+      partitionIds: allPartitionIds,
+      pqCodes: allPQCodes,
     };
 
     self.postMessage(finishedMessage);
