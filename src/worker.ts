@@ -33,7 +33,6 @@ interface StartMessage {
   h5File: File;
   useWebGPU: boolean;
   labelIndices: Int16Array;
-  labelIndicesLength: number;
 }
 
 interface H5DataSet {
@@ -102,9 +101,6 @@ interface FinishedMessage {
   userIndexArtifacts?: {
     partitionIds: Int32Array;
     pqCodes: Uint8Array[];
-    labelIndices: Int32Array;
-    x: Float32Array;
-    y: Float32Array;
   };
 }
 
@@ -116,15 +112,9 @@ let model: ModelInfo | null = null;
 const userIndex: {
   partitionIds: number[];
   pqCodes: Uint8Array[];
-  labelIndices: number[];
-  x: number[];
-  y: number[];
 } = {
   partitionIds: [],
   pqCodes: [],
-  labelIndices: [],
-  x: [],
-  y: [],
 };
 
 // Handle messages from main thread
@@ -137,7 +127,7 @@ self.addEventListener(
         event.data.modelsURL,
         event.data.h5File,
         event.data.useWebGPU,
-        event.data.labelIndices,
+        event.data.labelIndices
       );
     }
   }
@@ -614,7 +604,7 @@ async function labelCells(
   embeddings: Float32Array,
   batchSize: number,
   embeddingDim: number,
-  labelIndices: Int16Array,
+  labelIndices: Int16Array
 ): Promise<{
   labelIds: number[];
   confidences: number[];
@@ -706,7 +696,7 @@ async function start(
   modelsURL: string,
   h5File: File,
   useWebGPU: boolean,
-  labelIndices: Int16Array,
+  labelIndices: Int16Array
 ): Promise<void> {
   console.log(
     `Starting unified worker for model ${modelID} with file ${h5File.name}`
@@ -794,6 +784,7 @@ async function start(
       batchStart < cellNames.length;
       batchStart += BATCH_SIZE
     ) {
+      console.log(`Processing batch starting at cell ${batchStart}`);
       const batchEnd = Math.min(batchStart + BATCH_SIZE, cellNames.length);
       const currentBatchSize = batchEnd - batchStart;
 
@@ -859,15 +850,12 @@ async function start(
           embeddingResults.output.data as Float32Array,
           currentBatchSize,
           embeddingDim,
-          labelIndices,
+          labelIndices
         );
 
       // Retain artifacts for user index
       userIndex.partitionIds.push(...partitionIds);
       userIndex.pqCodes.push(...pqCodes);
-      userIndex.labelIndices.push(...labelIds);
-      userIndex.x.push(...coordinates.map((coord) => coord[0]));
-      userIndex.y.push(...coordinates.map((coord) => coord[1]));
 
       // Send labeled updates as batch
       const labeledBatch: CellUpdate[] = [];
@@ -885,6 +873,7 @@ async function start(
         }
       }
       if (labeledBatch.length > 0) {
+        console.log(`Sending batch of ${labeledBatch.length} labeled cells`);
         self.postMessage({
           type: 'cell_batch_update',
           cells: labeledBatch,
@@ -915,9 +904,6 @@ async function start(
       userIndexArtifacts: {
         partitionIds: new Int32Array(userIndex.partitionIds),
         pqCodes: userIndex.pqCodes,
-        labelIndices: new Int32Array(userIndex.labelIndices),
-        x: new Float32Array(userIndex.x),
-        y: new Float32Array(userIndex.y),
       },
     };
 

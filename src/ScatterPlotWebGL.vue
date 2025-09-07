@@ -142,7 +142,7 @@ const initializeScatterplot = () => {
     width: containerRef.value.clientWidth,
     height: containerRef.value.clientHeight,
     // Use a range for point sizes: base reference, user reference, query
-    pointSize: [1, 3, 6],
+    pointSize: [1, 5, 10],
     // performanceMode: true, // Enable performance mode for better rendering
   });
 
@@ -180,73 +180,97 @@ const initializeScatterplot = () => {
   drawInitialData();
 };
 
-// Build column data from current props
-const buildColumnData = () => {
+const updateColumnData = () => {
   if (!props.baseRefX || !props.baseRefY || !props.baseRefLabelIndices) {
     return null;
   }
-
-  const numPoints = Math.min(
-    props.baseRefX.length,
-    props.baseRefY.length,
-    props.baseRefLabelIndices.length
-  );
-
-  // Direct access to typed arrays
-  const xArray = props.baseRefX;
-  const yArray = props.baseRefY;
-  const categoryArrayData = Array.from(props.baseRefLabelIndices);
-
-  // If no query data, return just reference data
-  if (props.queryX.length === 0 && props.queryY.length === 0) {
-    return {
-      x: new Float32Array(xArray),
-      y: new Float32Array(yArray),
-      valueA: categoryArrayData,
-      valueB: new Array(numPoints).fill(0),
-    };
-  }
-
-  // Combine reference and query data
-  const trainX = Array.from(xArray);
-  const trainY = Array.from(yArray);
-  const allX = new Float32Array([...trainX, ...props.queryX]);
-  const allY = new Float32Array([...trainY, ...props.queryY]);
-
-  // Create category data for test points
-  const categoryColors = generateLabelColors(props.baseRefLabels.length);
-  const testCategories = props.queryX.map((_, index) => {
-    if (index < props.queryLabelIndices.length) {
-      const labelIndex = props.queryLabelIndices[index];
-      return labelIndex >= 0 && labelIndex < props.baseRefLabels.length
-        ? labelIndex
-        : categoryColors.length - 1;
-    }
-    return categoryColors.length - 1;
-  });
-
-  const allCategories = [
-    ...categoryArrayData.slice(0, numPoints),
-    ...testCategories,
-  ];
-
-  // Create size data
-  const trainSize = new Array(numPoints).fill(0);
-  const testSize = props.queryX.map((_, index) => {
-    if (index < props.queryLabelIndices.length) {
-      const labelIndex = props.queryLabelIndices[index];
-      return labelIndex >= 0 && labelIndex < props.baseRefLabels.length ? 2 : 1;
-    }
-    return 1;
-  });
-  const allSizes = [...trainSize, ...testSize];
-
   return {
-    x: allX,
-    y: allY,
-    valueA: allCategories,
-    valueB: allSizes,
+    x: new Float32Array([
+      ...props.baseRefX,
+      ...props.userRefX,
+      ...props.queryX,
+    ]),
+    y: new Float32Array([
+      ...props.baseRefY,
+      ...props.userRefY,
+      ...props.queryY,
+    ]),
+    valueA: [
+      ...props.baseRefLabelIndices,
+      ...props.userRefLabelIndices,
+      ...props.queryLabelIndices,
+    ],
+    valueB: [
+      ...new Array(props.baseRefX.length).fill(0),
+      ...new Array(props.userRefX.length).fill(1),
+      ...new Array(props.queryX.length).fill(2),
+    ],
   };
+
+  // const initialColumnData = {
+  //   x: new Float32Array([...props.baseRefX, ...props.userRefX]),
+  //   y: new Float32Array([...props.baseRefY, ...props.userRefY]),
+  //   valueA: [...props.baseRefLabelIndices, ...props.userRefLabelIndices],
+  //   valueB: [
+  //     ...new Array(props.baseRefX.length).fill(0),
+  //     ...new Array(props.userRefX.length).fill(1),
+  //   ],
+  // };
+
+  // const numPoints = Math.min(
+  //   props.baseRefX.length,
+  //   props.baseRefY.length,
+  //   props.baseRefLabelIndices.length
+  // );
+
+  // // If no query data, return just reference data
+  // if (props.queryX.length === 0 && props.queryY.length === 0) {
+  //   return {
+  //     x: new Float32Array(props.baseRefX),
+  //     y: new Float32Array(props.baseRefY),
+  //     valueA: props.baseRefLabelIndices,
+  //     valueB: new Array(numPoints).fill(0),
+  //   };
+  // }
+
+  // // Combine reference and query data
+  // const allX = new Float32Array([...props.baseRefX, ...props.queryX]);
+  // const allY = new Float32Array([...props.baseRefY, ...props.queryY]);
+
+  // // Create category data for test points
+  // const categoryColors = generateLabelColors(props.baseRefLabels.length);
+  // const testCategories = props.queryX.map((_, index) => {
+  //   if (index < props.queryLabelIndices.length) {
+  //     const labelIndex = props.queryLabelIndices[index];
+  //     return labelIndex >= 0 && labelIndex < props.baseRefLabels.length
+  //       ? labelIndex
+  //       : categoryColors.length - 1;
+  //   }
+  //   return categoryColors.length - 1;
+  // });
+
+  // const allCategories = [
+  //   ...categoryArrayData.slice(0, numPoints),
+  //   ...testCategories,
+  // ];
+
+  // // Create size data
+  // const trainSize = new Array(numPoints).fill(0);
+  // const testSize = props.queryX.map((_, index) => {
+  //   if (index < props.queryLabelIndices.length) {
+  //     const labelIndex = props.queryLabelIndices[index];
+  //     return labelIndex >= 0 && labelIndex < props.baseRefLabels.length ? 2 : 1;
+  //   }
+  //   return 1;
+  // });
+  // const allSizes = [...trainSize, ...testSize];
+
+  // return {
+  //   x: allX,
+  //   y: allY,
+  //   valueA: allCategories,
+  //   valueB: allSizes,
+  // };
 };
 
 // Timer-based update function
@@ -255,7 +279,7 @@ const doTimerUpdate = async () => {
     return;
   }
 
-  const columnData = buildColumnData();
+  const columnData = updateColumnData();
   if (!columnData) return;
 
   isDrawingRef.value = true;

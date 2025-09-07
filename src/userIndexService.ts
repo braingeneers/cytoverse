@@ -1,58 +1,59 @@
-import { openDB, DBSchema, IDBPDatabase } from 'idb'
+import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
 export interface UserIndexPartition {
-  pqCodes: Uint8Array  // Concatenated PQ codes
-  pqCodeCount: number  // Number of PQ codes (to know how to split)
-  labelIndices: Int32Array
-  cellIndices: Int32Array
+  pqCodes: Uint8Array; // Concatenated PQ codes
+  pqCodeCount: number; // Number of PQ codes (to know how to split)
+  labelIndices: Int16Array;
+  cellIndices: Int32Array;
 }
 
 export interface UserIndex {
-  id: string
-  name: string
-  baseModelId: string
-  created: Date
-  cellCount: number
-  partitions: Record<number, UserIndexPartition>
+  id: string;
+  name: string;
+  baseModelId: string;
+  created: Date;
+  cellCount: number;
+  partitions: Record<number, UserIndexPartition>;
   coordinates: {
-    x: Float32Array
-    y: Float32Array
-  }
-  labels: string[]
+    x: Float32Array;
+    y: Float32Array;
+  };
+  labelIndices: Int16Array;
+  labels: string[];
 }
 
 interface UserIndexDB extends DBSchema {
   userIndexes: {
-    key: string
-    value: UserIndex
-  }
+    key: string;
+    value: UserIndex;
+  };
 }
 
 class UserIndexService {
-  private db: IDBPDatabase<UserIndexDB> | null = null
-  private readonly DB_NAME = 'cytoverse-user-indexes'
-  private readonly DB_VERSION = 1
+  private db: IDBPDatabase<UserIndexDB> | null = null;
+  private readonly DB_NAME = 'cytoverse-user-indexes';
+  private readonly DB_VERSION = 1;
 
   async init(): Promise<void> {
     this.db = await openDB<UserIndexDB>(this.DB_NAME, this.DB_VERSION, {
       upgrade(db) {
         if (!db.objectStoreNames.contains('userIndexes')) {
-          db.createObjectStore('userIndexes', { keyPath: 'id' })
+          db.createObjectStore('userIndexes', { keyPath: 'id' });
         }
-      }
-    })
+      },
+    });
   }
 
   private ensureDb(): IDBPDatabase<UserIndexDB> {
     if (!this.db) {
-      throw new Error('UserIndexService not initialized. Call init() first.')
+      throw new Error('UserIndexService not initialized. Call init() first.');
     }
-    return this.db
+    return this.db;
   }
 
   async saveUserIndex(index: UserIndex): Promise<void> {
-    const db = this.ensureDb()
-    
+    const db = this.ensureDb();
+
     // Create a clean copy to ensure all data is serializable
     const cleanIndex: UserIndex = {
       id: index.id,
@@ -63,126 +64,134 @@ class UserIndexService {
       partitions: {},
       coordinates: {
         x: index.coordinates.x,
-        y: index.coordinates.y
+        y: index.coordinates.y,
       },
-      labels: [...index.labels] // Create a new array copy
-    }
-    
+      labels: [...index.labels], // Create a new array copy
+      labelIndices: new Int16Array(index.labelIndices), // Create a new typed array copy
+    };
+
     // Deep copy partitions to ensure clean structure
     for (const [key, partition] of Object.entries(index.partitions)) {
       cleanIndex.partitions[parseInt(key)] = {
         pqCodes: new Uint8Array(partition.pqCodes),
         pqCodeCount: partition.pqCodeCount,
-        labelIndices: new Int32Array(partition.labelIndices),
-        cellIndices: new Int32Array(partition.cellIndices)
-      }
+        labelIndices: new Int16Array(partition.labelIndices),
+        cellIndices: new Int32Array(partition.cellIndices),
+      };
     }
-    
-    await db.put('userIndexes', cleanIndex)
+
+    await db.put('userIndexes', cleanIndex);
   }
 
   async getUserIndex(id: string): Promise<UserIndex | undefined> {
-    const db = this.ensureDb()
-    return await db.get('userIndexes', id)
+    const db = this.ensureDb();
+    return await db.get('userIndexes', id);
   }
 
   async deleteUserIndex(id: string): Promise<void> {
-    const db = this.ensureDb()
-    await db.delete('userIndexes', id)
+    const db = this.ensureDb();
+    await db.delete('userIndexes', id);
   }
 
-  async getUserIndexMetadata(): Promise<Array<{
-    id: string
-    name: string
-    baseModelId: string
-    created: Date
-    cellCount: number
-  }>> {
-    const db = this.ensureDb()
-    const indexes = await db.getAll('userIndexes')
-    return indexes.map(index => ({
+  async getUserIndexMetadata(): Promise<
+    Array<{
+      id: string;
+      name: string;
+      baseModelId: string;
+      created: Date;
+      cellCount: number;
+    }>
+  > {
+    const db = this.ensureDb();
+    const indexes = await db.getAll('userIndexes');
+    return indexes.map((index) => ({
       id: index.id,
       name: index.name,
       baseModelId: index.baseModelId,
       created: index.created,
-      cellCount: index.cellCount
-    }))
+      cellCount: index.cellCount,
+    }));
   }
 
   transformArtifactsToUserIndex(
     name: string,
     baseModelId: string,
     artifacts: {
-      partitionIds: Int32Array
-      pqCodes: Uint8Array[]
-      labelIndices: Int32Array
-      x: Float32Array
-      y: Float32Array
+      partitionIds: Int32Array;
+      pqCodes: Uint8Array[];
     },
+    labelIndices: Int16Array,
+    x: Float32Array,
+    y: Float32Array,
     labels: string[],
     normalizationParams?: {
-      xCenter: number
-      yCenter: number
-      maxRange: number
+      xCenter: number;
+      yCenter: number;
+      maxRange: number;
     }
   ): UserIndex {
-    const partitions: Record<number, UserIndexPartition> = {}
-    
+    const partitions: Record<number, UserIndexPartition> = {};
+
     // First pass: collect cells by partition
-    const partitionGroups: Record<number, {
-      pqCodes: Uint8Array[]
-      labelIndices: number[]
-      cellIndices: number[]
-    }> = {}
-    
+    const partitionGroups: Record<
+      number,
+      {
+        pqCodes: Uint8Array[];
+        labelIndices: number[];
+        cellIndices: number[];
+      }
+    > = {};
+
     artifacts.partitionIds.forEach((partitionId, cellIndex) => {
       if (!partitionGroups[partitionId]) {
         partitionGroups[partitionId] = {
           pqCodes: [],
           labelIndices: [],
-          cellIndices: []
-        }
+          cellIndices: [],
+        };
       }
-      
-      partitionGroups[partitionId].pqCodes.push(artifacts.pqCodes[cellIndex])
-      partitionGroups[partitionId].labelIndices.push(artifacts.labelIndices[cellIndex])
-      partitionGroups[partitionId].cellIndices.push(cellIndex)
-    })
-    
+
+      partitionGroups[partitionId].pqCodes.push(artifacts.pqCodes[cellIndex]);
+      partitionGroups[partitionId].labelIndices.push(labelIndices[cellIndex]);
+      partitionGroups[partitionId].cellIndices.push(cellIndex);
+    });
+
     // Second pass: create concatenated arrays for each partition
     Object.entries(partitionGroups).forEach(([partitionIdStr, group]) => {
-      const partitionId = parseInt(partitionIdStr)
-      const pqCodeLength = group.pqCodes[0]?.length || 0
-      
+      const partitionId = parseInt(partitionIdStr);
+      const pqCodeLength = group.pqCodes[0]?.length || 0;
+
       // Concatenate all PQ codes into a single Uint8Array
-      const concatenatedPqCodes = new Uint8Array(group.pqCodes.length * pqCodeLength)
+      const concatenatedPqCodes = new Uint8Array(
+        group.pqCodes.length * pqCodeLength
+      );
       group.pqCodes.forEach((pqCode, i) => {
-        concatenatedPqCodes.set(pqCode, i * pqCodeLength)
-      })
-      
+        concatenatedPqCodes.set(pqCode, i * pqCodeLength);
+      });
+
       partitions[partitionId] = {
         pqCodes: concatenatedPqCodes,
         pqCodeCount: group.pqCodes.length,
-        labelIndices: new Int32Array(group.labelIndices),
-        cellIndices: new Int32Array(group.cellIndices)
-      }
-    })
-    
-    // Normalize coordinates if parameters provided
-    let normalizedX = artifacts.x
-    let normalizedY = artifacts.y
-    
-    if (normalizationParams) {
-      const { xCenter, yCenter, maxRange } = normalizationParams
-      normalizedX = new Float32Array(artifacts.x.length)
-      normalizedY = new Float32Array(artifacts.y.length)
-      
-      for (let i = 0; i < artifacts.x.length; i++) {
-        normalizedX[i] = (artifacts.x[i] - xCenter) / maxRange + 0.5
-        normalizedY[i] = (artifacts.y[i] - yCenter) / maxRange + 0.5
-      }
-    }
-    
+        labelIndices: new Int16Array(group.labelIndices),
+        cellIndices: new Int32Array(group.cellIndices),
+      };
+    });
+
+    // // Normalize coordinates if parameters provided
+    // let normalizedX = artifacts.x;
+    // let normalizedY = artifacts.y;
+
+    // if (normalizationParams) {
+    //   const { xCenter, yCenter, maxRange } = normalizationParams;
+    //   normalizedX = new Float32Array(artifacts.x.length);
+    //   normalizedY = new Float32Array(artifacts.y.length);
+
+    //   for (let i = 0; i < artifacts.x.length; i++) {
+    //     normalizedX[i] = (artifacts.x[i] - xCenter) / maxRange + 0.5;
+    //     normalizedY[i] = (artifacts.y[i] - yCenter) / maxRange + 0.5;
+    //   }
+    // }
+
     return {
       id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       name,
@@ -191,19 +200,20 @@ class UserIndexService {
       cellCount: artifacts.partitionIds.length,
       partitions,
       coordinates: {
-        x: normalizedX,
-        y: normalizedY
+        x: x,
+        y: y,
       },
-      labels
-    }
+      labels,
+      labelIndices: labelIndices,
+    };
   }
 
   async close(): Promise<void> {
     if (this.db) {
-      this.db.close()
-      this.db = null
+      this.db.close();
+      this.db = null;
     }
   }
 }
 
-export const userIndexService = new UserIndexService()
+export const userIndexService = new UserIndexService();

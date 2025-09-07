@@ -274,7 +274,7 @@
             "
             :base-ref-x="baseRef.x.value"
             :base-ref-y="baseRef.y.value"
-            :base-ref-label-indices="baseRef.labelIndices.value"
+            :base-ref-label-indices="baseRef.labelIndicesSubset.value"
             :base-ref-labels="baseRef.labels.value"
             :user-ref-x="userRef.x.value"
             :user-ref-y="userRef.y.value"
@@ -512,6 +512,7 @@ const selectedCategory = ref('');
 const baseRef = {
   labels: ref<string[]>([]),
   labelIndices: ref<Int16Array>(new Int16Array()),
+  labelIndicesSubset: ref<Int16Array>(new Int16Array()), // Subset for plotted cells
   x: ref<Float32Array>(new Float32Array()),
   y: ref<Float32Array>(new Float32Array()),
 };
@@ -555,9 +556,6 @@ const canCreateIndex = ref(false);
 const currentUserIndexArtifacts = ref<{
   partitionIds: Int16Array;
   pqCodes: Uint8Array[];
-  labelIndices: Int16Array;
-  x: Float32Array;
-  y: Float32Array;
 } | null>(null);
 
 // Normalization parameters from metadata
@@ -717,7 +715,6 @@ const createUnifiedWorker = () => {
             (m) => m.value === selectedModel.value
           );
           const isUsingReferenceModel = !selectedModelInfo?.isUserIndex;
-
           currentUserIndexArtifacts.value = evt.data.userIndexArtifacts;
           canCreateIndex.value = isUsingReferenceModel; // Only allow creating from reference models
         }
@@ -863,7 +860,7 @@ const loadCategoriesFromMetadata = async () => {
 
       if (metadata.categories && typeof metadata.categories === 'object') {
         const categories = Object.keys(metadata.categories);
-        categories.value = categories;
+        availableCategories.value = categories;
 
         // Set default category
         if (
@@ -942,6 +939,7 @@ const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
   // // They are already normalized to [0,1] range when saved
   userRef.x.value = userIndex.coordinates.x;
   userRef.y.value = userIndex.coordinates.y;
+  userRef.labelIndices.value = new Int16Array(userIndex.labelIndices);
   // categoryLabels.value = userIndex.labels;
 
   // Create category data by extracting label indices from all partitions
@@ -1070,6 +1068,10 @@ const loadReferenceData = async () => {
     baseRef.x.value = new Float32Array(xBuffer);
     baseRef.y.value = new Float32Array(yBuffer);
     baseRef.labelIndices.value = new Int16Array(labelIndicesBuffer);
+    // Create an independent copy with its own ArrayBuffer for the subset
+    const subset = baseRef.labelIndices.value.slice(0, baseRef.x.value.length);
+    baseRef.labelIndicesSubset.value = new Int16Array(subset.length);
+    baseRef.labelIndicesSubset.value.set(subset); // Copy the data
     baseRef.labels.value = labels;
 
     console.log(
@@ -1107,39 +1109,39 @@ const start = async () => {
   cellPositions.clear();
   cellIdToIndex.clear();
 
-  // Initialize or clear the IndexedDB
-  try {
-    // Delete existing database if it exists
-    if (db) {
-      db.close();
-      db = null;
-    }
-    await deleteDB('cytoverse');
+  // // Initialize or clear the IndexedDB
+  // try {
+  //   // Delete existing database if it exists
+  //   if (db) {
+  //     db.close();
+  //     db = null;
+  //   }
+  //   await deleteDB('cytoverse');
 
-    // Create new database
-    db = await openDB<ResultsDB>('cytoverse', 1, {
-      upgrade(db) {
-        // Create categoryLabels store
-        if (!db.objectStoreNames.contains('labels')) {
-          db.createObjectStore('labels');
-        }
+  //   // Create new database
+  //   db = await openDB<ResultsDB>('cytoverse', 1, {
+  //     upgrade(db) {
+  //       // Create categoryLabels store
+  //       if (!db.objectStoreNames.contains('labels')) {
+  //         db.createObjectStore('labels');
+  //       }
 
-        // Create query results store
-        if (!db.objectStoreNames.contains('results')) {
-          db.createObjectStore('results');
-        }
-      },
-    });
+  //       // Create query results store
+  //       if (!db.objectStoreNames.contains('results')) {
+  //         db.createObjectStore('results');
+  //       }
+  //     },
+  //   });
 
-    // Store category labels
-    const categoryTx = db.transaction('labels', 'readwrite');
-    for (let i = 0; i < baseRef.labels.value.length; i++) {
-      await categoryTx.store.put(baseRef.labels.value[i], i);
-    }
-    await categoryTx.done;
-  } catch (error) {
-    console.error('Failed to initialize IndexedDB:', error);
-  }
+  //   // Store category labels
+  //   const categoryTx = db.transaction('labels', 'readwrite');
+  //   for (let i = 0; i < baseRef.labels.value.length; i++) {
+  //     await categoryTx.store.put(baseRef.labels.value[i], i);
+  //   }
+  //   await categoryTx.done;
+  // } catch (error) {
+  //   console.error('Failed to initialize IndexedDB:', error);
+  // }
 
   // Start time tracking
   startTime.value = Date.now();
@@ -1168,16 +1170,22 @@ const start = async () => {
     : selectedModel.value;
 
   if (unifiedWorker) {
-    unifiedWorker.postMessage({
-      type: 'start',
-      modelID: baseModelId, // Always use the base model ID for loading models
-      modelsURL: `${sitePath}/models`,
-      // userIndexId: isUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
-      // isUserIndex,
-      h5File: selectedFile.value,
-      useWebGPU: useWebGPU.value,
-      labelIndices: baseRef.labelIndices.value,
-    });
+    unifiedWorker.postMessage(
+      {
+        type: 'start',
+        modelID: baseModelId, // Always use the base model ID for loading models
+        modelsURL: `${sitePath}/models`,
+        // userIndexId: isUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
+        // isUserIndex,
+        h5File: selectedFile.value,
+        useWebGPU: useWebGPU.value,
+        labelIndices: baseRef.labelIndices.value,
+      }
+      // [
+      //   // Objects listed in the second argument are transferred, not copied
+      //   baseRef.labelIndices.value.buffer,
+      // ]
+    );
   }
 };
 
@@ -1309,6 +1317,9 @@ const saveUserIndex = async () => {
       newIndexName.value.trim(),
       selectedModel.value,
       currentUserIndexArtifacts.value,
+      query.labelIndices.value,
+      query.x.value,
+      query.y.value,
       baseRef.labels.value,
       {
         xCenter: xCenter.value,
@@ -1317,18 +1328,8 @@ const saveUserIndex = async () => {
       }
     );
 
-    // Debug: Check the structure before saving
-    console.log('User index structure:', {
-      id: userIndex.id,
-      name: userIndex.name,
-      baseModelId: userIndex.baseModelId,
-      cellCount: userIndex.cellCount,
-      partitionCount: Object.keys(userIndex.partitions).length,
-      labelsType: typeof userIndex.labels,
-      labelsIsArray: Array.isArray(userIndex.labels),
-      coordinatesXType: userIndex.coordinates.x?.constructor?.name,
-      coordinatesYType: userIndex.coordinates.y?.constructor?.name,
-    });
+    userIndex.coordinates.x = new Float32Array(query.x.value);
+    userIndex.coordinates.y = new Float32Array(query.y.value);
 
     // Save to IndexedDB
     await userIndexService.saveUserIndex(userIndex);
