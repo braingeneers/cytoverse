@@ -117,18 +117,13 @@ class UserIndexService {
     name: string,
     baseModelId: string,
     artifacts: {
-      partitionIds: Int32Array;
+      partitionIds: Int16Array;
       pqCodes: Uint8Array[];
     },
     labelIndices: Int16Array,
     x: Float32Array,
     y: Float32Array,
     labels: string[],
-    normalizationParams?: {
-      xCenter: number;
-      yCenter: number;
-      maxRange: number;
-    }
   ): UserIndex {
     const partitions: Record<number, UserIndexPartition> = {};
 
@@ -176,21 +171,6 @@ class UserIndexService {
         cellIndices: new Int32Array(group.cellIndices),
       };
     });
-
-    // // Normalize coordinates if parameters provided
-    // let normalizedX = artifacts.x;
-    // let normalizedY = artifacts.y;
-
-    // if (normalizationParams) {
-    //   const { xCenter, yCenter, maxRange } = normalizationParams;
-    //   normalizedX = new Float32Array(artifacts.x.length);
-    //   normalizedY = new Float32Array(artifacts.y.length);
-
-    //   for (let i = 0; i < artifacts.x.length; i++) {
-    //     normalizedX[i] = (artifacts.x[i] - xCenter) / maxRange + 0.5;
-    //     normalizedY[i] = (artifacts.y[i] - yCenter) / maxRange + 0.5;
-    //   }
-    // }
 
     return {
       id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,

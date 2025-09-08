@@ -440,11 +440,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { openDB, deleteDB, DBSchema, IDBPDatabase } from 'idb';
 
 import Worker from './worker?worker';
 import ScatterPlotWebGL from './ScatterPlotWebGL.vue';
-import { userIndexService, type UserIndex } from './userIndexService';
+import { userIndexService } from './userIndexService';
 
 // Constants
 const drawerWidth = 320;
@@ -464,23 +463,6 @@ interface CellUpdate {
 interface CellBatchUpdate {
   type: 'cell_batch_update';
   cells: CellUpdate[];
-}
-
-// IndexedDB schema
-interface ResultsDB extends DBSchema {
-  labels: {
-    key: number;
-    value: string;
-  };
-  results: {
-    key: string;
-    value: {
-      labelId: number;
-      x: number;
-      y: number;
-      confidence: number;
-    };
-  };
 }
 
 // Reactive state
@@ -529,6 +511,8 @@ const query = {
   x: ref<Float32Array>(new Float32Array()),
   y: ref<Float32Array>(new Float32Array()),
   labelIndices: ref<Int16Array>(new Int16Array()),
+  confidences: ref<Float32Array>(new Float32Array()),
+  cellNames: ref<string[]>([]),
 };
 
 // Processing state
@@ -563,8 +547,8 @@ const xCenter = ref(0);
 const yCenter = ref(0);
 const maxRange = ref(1);
 
-// Worker management - single unified worker
-let unifiedWorker: Worker | null = null;
+// Worker management - single worker
+let worker: Worker | null = null;
 const cellPositions = new Map<string, { x: number; y: number }>(); // Track cell positions
 
 // ScatterPlot ref
@@ -578,8 +562,6 @@ const scatterPlotRef = ref<{
 const sitePath =
   window.location.origin +
   window.location.pathname.slice(0, window.location.pathname.lastIndexOf('/'));
-
-let db: IDBPDatabase<ResultsDB> | null = null;
 
 // Computed properties
 const sortedLabelCounts = computed(() => {
@@ -596,7 +578,7 @@ const normalizeCoordinates = (x: number, y: number) => {
 // Track cell ID to index mapping
 const cellIdToIndex = new Map<string, number>();
 
-// Handle cell updates from unified worker
+// Handle cell updates from worker
 const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
   // Process all cells in batch
   const newXData: number[] = [];
@@ -637,24 +619,6 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
       const label = baseRef.labels.value[update.labelId];
       labelCounts.value[label] = (labelCounts.value[label] || 0) + 1;
       totalLabeled.value += 1;
-
-      // Store in IndexedDB if available
-      if (db) {
-        const tx = db.transaction('results', 'readwrite');
-        tx.store
-          .put(
-            {
-              labelId: update.labelId,
-              x: normalizedX,
-              y: normalizedY,
-              confidence: update.confidence ?? 0,
-            },
-            update.cellId
-          )
-          .catch((error) => {
-            console.error('Failed to store query result:', error);
-          });
-      }
     }
   }
 
@@ -667,23 +631,26 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
       ...query.labelIndices.value,
       ...newLabels,
     ]);
+    query.confidences.value = new Float32Array([
+      ...query.confidences.value,
+      ...batchUpdate.cells.map((c) => c.confidence ?? -1),
+    ]);
   }
 };
 
 // Terminate worker
 const terminateWorker = () => {
-  if (unifiedWorker) {
-    console.log('Terminating unified worker...');
-    unifiedWorker.terminate();
-    unifiedWorker = null;
+  if (worker) {
+    console.log('Terminating worker...');
+    worker.terminate();
+    worker = null;
   }
 };
+// Create worker
+const createWorker = () => {
+  console.log('Creating worker...');
 
-// Create unified worker
-const createUnifiedWorker = () => {
-  console.log('Creating unified worker...');
-
-  const worker = new Worker();
+  worker = new Worker();
 
   worker.onmessage = (evt) => {
     switch (evt.data.type) {
@@ -708,6 +675,10 @@ const createUnifiedWorker = () => {
         isRunning.value = false;
         scatterPlotRef.value?.stopTimerUpdates();
         scatterPlotRef.value?.forceUpdate();
+
+        // Update cell names
+        query.cellNames.value = evt.data.cellNames;
+        console.log('Cell Names:', query.cellNames.value.slice(0, 10));
 
         // Store user index artifacts if available and we're using a reference model
         if (evt.data.partitionIds && evt.data.pqCodes) {
@@ -744,8 +715,6 @@ const createUnifiedWorker = () => {
         break;
     }
   };
-
-  unifiedWorker = worker;
 };
 
 // WebGPU detection
@@ -1104,40 +1073,6 @@ const start = async () => {
   cellPositions.clear();
   cellIdToIndex.clear();
 
-  // // Initialize or clear the IndexedDB
-  // try {
-  //   // Delete existing database if it exists
-  //   if (db) {
-  //     db.close();
-  //     db = null;
-  //   }
-  //   await deleteDB('cytoverse');
-
-  //   // Create new database
-  //   db = await openDB<ResultsDB>('cytoverse', 1, {
-  //     upgrade(db) {
-  //       // Create categoryLabels store
-  //       if (!db.objectStoreNames.contains('labels')) {
-  //         db.createObjectStore('labels');
-  //       }
-
-  //       // Create query results store
-  //       if (!db.objectStoreNames.contains('results')) {
-  //         db.createObjectStore('results');
-  //       }
-  //     },
-  //   });
-
-  //   // Store category labels
-  //   const categoryTx = db.transaction('labels', 'readwrite');
-  //   for (let i = 0; i < baseRef.labels.value.length; i++) {
-  //     await categoryTx.store.put(baseRef.labels.value[i], i);
-  //   }
-  //   await categoryTx.done;
-  // } catch (error) {
-  //   console.error('Failed to initialize IndexedDB:', error);
-  // }
-
   // Start time tracking
   startTime.value = Date.now();
 
@@ -1150,10 +1085,10 @@ const start = async () => {
 
   // Create worker and start processing
   terminateWorker();
-  createUnifiedWorker();
+  createWorker();
 
   // Start the worker
-  console.log(`Starting unified worker with modelID: ${selectedModel.value}`);
+  console.log(`Starting worker with modelID: ${selectedModel.value}`);
 
   // Check if this is a user index
   const selectedModelInfo = availableModels.value.find(
@@ -1172,8 +1107,8 @@ const start = async () => {
     console.log(`Using reference model: ${selectedModel.value}`);
   }
 
-  if (unifiedWorker) {
-    unifiedWorker.postMessage(
+  if (worker) {
+    worker.postMessage(
       {
         type: 'start',
         modelID: baseModelId, // Always use the base model ID for loading models
@@ -1215,43 +1150,30 @@ const stop = () => {
 };
 
 const exportResultsToCSV = async () => {
-  if (!db) {
-    console.error('No database connection');
+  if (!query.labelIndices.value || query.labelIndices.value.length === 0) {
+    console.error('No results to export');
     return;
   }
 
   try {
-    // Fetch all data from IndexedDB
-    const categoryTx = db.transaction('labels', 'readonly');
-    const storedLabels = await categoryTx.store.getAll();
-    const storedLabelKeys = await categoryTx.store.getAllKeys();
-    await categoryTx.done;
-
-    const resultsTx = db.transaction('results', 'readonly');
-    const queryResults = await resultsTx.store.getAll();
-    const queryResultKeys = await resultsTx.store.getAllKeys();
-    await resultsTx.done;
-
-    // Create label lookup map
-    const labelMap: { [id: number]: string } = {};
-    storedLabels.forEach((label, index) => {
-      const labelId = storedLabelKeys[index];
-      labelMap[labelId] = label;
-    });
-
     // Generate CSV content
     let csv = 'cell_id,category_label,confidence\n';
 
-    queryResults.forEach((result, index) => {
-      const vectorId = queryResultKeys[index];
-      const label =
-        result.labelId >= 0 ? labelMap[result.labelId] || 'Unknown' : 'Unknown';
+    for (let i = 0; i < query.cellNames.value.length; i++) {
+      const cellId = query.cellNames.value[i];
+      const labelId = query.labelIndices.value[i];
       const confidence =
-        result.confidence !== undefined
-          ? result.confidence.toFixed(3)
-          : '1.000';
-      csv += `"${vectorId}","${label}",${confidence}\n`;
-    });
+        query.confidences.value && query.confidences.value.length > i
+          ? query.confidences.value[i]
+          : undefined;
+      const label =
+        labelId >= 0 && labelId < baseRef.labels.value.length
+          ? baseRef.labels.value[labelId]
+          : 'Unknown';
+      const confidenceStr =
+        confidence !== undefined ? confidence.toFixed(3) : '1.000';
+      csv += `"${cellId}","${label}",${confidenceStr}\n`;
+    }
 
     // Create blob and download
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1270,7 +1192,7 @@ const exportResultsToCSV = async () => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    console.log(`Exported ${queryResults.length} results to CSV`);
+    console.log(`Exported ${query.cellNames.value.length} results to CSV`);
   } catch (error) {
     console.error('Failed to export results:', error);
   }
@@ -1323,12 +1245,7 @@ const saveUserIndex = async () => {
       query.labelIndices.value,
       query.x.value,
       query.y.value,
-      baseRef.labels.value,
-      {
-        xCenter: xCenter.value,
-        yCenter: yCenter.value,
-        maxRange: maxRange.value,
-      }
+      baseRef.labels.value
     );
 
     userIndex.coordinates.x = new Float32Array(query.x.value);

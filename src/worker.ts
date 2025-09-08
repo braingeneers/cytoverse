@@ -99,6 +99,7 @@ interface FinishedMessage {
   type: 'finished';
   datasetLabel: string;
   totalProcessed: number;
+  cellNames: string[];
   partitionIds: Uint16Array;
   pqCodes: Uint8Array[];
 }
@@ -549,9 +550,9 @@ function fillBatchData(
     const batchOffset = batchSlot * model!.genes.length;
 
     if (isSparse) {
-      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]);
-      const values = data.slice([[start, end]]);
-      const valueIndices = indices!.slice([[start, end]]);
+      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]) as number[];
+      const values = data.slice([[start, end]]) as number[];
+      const valueIndices = indices!.slice([[start, end]]) as number[];
 
       for (let j = 0; j < valueIndices.length; j++) {
         const sampleIndex = inflationIndices[valueIndices[j]];
@@ -663,7 +664,7 @@ async function labelCells(
       confidences.push(consensusConfidence);
 
       // Additional artifacts to create a user index
-      partitionIds[i] = searchResults.partitionId;
+      partitionIds[i] = searchResults.partitionId
       pqCodes[i] = searchResults.pqCode;
     } catch (error) {
       console.error(`Error processing vector ${i}:`, error);
@@ -889,6 +890,7 @@ async function start(
       type: 'finished',
       datasetLabel: h5File.name,
       totalProcessed: cellNames.length,
+      cellNames: cellNames,
       partitionIds: allPartitionIds,
       pqCodes: allPQCodes,
     };
