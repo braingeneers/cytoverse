@@ -721,6 +721,7 @@ const loadAvailableModels = async () => {
       isUserIndex: true,
       baseModelId: index.baseModelId,
       cellCount: index.cellCount,
+      category: index.category,
     }));
 
     // Combine both lists
@@ -803,7 +804,10 @@ const loadCategoriesFromMetadata = async () => {
     // Check if this is a user index
     const selectedModelInfo = availableModels.value.find((m) => m.value === modelID);
     if (selectedModelInfo?.isUserIndex) {
-      // For user indexes, load categories from the base model
+      // User indexes only have one category - the one selected at creation
+      availableCategories.value = [selectedModelInfo.category || ''];
+      selectedCategory.value = selectedModelInfo.category || '';
+    } else {
       const baseModelId = selectedModelInfo.baseModelId;
       const metadataResponse = await fetch(
         `${sitePath}/models/${baseModelId}/pumap/metadata.json`
@@ -827,30 +831,6 @@ const loadCategoriesFromMetadata = async () => {
       }
       return;
     }
-
-    // Original logic for reference models
-    const metadataResponse = await fetch(
-      `${sitePath}/models/${modelID}/pumap/metadata.json`
-    );
-    const metadata = await metadataResponse.json();
-
-    if (metadata.categories && typeof metadata.categories === 'object') {
-      const categories = Object.keys(metadata.categories);
-      availableCategories.value = categories;
-
-      if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
-        // REMIND: Should switch to specifying in metadata.json
-        if (modelID === 'scimilarity' && categories.includes('prediction')) {
-          selectedCategory.value = 'prediction';
-        } else if (modelID === 'brain' && categories.includes('CellType')) {
-          selectedCategory.value = 'CellType';
-        } else if (categories.length > 0) {
-          selectedCategory.value = categories[0];
-        }
-      }
-    } else {
-      availableCategories.value = [];
-    }
   } catch (error) {
     console.error('Error loading categories from metadata:', error);
     availableCategories.value = [];
@@ -864,9 +844,9 @@ const loadUserIndexData = async (userIndexId: string) => {
     throw new Error('User index not found');
   }
 
-  userRef.x.value = userIndex.coordinates.x;
-  userRef.y.value = userIndex.coordinates.y;
-  userRef.labelIndices.value = new Int16Array(userIndex.labelIndices);
+  userRef.x.value = userIndex.x;
+  userRef.y.value = userIndex.y;
+  userRef.labelIndices.value = userIndex.labelIndices;
 
   // Force scatter plot update
   setTimeout(() => {
@@ -1026,22 +1006,16 @@ const start = async () => {
   }
 
   if (worker) {
-    worker.postMessage(
-      {
-        type: 'start',
-        modelID: baseModelId, // Always use the base model ID for loading models
-        modelsURL: `${sitePath}/models`,
-        useUserIndex: useUserIndex,
-        userIndexId: useUserIndex ? selectedModel.value : null,
-        h5File: selectedFile.value,
-        useWebGPU: useWebGPU.value,
-        labelIndices: baseRef.labelIndices.value,
-      }
-      // [
-      //   // Objects listed in the second argument are transferred, not copied
-      //   baseRef.labelIndices.value.buffer,
-      // ]
-    );
+    worker.postMessage({
+      type: 'start',
+      modelID: baseModelId, // Always use the base model ID for loading models
+      modelsURL: `${sitePath}/models`,
+      useUserIndex: useUserIndex,
+      userIndexId: useUserIndex ? selectedModel.value : null,
+      h5File: selectedFile.value,
+      useWebGPU: useWebGPU.value,
+      labelIndices: baseRef.labelIndices.value,
+    });
   }
 };
 
@@ -1155,14 +1129,15 @@ const saveUserIndex = async () => {
       newIndexName.value.trim(),
       selectedModel.value,
       currentUserIndexArtifacts.value,
-      query.labelIndices.value,
       query.x.value,
       query.y.value,
-      baseRef.labels.value
+      selectedCategory.value,
+      baseRef.labels.value,
+      query.labelIndices.value
     );
 
-    userIndex.coordinates.x = new Float32Array(query.x.value);
-    userIndex.coordinates.y = new Float32Array(query.y.value);
+    userIndex.x = new Float32Array(query.x.value);
+    userIndex.y = new Float32Array(query.y.value);
 
     // Save to IndexedDB
     await userIndexService.saveUserIndex(userIndex);
@@ -1245,10 +1220,10 @@ watch(selectedModel, async () => {
   cellIdToIndex.clear();
 
   // Clear training data to refresh scatter plot
-  // baseRef.x.value = new Float32Array();
-  // baseRef.y.value = new Float32Array();
-  // baseRef.labelIndices.value = new Int16Array();
-  // baseRef.labels.value = [];
+  baseRef.x.value = new Float32Array();
+  baseRef.y.value = new Float32Array();
+  baseRef.labelIndices.value = new Int16Array();
+  baseRef.labels.value = [];
 
   // Load categories for the new model
   await loadCategoriesFromMetadata();

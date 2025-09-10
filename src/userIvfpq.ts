@@ -14,7 +14,7 @@ export class UserIVFPQ {
   private basePath: string;
   private n_probe: number;
   private k: number;
-  private baseIVFPQ: IVFPQ;
+  private baseIVFPQ: IVFPQ | undefined = undefined;
   private userIndex: UserIndex | undefined = undefined;
   private userCentroids: Float32Array | undefined = undefined;
   private userPartitions: Record<number, UserIndex['partitions'][number]> | undefined =
@@ -24,7 +24,7 @@ export class UserIVFPQ {
     this.basePath = basePath;
     this.n_probe = n_probe;
     this.k = k;
-    this.baseIVFPQ = null as any; // Will be initialized in loadUserIndex
+    // this.baseIVFPQ = null as any; // Will be initialized in loadUserIndex
   }
 
   /**
@@ -44,6 +44,9 @@ export class UserIVFPQ {
     await this.baseIVFPQ.load();
 
     // Get reference components from base model
+    if (!this.baseIVFPQ) {
+      throw new Error('BaseIVFPQ not loaded');
+    }
     const components = this.baseIVFPQ.getReferenceComponents();
     if (!components) {
       throw new Error('Base model not loaded');
@@ -100,6 +103,9 @@ export class UserIVFPQ {
     }
 
     // Get reference components from base model
+    if (!this.baseIVFPQ) {
+      throw new Error('BaseIVFPQ not loaded');
+    }
     const components = this.baseIVFPQ.getReferenceComponents();
     if (!components) {
       throw new Error('Base model not loaded');
@@ -107,7 +113,7 @@ export class UserIVFPQ {
 
     const { pqDistance, d } = components;
 
-    // Step 1: Find nearest partitions (use ONNX if requested and available)
+    // Step 1: Find nearest partitions using user index centroids
     const partitionIds = await this.baseIVFPQ.findNearestPartitions(
       queryVector,
       this.userCentroids,
@@ -153,9 +159,8 @@ export class UserIVFPQ {
       // Convert local indices to global indices and add all distances
       for (let i = 0; i < partitionResults.indices.length; i++) {
         const localIdx = partitionResults.indices[i];
-        const globalIdx = partition.cellIndices[localIdx];
         allCandidates.push({
-          index: globalIdx,
+          index: localIdx,
           distance: partitionResults.distances[i],
         });
       }
@@ -200,7 +205,7 @@ export class UserIVFPQ {
       return null;
     }
 
-    return this.userIndex.coordinates;
+    return { x: this.userIndex.x, y: this.userIndex.y };
   }
 
   /**
@@ -218,6 +223,10 @@ export class UserIVFPQ {
    * Check if the system is ready
    */
   isReady(): boolean {
-    return this.userIndex !== undefined && this.baseIVFPQ && this.baseIVFPQ.isReady();
+    return (
+      this.userIndex !== undefined &&
+      this.baseIVFPQ !== undefined &&
+      this.baseIVFPQ.isReady() === true
+    );
   }
 }

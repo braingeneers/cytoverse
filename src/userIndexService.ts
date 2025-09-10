@@ -4,7 +4,6 @@ export interface UserIndexPartition {
   pqCodes: Uint8Array; // Concatenated PQ codes
   pqCodeCount: number; // Number of PQ codes (to know how to split)
   labelIndices: Int16Array;
-  cellIndices: Int32Array;
 }
 
 export interface UserIndex {
@@ -14,12 +13,12 @@ export interface UserIndex {
   created: Date;
   cellCount: number;
   partitions: Record<number, UserIndexPartition>;
-  coordinates: {
-    x: Float32Array;
-    y: Float32Array;
-  };
-  labelIndices: Int16Array;
+  x: Float32Array;
+  y: Float32Array;
+  category: string;
   labels: string[];
+  // NOTE: Duplicated in partitions but here for plotting
+  labelIndices: Int16Array;
 }
 
 interface UserIndexDB extends DBSchema {
@@ -62,12 +61,11 @@ class UserIndexService {
       created: index.created,
       cellCount: index.cellCount,
       partitions: {},
-      coordinates: {
-        x: index.coordinates.x,
-        y: index.coordinates.y,
-      },
+      x: index.x,
+      y: index.y,
+      category: index.category,
       labels: [...index.labels], // Create a new array copy
-      labelIndices: new Int16Array(index.labelIndices), // Create a new typed array copy
+      labelIndices: new Int16Array(index.labelIndices),
     };
 
     // Deep copy partitions to ensure clean structure
@@ -76,7 +74,6 @@ class UserIndexService {
         pqCodes: new Uint8Array(partition.pqCodes),
         pqCodeCount: partition.pqCodeCount,
         labelIndices: new Int16Array(partition.labelIndices),
-        cellIndices: new Int32Array(partition.cellIndices),
       };
     }
 
@@ -100,6 +97,7 @@ class UserIndexService {
       baseModelId: string;
       created: Date;
       cellCount: number;
+      category: string;
     }>
   > {
     const db = this.ensureDb();
@@ -110,6 +108,7 @@ class UserIndexService {
       baseModelId: index.baseModelId,
       created: index.created,
       cellCount: index.cellCount,
+      category: index.category,
     }));
   }
 
@@ -120,10 +119,11 @@ class UserIndexService {
       partitionIds: Int16Array;
       pqCodes: Uint8Array[];
     },
-    labelIndices: Int16Array,
     x: Float32Array,
     y: Float32Array,
+    category: string,
     labels: string[],
+    labelIndices: Int16Array
   ): UserIndex {
     const partitions: Record<number, UserIndexPartition> = {};
 
@@ -133,7 +133,6 @@ class UserIndexService {
       {
         pqCodes: Uint8Array[];
         labelIndices: number[];
-        cellIndices: number[];
       }
     > = {};
 
@@ -142,13 +141,11 @@ class UserIndexService {
         partitionGroups[partitionId] = {
           pqCodes: [],
           labelIndices: [],
-          cellIndices: [],
         };
       }
 
       partitionGroups[partitionId].pqCodes.push(artifacts.pqCodes[cellIndex]);
       partitionGroups[partitionId].labelIndices.push(labelIndices[cellIndex]);
-      partitionGroups[partitionId].cellIndices.push(cellIndex);
     });
 
     // Second pass: create concatenated arrays for each partition
@@ -157,9 +154,7 @@ class UserIndexService {
       const pqCodeLength = group.pqCodes[0]?.length || 0;
 
       // Concatenate all PQ codes into a single Uint8Array
-      const concatenatedPqCodes = new Uint8Array(
-        group.pqCodes.length * pqCodeLength
-      );
+      const concatenatedPqCodes = new Uint8Array(group.pqCodes.length * pqCodeLength);
       group.pqCodes.forEach((pqCode, i) => {
         concatenatedPqCodes.set(pqCode, i * pqCodeLength);
       });
@@ -168,7 +163,6 @@ class UserIndexService {
         pqCodes: concatenatedPqCodes,
         pqCodeCount: group.pqCodes.length,
         labelIndices: new Int16Array(group.labelIndices),
-        cellIndices: new Int32Array(group.cellIndices),
       };
     });
 
@@ -179,12 +173,11 @@ class UserIndexService {
       created: new Date(),
       cellCount: artifacts.partitionIds.length,
       partitions,
-      coordinates: {
-        x: x,
-        y: y,
-      },
+      x,
+      y,
+      category,
       labels,
-      labelIndices: labelIndices,
+      labelIndices,
     };
   }
 
