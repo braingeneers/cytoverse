@@ -2,9 +2,9 @@
 export model_id=scimilarity
 
 test:
-	python -m pytest ivfpq/python/tests
+	npx vitest run tests/unit
 	python -m pytest tests/unit
-	npx vitest run ivfpq
+	python -m pytest tests/e2e
 
 benchmark:
 	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG

@@ -8,6 +8,7 @@
  * - Support using a previously searched index as a 'user generated' index
  */
 
+import * as ort from 'onnxruntime-web';
 import { PQDistance, PQMetadata } from './pq';
 
 /**
@@ -36,14 +37,6 @@ interface PartitionData {
 }
 
 /**
- * Search configuration
- */
-export interface SearchConfig {
-  n_probe: number;
-  k: number;
-}
-
-/**
  * Search results
  */
 export interface SearchResults {
@@ -58,16 +51,20 @@ export interface SearchResults {
  */
 export class IVFPQ {
   private basePath: string;
+  private n_probe: number;
+  private k: number;
   private useHttp: boolean;
   private metadata: IVFPQMetadata | null = null;
   private centroids: Float32Array | null = null;
   private pqDistance: PQDistance | null = null;
   private partitionCache: Map<number, PartitionData> = new Map();
+  private forwardSession: ort.InferenceSession | null = null;
 
-  constructor(basePath: string) {
+  constructor(basePath: string, n_probe: number = 1, k: number = 10) {
     this.basePath = basePath;
-    this.useHttp =
-      basePath.startsWith('http://') || basePath.startsWith('https://');
+    this.useHttp = basePath.startsWith('http://') || basePath.startsWith('https://');
+    this.n_probe = n_probe;
+    this.k = k;
   }
 
   /**
@@ -81,6 +78,9 @@ export class IVFPQ {
 
     // Load IVF centroids
     await this.loadCentroids();
+
+    // Load IVF forward ONNX model
+    await this.loadForwardModel();
 
     // Initialize and load PQ distance calculator
     this.pqDistance = new PQDistance(this.basePath);
@@ -122,15 +122,28 @@ export class IVFPQ {
     const d = view.getUint32(4, true);
 
     // Validate dimensions
-    if (
-      n_partitions !== this.metadata!.n_partitions ||
-      d !== this.metadata!.d
-    ) {
+    if (n_partitions !== this.metadata!.n_partitions || d !== this.metadata!.d) {
       throw new Error('Centroids dimensions mismatch with metadata');
     }
 
     // Read centroids data
     this.centroids = new Float32Array(buffer, 8);
+  }
+
+  /**
+   * Load IVF forward ONNX model for finding nearest partitions
+   */
+  private async loadForwardModel(modelPath?: string): Promise<void> {
+    const path = modelPath || `${this.basePath}/ivf_coarse.onnx`;
+    try {
+      this.forwardSession = await ort.InferenceSession.create(path, {
+        executionProviders: ['wasm'],
+      });
+      console.log(`Loaded IVF forward model from ${path}`);
+    } catch (error) {
+      console.error('Failed to load IVF forward model:', error);
+      throw error;
+    }
   }
 
   /**
@@ -142,9 +155,7 @@ export class IVFPQ {
       return this.partitionCache.get(partitionId)!;
     }
 
-    const path = `partitions/partition_${partitionId
-      .toString()
-      .padStart(4, '0')}.bin`;
+    const path = `partitions/partition_${partitionId.toString().padStart(4, '0')}.bin`;
     const buffer = (await this.fetchData(path, 'arraybuffer')) as ArrayBuffer;
     const view = new DataView(buffer);
 
@@ -186,44 +197,54 @@ export class IVFPQ {
   }
 
   /**
-   * Find nearest partitions for a query vector
+   * Find nearest partitions using ONNX model
+   *
+   * @param queryVector - Query vector to search with
+   * @param nProbe - Number of partitions to probe
+   * @returns Array of partition indices sorted by distance
    */
-  private findNearestPartitions(
+  async findNearestPartitions(
     queryVector: Float32Array,
+    centroids: Float32Array,
     nProbe: number
-  ): number[] {
-    if (!this.centroids || !this.metadata) {
+  ): Promise<number[]> {
+    if (!this.forwardSession) {
+      throw new Error('IVF forward model not loaded. Call load() first.');
+    }
+
+    if (!centroids || !this.metadata) {
       throw new Error('IVFPQ not loaded');
     }
 
-    const n_partitions = this.metadata.n_partitions;
     const d = this.metadata.d;
 
-    // Compute distances to all centroids
-    const distances = new Float32Array(n_partitions);
-    for (let i = 0; i < n_partitions; i++) {
-      let dist = 0;
-      for (let j = 0; j < d; j++) {
-        const diff = queryVector[j] - this.centroids[i * d + j];
-        dist += diff * diff;
-      }
-      distances[i] = dist;
-    }
+    // Prepare tensors for ONNX model
+    const queryTensor = new ort.Tensor('float32', queryVector, [d]);
+    const centroidsTensor = new ort.Tensor('float32', centroids, [
+      centroids.length / d,
+      d,
+    ]);
+    const kTensor = new ort.Tensor('int32', Int32Array.from([nProbe]), []);
 
-    // Find top nProbe partitions
-    const indices = Array.from({ length: n_partitions }, (_, i) => i);
-    indices.sort((a, b) => distances[a] - distances[b]);
+    // Run the ONNX model
+    const outputs = await this.forwardSession.run({
+      query_vector: queryTensor,
+      partition_centroids: centroidsTensor,
+      k: kTensor,
+    });
 
-    return indices.slice(0, nProbe);
+    // Extract the indices from the output
+    const indices = Array.from(outputs.top_k_indices.data as Int32Array);
+
+    // console.log(`Nearest partitions (ONNX): ${indices}`);
+
+    return indices;
   }
 
   /**
    * Search for k nearest neighbors with optional artifact retention
    */
-  async search(
-    queryVector: Float32Array,
-    config: Partial<SearchConfig> = {}
-  ): Promise<SearchResults> {
+  async search(queryVector: Float32Array): Promise<SearchResults> {
     if (
       !this.metadata ||
       !this.centroids ||
@@ -233,7 +254,6 @@ export class IVFPQ {
       throw new Error('IVFPQ system not loaded');
     }
 
-    const { n_probe = 1, k = 10 } = config;
     const d = this.metadata.d;
 
     if (queryVector.length !== d) {
@@ -242,8 +262,12 @@ export class IVFPQ {
       );
     }
 
-    // Step 1: Find nearest partitions
-    const partitionIds = this.findNearestPartitions(queryVector, n_probe);
+    // Step 1: Find nearest partitions (use ONNX if requested and available)
+    const partitionIds = await this.findNearestPartitions(
+      queryVector,
+      this.centroids,
+      this.n_probe
+    );
     const nearestPartition = partitionIds[0]; // Closest partition for artifacts
 
     // PQ encode the query vector's residual to the partition for a user index
@@ -295,7 +319,7 @@ export class IVFPQ {
 
     // Step 3: Sort all candidates and return top k
     allCandidates.sort((a, b) => a.distance - b.distance);
-    const topK = allCandidates.slice(0, k);
+    const topK = allCandidates.slice(0, this.k);
 
     const result: SearchResults = {
       indices: topK.map((c) => c.index),

@@ -16,12 +16,19 @@ requires-python = ">=3.12, <3.13"
 dependencies = [
     "typer>=0.16.0",
     "anndata>=0.12.1",
-    "ivfpq",
     "scimilarity",
     "umap-pytorch",
     "anndata>=0.12.1",
     "pyarrow>=21.0.0",
     "scanpy>=1.11.4",
+    "numpy>=1.24,<2.3",
+    "scipy>=1.16.1",
+    "scikit-learn>=1.7.1",
+    "torch>=2.8.0",
+    "torchvision>=0.23.0",
+    "onnx>=1.18.0",
+    "onnxruntime>=1.22.1",
+    "onnxscript>=0.3.2",
 ]
 
 [dependency-groups]
@@ -40,7 +47,6 @@ dev = [
 [tool.uv.sources]
 scimilarity = { git = "https://github.com/Genentech/scimilarity.git" }
 umap-pytorch = { git = "https://github.com/rcurrie/umap_pytorch.git" }
-ivfpq = { path = "ivfpq/python", editable = true }
 
 [tool.uv]
 override-dependencies = ["umap-learn>=0.5.0", "numba>=0.60.0"]

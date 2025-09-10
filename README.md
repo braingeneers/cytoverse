@@ -68,7 +68,7 @@ public/models/scimilarity
 │   └── preprocessing.onnx
 ├── ivfpq
 │   ├── ivf_centroids.bin
-│   ├── ivf_forward.onnx
+│   ├── ivf_coarse.onnx
 │   ├── ivf_metadata.json
 │   ├── partitions
 │   ├── partitions

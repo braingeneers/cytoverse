@@ -7,7 +7,6 @@ export default defineConfig({
   optimizeDeps: {
     exclude: [
       'onnxruntime-web', 
-      // 'parquet-wasm',
     ],
   },
   base: './', // For gh-pages
@@ -45,10 +44,6 @@ export default defineConfig({
           src: 'node_modules/onnxruntime-web/dist/*.wasm',
           dest: 'assets',
         },
-        // {
-        //   src: 'node_modules/parquet-wasm/esm/*.wasm',
-        //   dest: 'assets',
-        // },
         {
           src: 'public/*',
           dest: './',
@@ -63,7 +58,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      '@ivfpq': '/ivfpq/typescript/src',
     },
   },
   build: {

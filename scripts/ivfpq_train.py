@@ -21,7 +21,7 @@ from pathlib import Path
 import logging
 from typing import Optional
 
-from ivfpq.ivfpq import IVFPQ
+from ivfpq import IVFPQ
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +34,7 @@ app = typer.Typer(
     add_completion=False,
 )
 
+
 # New helper for reproducibility
 def _set_seed(seed: int) -> None:
     logger.info(f"Setting global random seed: {seed}")
@@ -44,7 +45,9 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
         logger.info("CUDA available: seeded all CUDA devices")
     # MPS (Apple Silicon) shares CPU RNG; manual_seed suffices. Log if present.
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():  # noqa: SIM108
+    if (
+        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    ):  # noqa: SIM108
         logger.info("MPS backend available: seeded via torch.manual_seed")
     try:
         torch.use_deterministic_algorithms(True, warn_only=True)
@@ -122,7 +125,6 @@ def train(
     IVFPQ.build(
         vectors=vectors_tensor,
         output_dir=output_dir,
-        n_partitions=None,  # Use default partitioning
         num_training_vectors=max_vectors_for_training,
         sample_training_vectors=sample_training_vectors,
         pq_m=pq_m,
@@ -195,7 +197,7 @@ def measure_recall(
         query_vector = vectors_tensor[idx]
 
         try:
-            vector_ids, _ = ivfpq.search(
+            vector_ids, _, _ = ivfpq.search(
                 query_vector=query_vector,
                 model_path=model_path,
                 n_probe=8,  # Use reasonable n_probe for accuracy
@@ -246,7 +248,7 @@ def measure_recall(
         perturbed_vector = original_vector + perturbation
 
         try:
-            vector_ids, _ = ivfpq.search(
+            vector_ids, _, _ = ivfpq.search(
                 query_vector=perturbed_vector,
                 model_path=model_path,
                 n_probe=8,

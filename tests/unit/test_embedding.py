@@ -2,13 +2,18 @@
 Unit tests for embedding data validation.
 """
 
+import sys
+from pathlib import Path
+
+# Add scripts directory to path for ivfpq import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+
 import pytest
 import anndata
 import tiledb
 import pandas as pd
 import numpy as np
 import torch
-from pathlib import Path
 
 # Add SCimilarity imports for embedding computation
 from scimilarity import CellEmbedding
@@ -151,7 +156,7 @@ class TestEmbeddingData:
         query_embedding = torch.from_numpy(computed_embeddings[0]).float()
 
         # Perform nearest neighbor search using disk-based partitions
-        vector_ids, distances = ivf.search(
+        vector_ids, distances, _ = ivf.search(
             query_embedding,
             model_path=ivf_model_path,
             n_probe=4,  # Search multiple partitions for better accuracy

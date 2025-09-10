@@ -17,6 +17,12 @@ these merged results are returned, but internally all vectors from all probed
 partitions are considered and sorted globally.
 """
 
+import sys
+from pathlib import Path
+
+# Add scripts directory to path for ivfpq import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+
 from unittest import result
 import pytest
 import torch
@@ -26,14 +32,14 @@ import json
 from typing import List, Tuple
 from collections import Counter
 
-from ivfpq.ivfpq import (
+from ivfpq import (
     IVFPQ,
     _load_centroids_binary,
     _export_centroids_binary,
     _load_partition_binary,
     _export_partition_binary,
 )
-from ivfpq.pq import PQ
+from pq import PQ
 
 
 class TestIVFResidualBasic:
@@ -69,6 +75,7 @@ class TestIVFResidualBasic:
         IVFPQ.build(
             vectors=self.vectors,
             output_dir=output_dir,
+            num_training_vectors=self.vectors.shape[0],
             max_iterations=20,
         )
         ivf = IVFPQ.load(output_dir)
@@ -149,6 +156,71 @@ class TestIVFResidualBasic:
             top_k_distances[:-1] <= top_k_distances[1:]
         )  # Distances should be sorted
 
+    def test_forward_onnx(self, tmp_path):
+        """Test the exported ONNX model for coarse centroid search produces concordant results."""
+        import onnxruntime as ort
+
+        # First build an IVFPQ to generate the ONNX model
+        output_dir = tmp_path
+        IVFPQ.build(
+            vectors=self.vectors,
+            output_dir=output_dir,
+            num_training_vectors=self.vectors.shape[0],
+            max_iterations=10,
+        )
+
+        # Load the IVF model
+        ivf = IVFPQ.load(output_dir)
+
+        # Verify ONNX file was created
+        onnx_file = output_dir / "ivf_coarse.onnx"
+        assert onnx_file.exists(), "ivf_coarse.onnx not found"
+
+        # Create test inputs
+        query_vector = torch.randn(self.d)
+        centroids = ivf.centroids.data
+        k = 4
+
+        # Get PyTorch results
+        pytorch_indices, pytorch_distances = ivf.forward(query_vector, centroids, k)
+
+        # Create ONNX runtime session
+        ort_session = ort.InferenceSession(str(onnx_file))
+
+        # Prepare inputs for ONNX (need to convert to numpy and add batch dimension if needed)
+        ort_inputs = {
+            "query_vector": query_vector.numpy(),
+            "partition_centroids": centroids.numpy(),
+            "k": np.array(k, dtype=np.int32),
+        }
+
+        # Run ONNX inference
+        ort_outputs = ort_session.run(None, ort_inputs)
+        onnx_indices = torch.from_numpy(ort_outputs[0])
+        onnx_distances = torch.from_numpy(ort_outputs[1])
+
+        # Validate results are concordant
+        assert torch.equal(
+            pytorch_indices, onnx_indices
+        ), f"ONNX indices {onnx_indices} don't match PyTorch indices {pytorch_indices}"
+
+        # For distances, allow small numerical differences due to floating point precision
+        assert torch.allclose(
+            pytorch_distances, onnx_distances, rtol=1e-5, atol=1e-6
+        ), f"ONNX distances differ from PyTorch distances beyond tolerance"
+
+        # Verify both are properly sorted
+        assert torch.all(
+            onnx_distances[:-1] <= onnx_distances[1:]
+        ), "ONNX distances should be sorted"
+
+        print(f"✓ ONNX forward method produces concordant results with PyTorch")
+        print(f"  PyTorch indices: {pytorch_indices.tolist()}")
+        print(f"  ONNX indices: {onnx_indices.tolist()}")
+        print(
+            f"  Distance difference: {torch.abs(pytorch_distances - onnx_distances).max().item():.2e}"
+        )
+
     def test_ivf_search(self, tmp_path):
         """Test IVF search with residual vectors using the refactored search method."""
         output_dir = tmp_path
@@ -157,6 +229,7 @@ class TestIVFResidualBasic:
         IVFPQ.build(
             vectors=self.vectors,
             output_dir=output_dir,
+            num_training_vectors=self.vectors.shape[0],
             max_iterations=10,
         )
         ivf = IVFPQ.load(output_dir)
@@ -222,6 +295,7 @@ class TestIVFResidualBasic:
         IVFPQ.build(
             vectors=self.vectors,
             output_dir=output_dir,
+            num_training_vectors=self.vectors.shape[0],
             max_iterations=10,
         )
 
@@ -265,6 +339,7 @@ class TestIVFResidualIntegration:
         IVFPQ.build(
             vectors=vectors,
             output_dir=output_dir,
+            num_training_vectors=vectors.shape[0],
             max_iterations=10,
         )
         ivf = IVFPQ.load(output_dir)
@@ -313,15 +388,15 @@ class TestIVFResidualIntegration:
     def test_search_returns_all_partition_vectors(self, tmp_path):
         """Test that search returns ALL vectors from ALL probed partitions, globally sorted."""
         d = 64
-        n_vectors = 200  # Small dataset to make counting easier
-        n_partitions = 4
+        n_vectors = 256  # Small dataset to make counting easier
+        n_partitions = 16  # sqrt(n_vectors) as rule of thumb in ivfpq.build
 
         torch.manual_seed(42)
         # Create vectors with clear partition structure
         vectors = []
         for i in range(n_vectors):
             # Create vectors that will cluster into roughly equal partitions
-            partition_id = i % n_partitions
+            partition_id = i % 16
             base = torch.zeros(d)
             base[partition_id * 16 : (partition_id + 1) * 16] = (
                 5.0  # Strong signal in different dimensions
@@ -336,10 +411,11 @@ class TestIVFResidualIntegration:
         IVFPQ.build(
             vectors=vectors,
             output_dir=output_dir,
-            n_partitions=n_partitions,
+            num_training_vectors=vectors.shape[0],
             max_iterations=20,
         )
         ivf = IVFPQ.load(output_dir)
+        assert ivf.n_partitions == n_partitions
 
         # Query with a vector that should match partition 0
         query_vector = torch.zeros(d)
@@ -440,6 +516,7 @@ class TestIVFResidualIntegration:
         IVFPQ.build(
             vectors=vectors,
             output_dir=output_dir,
+            num_training_vectors=vectors.shape[0],
             max_iterations=10,
         )
         ivf = IVFPQ.load(output_dir)
@@ -506,41 +583,12 @@ class TestIVFResidualIntegration:
             IVFPQ.build(
                 vectors=vectors,
                 output_dir=test_output_dir,
+                num_training_vectors=vectors.shape[0],
                 max_iterations=5,
             )
             ivf = IVFPQ.load(test_output_dir)
 
             assert ivf.centroids.shape == (ivf.n_partitions, d)
-
-    def test_different_partition_counts(self, tmp_path):
-        """Test with different numbers of partitions."""
-        d = 64
-        n_vectors = 300
-        torch.manual_seed(42)
-        vectors = torch.randn(n_vectors, d)
-
-        for n_partitions in [4, 8, 16]:
-            test_output_dir = tmp_path / f"test_partitions_{n_partitions}"
-            test_output_dir.mkdir(exist_ok=True)
-
-            IVFPQ.build(
-                vectors=vectors,
-                output_dir=test_output_dir,
-                n_partitions=n_partitions,
-                max_iterations=5,
-            )
-            ivf = IVFPQ.load(test_output_dir)
-
-            assert ivf.centroids.shape == (n_partitions, d)
-
-            # Test metadata
-            metadata_file = test_output_dir / "ivf_metadata.json"
-            with open(metadata_file, "r") as f:
-                metadata = json.load(f)
-
-            assert metadata["n_partitions"] == n_partitions
-            assert metadata["d"] == d
-            assert metadata["total_vectors"] == n_vectors
 
     def test_search_accuracy(self, tmp_path):
         """Test search accuracy with perturbed queries using globally sorted results."""
@@ -558,6 +606,7 @@ class TestIVFResidualIntegration:
         IVFPQ.build(
             vectors=vectors,
             output_dir=output_dir,
+            num_training_vectors=vectors.shape[0],
             max_iterations=15,
         )
         ivf = IVFPQ.load(output_dir)

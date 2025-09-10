@@ -32,12 +32,7 @@
         <div class="drawer-header">
           <h2>Cytoverse</h2>
           <div class="header-actions">
-            <v-btn
-              variant="text"
-              icon
-              size="small"
-              @click="helpModalOpen = true"
-            >
+            <v-btn variant="text" icon size="small" @click="helpModalOpen = true">
               <v-icon>mdi-help-circle</v-icon>
             </v-btn>
             <v-btn variant="text" icon size="small" @click="openGithub">
@@ -67,8 +62,8 @@
           <!-- Model Selection -->
           <div class="form-section">
             <v-select
-              data-testid="model-select-dropdown"
               v-model="selectedModel"
+              data-testid="model-select-dropdown"
               :items="availableModels"
               label="Reference"
               :disabled="isRunning"
@@ -97,8 +92,8 @@
           <!-- Category Selection -->
           <div class="form-section">
             <v-select
-              data-testid="category-select-dropdown"
               v-model="selectedCategory"
+              data-testid="category-select-dropdown"
               :items="availableCategories"
               label="Category"
               :disabled="isRunning"
@@ -111,12 +106,7 @@
           <v-card class="stats-card" variant="outlined">
             <v-card-text>
               <template
-                v-if="
-                  baseRef.x &&
-                  baseRef.y &&
-                  baseRef.labels &&
-                  baseRef.labelIndices
-                "
+                v-if="baseRef.x && baseRef.y && baseRef.labels && baseRef.labelIndices"
               >
                 <div class="stat-item">
                   <strong>Reference Cells:</strong>
@@ -142,11 +132,7 @@
           <!-- WebGPU Selection -->
           <div class="form-section">
             <v-radio-group v-model="useWebGPU" :disabled="isRunning" inline>
-              <v-radio
-                :value="false"
-                label="CPU"
-                data-testid="radio-cpu-option"
-              />
+              <v-radio :value="false" label="CPU" data-testid="radio-cpu-option" />
               <v-radio
                 :value="true"
                 :disabled="!hasWebGPU"
@@ -206,10 +192,7 @@
           </div>
 
           <!-- Label Counts -->
-          <div
-            v-if="Object.keys(labelCounts).length > 0"
-            class="labels-section"
-          >
+          <div v-if="Object.keys(labelCounts).length > 0" class="labels-section">
             <div class="labels-header">
               <h3>{{ selectedCategory }}</h3>
               <div class="header-actions">
@@ -219,8 +202,8 @@
                   size="small"
                   :disabled="Object.keys(labelCounts).length === 0 || isRunning"
                   data-testid="download-button"
-                  @click="exportResultsToCSV"
                   title="Download results as CSV"
+                  @click="exportResultsToCSV"
                 >
                   <v-icon>mdi-download</v-icon>
                 </v-btn>
@@ -265,13 +248,13 @@
             <div>Loading scatter plot data...</div>
           </div>
           <ScatterPlotWebGL
-            ref="scatterPlotRef"
             v-else-if="
               baseRef.x.value &&
               baseRef.y.value &&
               baseRef.labelIndices.value &&
               baseRef.labels.value.length > 0
             "
+            ref="scatterPlotRef"
             :base-ref-x="baseRef.x.value"
             :base-ref-y="baseRef.y.value"
             :base-ref-label-indices="baseRef.labelIndicesSubset.value"
@@ -304,9 +287,9 @@
                 density="comfortable"
               />
               <div class="modal-description">
-                Get introduced to others with similar embeddings? Enter your
-                email and we'll connect you. We'll never upload or share your
-                raw data, only your embeddings. (Coming soon...)
+                Get introduced to others with similar embeddings? Enter your email and
+                we'll connect you. We'll never upload or share your raw data, only your
+                embeddings. (Coming soon...)
               </div>
             </v-form>
           </v-card-text>
@@ -331,22 +314,20 @@
           <v-card-text>
             <div class="help-content">
               <p>
-                CytoVerse is a browser-based platform for single-cell RNA-seq
-                analysis, designed for cell annotation using foundation model
-                embeddings. It runs entirely in the browser, streaming h5ad
-                files from local storage without uploading data or requiring
-                server computation. It uses SCimilarity for cell embeddings and
-                parametric UMAP for 2D visualization, leveraging large training
-                datasets for accurate cell annotation. An Inverted File with
-                Product Quantization (IVFPQ) enables fast approximate nearest
-                neighbor searches across over 20 million samples. Built on
-                WebAssembly and ONNX for high-speed processing, it supports
-                unlimited streaming analysis of h5ad files via h5wasm. This
-                enables distributed collaborative discovery, allowing
-                researchers to explore shared embedding spaces to identify
-                overlapping or complementary assays, particularly for
-                perturbseq-driven research. The architecture ensures privacy,
-                scalability, and collaborative potential without server
+                CytoVerse is a browser-based platform for single-cell RNA-seq analysis,
+                designed for cell annotation using foundation model embeddings. It runs
+                entirely in the browser, streaming h5ad files from local storage without
+                uploading data or requiring server computation. It uses SCimilarity for
+                cell embeddings and parametric UMAP for 2D visualization, leveraging
+                large training datasets for accurate cell annotation. An Inverted File
+                with Product Quantization (IVFPQ) enables fast approximate nearest
+                neighbor searches across over 20 million samples. Built on WebAssembly
+                and ONNX for high-speed processing, it supports unlimited streaming
+                analysis of h5ad files via h5wasm. This enables distributed
+                collaborative discovery, allowing researchers to explore shared
+                embedding spaces to identify overlapping or complementary assays,
+                particularly for perturbseq-driven research. The architecture ensures
+                privacy, scalability, and collaborative potential without server
                 dependency.
               </p>
               <p><strong>Getting Started:</strong></p>
@@ -358,8 +339,8 @@
                 <li>Click Start to begin analysis</li>
               </ol>
               <p>
-                The tool will display your cells in real-time as they are
-                processed and labeled.
+                The tool will display your cells in real-time as they are processed and
+                labeled.
               </p>
             </div>
           </v-card-text>
@@ -390,8 +371,8 @@
           <v-card-title>Create User Index</v-card-title>
           <v-card-text>
             <p>
-              Save the current labeled cells as a user index for future
-              reference labeling.
+              Save the current labeled cells as a user index for future reference
+              labeling.
             </p>
             <v-text-field
               v-model="newIndexName"
@@ -699,8 +680,7 @@ const createWorker = () => {
           const totalElapsed = Math.round((endTime - startTime.value) / 1000);
           const minutes = Math.floor(totalElapsed / 60);
           const seconds = totalElapsed % 60;
-          const timeStr =
-            minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+          const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
           statusMessage.value = `Finished: Labeled ${totalProcessed.value.toLocaleString()} cells in ${timeStr}`;
         } else {
           statusMessage.value = 'Finished';
@@ -820,9 +800,7 @@ const loadCategoriesFromMetadata = async () => {
     const modelID = selectedModel.value;
 
     // Check if this is a user index
-    const selectedModelInfo = availableModels.value.find(
-      (m) => m.value === modelID
-    );
+    const selectedModelInfo = availableModels.value.find((m) => m.value === modelID);
     if (selectedModelInfo?.isUserIndex) {
       // For user indexes, load categories from the base model
       const baseModelId = selectedModelInfo.baseModelId;
@@ -836,19 +814,10 @@ const loadCategoriesFromMetadata = async () => {
         availableCategories.value = categories;
 
         // Set default category
-        if (
-          !selectedCategory.value ||
-          !categories.includes(selectedCategory.value)
-        ) {
-          if (
-            baseModelId === 'scimilarity' &&
-            categories.includes('prediction')
-          ) {
+        if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
+          if (baseModelId === 'scimilarity' && categories.includes('prediction')) {
             selectedCategory.value = 'prediction';
-          } else if (
-            baseModelId === 'brain' &&
-            categories.includes('CellType')
-          ) {
+          } else if (baseModelId === 'brain' && categories.includes('CellType')) {
             selectedCategory.value = 'CellType';
           } else if (categories.length > 0) {
             selectedCategory.value = categories[0];
@@ -868,10 +837,7 @@ const loadCategoriesFromMetadata = async () => {
       const categories = Object.keys(metadata.categories);
       availableCategories.value = categories;
 
-      if (
-        !selectedCategory.value ||
-        !categories.includes(selectedCategory.value)
-      ) {
+      if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
         // REMIND: Should switch to specifying in metadata.json
         if (modelID === 'scimilarity' && categories.includes('prediction')) {
           selectedCategory.value = 'prediction';
@@ -890,7 +856,7 @@ const loadCategoriesFromMetadata = async () => {
   }
 };
 
-const loadUserIndexData = async (userIndexId: string, baseModelId: string) => {
+const loadUserIndexData = async (userIndexId: string) => {
   // Load the user index from IndexedDB
   const userIndex = await userIndexService.getUserIndex(userIndexId);
   if (!userIndex) {
@@ -973,9 +939,7 @@ const loadReferenceData = async () => {
     const metadata = await metadataResponse.json();
 
     // Get category labels from metadata
-    const labels: string[] = metadata.categories?.[
-      selectedCategory.value
-    ] as string[];
+    const labels: string[] = metadata.categories?.[selectedCategory.value] as string[];
 
     // Store normalization parameters for query data
     xCenter.value = metadata.xCenter || 0;
@@ -992,10 +956,8 @@ const loadReferenceData = async () => {
     ]);
 
     // Check if all responses are successful
-    if (!xResponse.ok)
-      throw new Error(`Failed to fetch x.bin: ${xResponse.status}`);
-    if (!yResponse.ok)
-      throw new Error(`Failed to fetch y.bin: ${yResponse.status}`);
+    if (!xResponse.ok) throw new Error(`Failed to fetch x.bin: ${xResponse.status}`);
+    if (!yResponse.ok) throw new Error(`Failed to fetch y.bin: ${yResponse.status}`);
     if (!labelIndicesResponse.ok)
       throw new Error(
         `Failed to fetch ${selectedCategory.value}.bin: ${labelIndicesResponse.status}`
@@ -1014,14 +976,10 @@ const loadReferenceData = async () => {
 
     // Check if buffer sizes are valid
     if (xBuffer.byteLength % 4 !== 0) {
-      throw new Error(
-        `X buffer size ${xBuffer.byteLength} is not a multiple of 4`
-      );
+      throw new Error(`X buffer size ${xBuffer.byteLength} is not a multiple of 4`);
     }
     if (yBuffer.byteLength % 4 !== 0) {
-      throw new Error(
-        `Y buffer size ${yBuffer.byteLength} is not a multiple of 4`
-      );
+      throw new Error(`Y buffer size ${yBuffer.byteLength} is not a multiple of 4`);
     }
     if (labelIndicesBuffer.byteLength % 2 !== 0) {
       throw new Error(
@@ -1045,10 +1003,7 @@ const loadReferenceData = async () => {
     // Now load the user index data if applicable
     if (selectedModelInfo?.isUserIndex) {
       // Load user index data instead
-      await loadUserIndexData(
-        selectedModel.value,
-        selectedModelInfo.baseModelId!
-      );
+      await loadUserIndexData(selectedModel.value);
     }
   } catch (error) {
     console.error('Error loading reference data:', error);
@@ -1100,9 +1055,7 @@ const start = async () => {
     : selectedModel.value;
 
   if (useUserIndex) {
-    console.log(
-      `Using user index: ${selectedModel.value} based on ${baseModelId}`
-    );
+    console.log(`Using user index: ${selectedModel.value} based on ${baseModelId}`);
   } else {
     console.log(`Using reference model: ${selectedModel.value}`);
   }
@@ -1114,10 +1067,10 @@ const start = async () => {
         modelID: baseModelId, // Always use the base model ID for loading models
         modelsURL: `${sitePath}/models`,
         useUserIndex: useUserIndex,
-        userIndexId: useUserIndex ? selectedModel.value : null, // Pass user index ID if applicable
+        userIndexId: useUserIndex ? selectedModel.value : null,
         h5File: selectedFile.value,
         useWebGPU: useWebGPU.value,
-        labelIndices: baseRef.labelIndices.value,
+        labelIndices: baseRef.labelIndices.value, // Always pass baseRef labels
       },
       [
         // Objects listed in the second argument are transferred, not copied
@@ -1170,8 +1123,7 @@ const exportResultsToCSV = async () => {
         labelId >= 0 && labelId < baseRef.labels.value.length
           ? baseRef.labels.value[labelId]
           : 'Unknown';
-      const confidenceStr =
-        confidence !== undefined ? confidence.toFixed(3) : '1.000';
+      const confidenceStr = confidence !== undefined ? confidence.toFixed(3) : '1.000';
       csv += `"${cellId}","${label}",${confidenceStr}\n`;
     }
 
@@ -1180,12 +1132,8 @@ const exportResultsToCSV = async () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    const baseFilename =
-      selectedFile.value?.name.replace('.h5ad', '') || 'results';
-    const timestamp = new Date()
-      .toISOString()
-      .slice(0, 19)
-      .replace(/[:T-]/g, '_');
+    const baseFilename = selectedFile.value?.name.replace('.h5ad', '') || 'results';
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '_');
     link.download = `${baseFilename}_labels_${timestamp}.csv`;
     document.body.appendChild(link);
     link.click();

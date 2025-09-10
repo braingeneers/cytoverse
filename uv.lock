@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.12.*"
 
 [manifest]
@@ -410,10 +410,17 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anndata" },
-    { name = "ivfpq" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "onnxscript" },
     { name = "pyarrow" },
     { name = "scanpy" },
+    { name = "scikit-learn" },
     { name = "scimilarity" },
+    { name = "scipy" },
+    { name = "torch" },
+    { name = "torchvision" },
     { name = "typer" },
     { name = "umap-pytorch" },
 ]
@@ -434,10 +441,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anndata", specifier = ">=0.12.1" },
-    { name = "ivfpq", editable = "ivfpq/python" },
+    { name = "numpy", specifier = ">=1.24,<2.3" },
+    { name = "onnx", specifier = ">=1.18.0" },
+    { name = "onnxruntime", specifier = ">=1.22.1" },
+    { name = "onnxscript", specifier = ">=0.3.2" },
     { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "scanpy", specifier = ">=1.11.4" },
+    { name = "scikit-learn", specifier = ">=1.7.1" },
     { name = "scimilarity", git = "https://github.com/Genentech/scimilarity.git" },
+    { name = "scipy", specifier = ">=1.16.1" },
+    { name = "torch", specifier = ">=2.8.0" },
+    { name = "torchvision", specifier = ">=0.23.0" },
     { name = "typer", specifier = ">=0.16.0" },
     { name = "umap-pytorch", git = "https://github.com/rcurrie/umap_pytorch.git" },
 ]
@@ -837,33 +851,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7c/1a/3c8edc664e06e6bd06cce40c6b22da5f1429aa4224d0c590f3be21c91ead/isoduration-20.11.0.tar.gz", hash = "sha256:ac2f9015137935279eac671f94f89eb00584f940f5dc49462a0c4ee692ba1bd9", size = 11649, upload-time = "2020-11-01T11:00:00.312Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/55/e5326141505c5d5e34c5e0935d2908a74e4561eca44108fbfb9c13d2911a/isoduration-20.11.0-py3-none-any.whl", hash = "sha256:b2904c2a4228c3d44f409c8ae8e2370eb21a26f7ac2ec5446df141dde3452042", size = 11321, upload-time = "2020-11-01T10:59:58.02Z" },
-]
-
-[[package]]
-name = "ivfpq"
-version = "0.1.0"
-source = { editable = "ivfpq/python" }
-dependencies = [
-    { name = "numpy" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "onnxscript" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "torch" },
-    { name = "torchvision" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=1.24,<2.3" },
-    { name = "onnx", specifier = ">=1.18.0" },
-    { name = "onnxruntime", specifier = ">=1.22.1" },
-    { name = "onnxscript", specifier = ">=0.3.2" },
-    { name = "scikit-learn", specifier = ">=1.7.1" },
-    { name = "scipy", specifier = ">=1.16.1" },
-    { name = "torch", specifier = ">=2.8.0" },
-    { name = "torchvision", specifier = ">=0.23.0" },
 ]
 
 [[package]]

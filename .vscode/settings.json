@@ -1,6 +1,12 @@
 {
-  "python.testing.pytestArgs": ["tests", "-v"],
+  "python.testing.pytestArgs": [
+    "tests",
+    "-v"
+  ],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
-  "jupyter.notebookFileRoot": "${workspaceFolder}"
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "python.analysis.extraPaths": [
+    "./src"
+  ]
 }

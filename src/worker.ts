@@ -10,7 +10,8 @@
 
 import h5wasm from 'h5wasm';
 import { InferenceSession, Tensor, env } from 'onnxruntime-web';
-import { IVFPQ, SearchResults } from '@cytoverse/ivfpq';
+import { IVFPQ, SearchResults } from './ivfpq';
+import { UserIVFPQ } from './userIvfpq';
 
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50;
@@ -23,7 +24,7 @@ interface ModelInfo {
   genes: string[];
   embeddingSession: InferenceSession;
   mappingSession: InferenceSession;
-  ivfpq: IVFPQ;
+  ivfpq: IVFPQ | UserIVFPQ;
 }
 
 interface StartMessage {
@@ -31,6 +32,7 @@ interface StartMessage {
   modelID: string;
   modelsURL: string;
   useUserIndex: boolean;
+  userIndexId?: string;
   h5File: File;
   useWebGPU: boolean;
   labelIndices: Int16Array;
@@ -70,7 +72,6 @@ interface CellUpdate {
   label?: string;
   labelId?: number;
   confidence?: number;
-  trainVectorId?: number;
 }
 
 interface CellBatchUpdate {
@@ -109,20 +110,19 @@ let model: ModelInfo | null = null;
 // let labelIndices: Int16Array | null = null;
 
 // Handle messages from main thread
-self.addEventListener(
-  'message',
-  async function (event: MessageEvent<StartMessage>) {
-    if (event.data.type === 'start') {
-      start(
-        event.data.modelID,
-        event.data.modelsURL,
-        event.data.h5File,
-        event.data.useWebGPU,
-        event.data.labelIndices
-      );
-    }
+self.addEventListener('message', async function (event: MessageEvent<StartMessage>) {
+  if (event.data.type === 'start') {
+    start(
+      event.data.modelID,
+      event.data.modelsURL,
+      event.data.h5File,
+      event.data.useWebGPU,
+      event.data.labelIndices,
+      event.data.useUserIndex,
+      event.data.userIndexId
+    );
   }
-);
+});
 
 /**
  * Initialize model and IVFPQ components
@@ -130,7 +130,9 @@ self.addEventListener(
 async function instantiateModel(
   modelsURL: string,
   modelID: string,
-  useWebGPU: boolean
+  useWebGPU: boolean,
+  useUserIndex: boolean = false,
+  userIndexId?: string
 ): Promise<ModelInfo> {
   console.log(`Instantiating model ${modelID} from ${modelsURL}`);
   // self.postMessage({ type: 'status', message: 'Downloading model...' } as StatusMessage)
@@ -223,11 +225,23 @@ async function instantiateModel(
   );
   console.log('Mapper Output names', mappingSession.outputNames);
 
-  // Load IVFPQ system
+  // Load IVFPQ or UserIVFPQ system
+  let ivfpq: IVFPQ | UserIVFPQ;
   const ivfpqBasePath = `${modelsURL}/${modelID}/ivfpq`;
-  const ivfpq = new IVFPQ(ivfpqBasePath);
-  await ivfpq.load();
-  console.log('IVFPQ system loaded successfully');
+  if (useUserIndex && userIndexId) {
+    ivfpq = new UserIVFPQ(
+      ivfpqBasePath,
+      NUM_PARTITIONS_TO_SEARCH,
+      NUM_NEAREST_NEIGHBORS
+    );
+    await (ivfpq as UserIVFPQ).loadUserIndex(userIndexId);
+    console.log('UserIVFPQ system loaded successfully');
+  } else {
+    const ivfpqBasePath = `${modelsURL}/${modelID}/ivfpq`;
+    ivfpq = new IVFPQ(ivfpqBasePath, NUM_PARTITIONS_TO_SEARCH, NUM_NEAREST_NEIGHBORS);
+    await ivfpq.load();
+    console.log('IVFPQ system loaded successfully');
+  }
 
   return { modelID, genes, embeddingSession, mappingSession, ivfpq };
 }
@@ -237,9 +251,7 @@ async function instantiateModel(
  */
 function getCellNames(annData: H5File): string[] {
   if (!annData.keys().includes('obs')) {
-    throw new Error(
-      'Unable to find cell names: Missing "obs" group in h5ad file'
-    );
+    throw new Error('Unable to find cell names: Missing "obs" group in h5ad file');
   }
 
   const obs = annData.get('obs');
@@ -276,15 +288,11 @@ function getCellNames(annData: H5File): string[] {
     }
 
     throw new Error(
-      `Unable to find cell names in obs group. Available keys: ${obsKeys.join(
-        ', '
-      )}`
+      `Unable to find cell names in obs group. Available keys: ${obsKeys.join(', ')}`
     );
   }
 
-  throw new Error(
-    'Unable to find cell names: obs is neither Dataset nor Group'
-  );
+  throw new Error('Unable to find cell names: obs is neither Dataset nor Group');
 }
 
 /**
@@ -300,9 +308,7 @@ function validateGeneSymbols(geneArray: string[]): boolean {
  */
 function getSampleGenes(annData: H5File): string[] {
   if (!annData.keys().includes('var')) {
-    throw new Error(
-      'Unable to find gene names: Missing "var" group in h5ad file'
-    );
+    throw new Error('Unable to find gene names: Missing "var" group in h5ad file');
   }
 
   const varData = annData.get('var');
@@ -350,12 +356,8 @@ function getSampleGenes(annData: H5File): string[] {
     if (varKeys.length > 0) {
       try {
         const firstKey = varKeys[0];
-        const potentialGenes = (varGroup.get(firstKey) as H5DataSet)
-          .value as string[];
-        if (
-          Array.isArray(potentialGenes) &&
-          validateGeneSymbols(potentialGenes)
-        ) {
+        const potentialGenes = (varGroup.get(firstKey) as H5DataSet).value as string[];
+        if (Array.isArray(potentialGenes) && validateGeneSymbols(potentialGenes)) {
           console.warn('Falling back to using var index as gene names');
           return potentialGenes;
         }
@@ -367,15 +369,11 @@ function getSampleGenes(annData: H5File): string[] {
     }
 
     throw new Error(
-      `Unable to find gene names in var group. Available keys: ${varKeys.join(
-        ', '
-      )}`
+      `Unable to find gene names in var group. Available keys: ${varKeys.join(', ')}`
     );
   }
 
-  throw new Error(
-    'Unable to find gene names: var is neither Dataset nor Group'
-  );
+  throw new Error('Unable to find gene names: var is neither Dataset nor Group');
 }
 
 /**
@@ -564,10 +562,7 @@ function fillBatchData(
       let sampleExpression: number[] | null = null;
       if (data.shape.length === 1) {
         sampleExpression = data.slice([
-          [
-            cellIndex * sampleGenes.length,
-            (cellIndex + 1) * sampleGenes.length,
-          ],
+          [cellIndex * sampleGenes.length, (cellIndex + 1) * sampleGenes.length],
         ]) as number[];
       } else if (data.shape.length === 2) {
         sampleExpression = data.slice([
@@ -580,8 +575,7 @@ function fillBatchData(
       for (let geneIndex = 0; geneIndex < sampleGenes.length; geneIndex++) {
         const sampleIndex = inflationIndices[geneIndex];
         if (sampleIndex !== -1) {
-          inflatedBatchData[batchOffset + sampleIndex] =
-            sampleExpression[geneIndex];
+          inflatedBatchData[batchOffset + sampleIndex] = sampleExpression[geneIndex];
         }
       }
     }
@@ -599,13 +593,11 @@ async function labelCells(
 ): Promise<{
   labelIds: number[];
   confidences: number[];
-  trainVectorIds: number[];
   partitionIds: Uint16Array;
   pqCodes: Uint8Array[];
 }> {
   const labelIds: number[] = [];
   const confidences: number[] = [];
-  const trainVectorIds: number[] = [];
   const partitionIds: Uint16Array = new Uint16Array(batchSize);
   const pqCodes: Uint8Array[] = new Array(batchSize);
 
@@ -619,16 +611,7 @@ async function labelCells(
       }
 
       // Search using IVFPQ with optional artifact retention
-      const searchResults: SearchResults = await model!.ivfpq.search(
-        queryVector,
-        {
-          n_probe: NUM_PARTITIONS_TO_SEARCH,
-          k: NUM_NEAREST_NEIGHBORS,
-        }
-      );
-
-      const nearestTrainVectorId =
-        searchResults.indices.length > 0 ? searchResults.indices[0] : -1;
+      const searchResults: SearchResults = await model!.ivfpq.search(queryVector);
 
       // Compute consensus label
       let consensusLabelId = -1;
@@ -637,9 +620,11 @@ async function labelCells(
       if (searchResults.indices.length > 0 && labelIndices) {
         const labelVotes: { [labelId: number]: number } = {};
 
-        for (const trainVectorId of searchResults.indices) {
-          if (trainVectorId !== -1 && trainVectorId < labelIndices.length) {
-            const labelId = labelIndices[trainVectorId];
+        // UserIVFPQ returns label indices directly, IVFPQ returns train vector indices
+        // Both work with the same labelIndices array passed from baseRef
+        for (const indexValue of searchResults.indices) {
+          if (indexValue !== -1 && indexValue < labelIndices.length) {
+            const labelId = labelIndices[indexValue];
             if (labelId >= 0) {
               labelVotes[labelId] = (labelVotes[labelId] || 0) + 1;
             }
@@ -659,19 +644,18 @@ async function labelCells(
         }
       }
 
-      trainVectorIds.push(nearestTrainVectorId);
       labelIds.push(consensusLabelId);
       confidences.push(consensusConfidence);
 
       // Additional artifacts to create a user index
-      partitionIds[i] = searchResults.partitionId
+      partitionIds[i] = searchResults.partitionId;
       pqCodes[i] = searchResults.pqCode;
     } catch (error) {
       console.error(`Error processing vector ${i}:`, error);
     }
   }
 
-  return { labelIds, confidences, trainVectorIds, partitionIds, pqCodes };
+  return { labelIds, confidences, partitionIds, pqCodes };
 }
 
 /**
@@ -682,11 +666,11 @@ async function start(
   modelsURL: string,
   h5File: File,
   useWebGPU: boolean,
-  labelIndices: Int16Array
+  labelIndices: Int16Array,
+  useUserIndex: boolean = false,
+  userIndexId?: string
 ): Promise<void> {
-  console.log(
-    `Starting unified worker for model ${modelID} with file ${h5File.name}`
-  );
+  console.log(`Starting unified worker for model ${modelID} with file ${h5File.name}`);
 
   self.postMessage({
     type: 'status',
@@ -699,7 +683,13 @@ async function start(
   try {
     // Load model if needed
     if (!model || model.modelID !== modelID) {
-      model = await instantiateModel(modelsURL, modelID, useWebGPU);
+      model = await instantiateModel(
+        modelsURL,
+        modelID,
+        useWebGPU,
+        useUserIndex,
+        userIndexId
+      );
     }
 
     // Mount h5 file
@@ -754,10 +744,7 @@ async function start(
     }
 
     const { isSparse, data, indices, indptr } = rawCountsData;
-    const inflationIndices = precomputeInflationIndices(
-      model.genes,
-      sampleGenes
-    );
+    const inflationIndices = precomputeInflationIndices(model.genes, sampleGenes);
 
     self.postMessage({
       type: 'status',
@@ -768,12 +755,8 @@ async function start(
     const allPQCodes: Uint8Array[] = new Array(cellNames.length);
 
     // Process batches
-    for (
-      let batchStart = 0;
-      batchStart < cellNames.length;
-      batchStart += BATCH_SIZE
-    ) {
-      console.log(`Processing batch starting at cell ${batchStart}`);
+    for (let batchStart = 0; batchStart < cellNames.length; batchStart += BATCH_SIZE) {
+      // console.log(`Processing batch starting at cell ${batchStart}`);
       const batchEnd = Math.min(batchStart + BATCH_SIZE, cellNames.length);
       const currentBatchSize = batchEnd - batchStart;
 
@@ -816,31 +799,14 @@ async function start(
         ]);
       }
 
-      // Skip un-labelled updates to reduce overhead
-      // // Send unlabeled coordinates for immediate display
-      // const unlabeledBatch: CellUpdate[] = []
-      // for (let i = 0; i < currentBatchSize; i++) {
-      //   const cellIndex = batchStart + i
-      //   unlabeledBatch.push({
-      //     cellId: cellNames[cellIndex],
-      //     x: coordinates[i][0],
-      //     y: coordinates[i][1],
-      //   })
-      // }
-      // self.postMessage({
-      //   type: 'cell_batch_update',
-      //   cells: unlabeledBatch,
-      // } as CellBatchUpdate)
-
       // Label cells using IVFPQ
       const embeddingDim = embeddingResults.output.dims[1] as number;
-      const { labelIds, confidences, trainVectorIds, partitionIds, pqCodes } =
-        await labelCells(
-          embeddingResults.output.data as Float32Array,
-          currentBatchSize,
-          embeddingDim,
-          labelIndices
-        );
+      const { labelIds, confidences, partitionIds, pqCodes } = await labelCells(
+        embeddingResults.output.data as Float32Array,
+        currentBatchSize,
+        embeddingDim,
+        labelIndices
+      );
 
       // Retain artifacts for user index
       allPartitionIds.set(partitionIds, batchStart);
@@ -857,12 +823,11 @@ async function start(
             y: coordinates[i][1],
             labelId: labelIds[i],
             confidence: confidences[i],
-            trainVectorId: trainVectorIds[i],
           });
         }
       }
       if (labeledBatch.length > 0) {
-        console.log(`Sending batch of ${labeledBatch.length} labeled cells`);
+        // console.log(`Sending batch of ${labeledBatch.length} labeled cells`);
         self.postMessage({
           type: 'cell_batch_update',
           cells: labeledBatch,

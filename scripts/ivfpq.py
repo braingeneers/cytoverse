@@ -21,7 +21,7 @@ import json
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
-from .pq import PQ, PQDistance, create_pq_system
+from pq import PQ, PQDistance, create_pq_system
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 def _train_ivfpq(
     vectors: torch.Tensor,
     output_dir: Path,
-    n_partitions: int = None,
-    n_training_vectors: int = None,
+    n_partitions: int,
+    n_training_vectors: int,
     sample_training_vectors: bool = False,
     max_iterations: int = 100,
     pq_m: int = 16,
@@ -42,7 +42,7 @@ def _train_ivfpq(
     Args:
         vectors: All vectors to be indexed [N, d]
         output_dir: Directory to save artifacts (pq, centroids, partitions)
-        n_partitions: Number of partitions (default: sqrt(n_vectors))
+        n_partitions: Number of partitions
         n_training_vectors: Number of training vectors to use for k-means (default: all vectors)
         sample_training_vectors: Randomly sample training vectors instead of taking first n (default: False)
         max_iterations: Maximum k-means iterations
@@ -54,22 +54,13 @@ def _train_ivfpq(
     """
     N, d = vectors.shape
 
-    if n_partitions is None:
-        n_partitions = int(np.sqrt(N))
-        logger.info(
-            f"n_partitions not specified, using default: {n_partitions} (sqrt(N))"
-        )
-
-    if n_training_vectors:
-        if sample_training_vectors:
-            # Randomly sample n_training_vectors from the entire dataset
-            indices = torch.randperm(vectors.shape[0])[:n_training_vectors]
-            training_vectors = vectors[indices]
-        else:
-            # Take the first n_training_vectors
-            training_vectors = vectors[:n_training_vectors]
+    if sample_training_vectors:
+        # Randomly sample n_training_vectors from the entire dataset
+        indices = torch.randperm(vectors.shape[0])[:n_training_vectors]
+        training_vectors = vectors[indices]
     else:
-        training_vectors = vectors
+        # Take the first n_training_vectors
+        training_vectors = vectors[:n_training_vectors]
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -329,7 +320,10 @@ class IVFPQ(nn.Module):
         )
 
     def forward(
-        self, query_vector: torch.Tensor, partition_centroids: torch.Tensor, k: int
+        self,
+        query_vector: torch.Tensor,
+        partition_centroids: torch.Tensor,
+        k: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Perform coarse centroid search.
@@ -337,7 +331,7 @@ class IVFPQ(nn.Module):
         Args:
             query_vector: Query vector of shape [d]
             partition_centroids: Partition centroids of shape [n_partitions, d]
-            k: Number of nearest centroids to return
+            k: Number of nearest centroids to return (as tensor for ONNX compatibility)
 
         Returns:
             Tuple of (top_k_indices, top_k_distances)
@@ -345,7 +339,10 @@ class IVFPQ(nn.Module):
         distances = torch.cdist(query_vector.unsqueeze(0), partition_centroids).squeeze(
             0
         )
-        top_k_distances, top_k_indices = torch.topk(distances, k=k, largest=False)
+        # For ONNX export compatibility, keep k as tensor
+        top_k_distances, top_k_indices = torch.topk(
+            distances, k=k, largest=False
+        )
         return top_k_indices.to(torch.int32), top_k_distances
 
     @classmethod
@@ -353,8 +350,7 @@ class IVFPQ(nn.Module):
         cls,
         vectors: torch.Tensor,
         output_dir: Path,
-        n_partitions: int = None,
-        num_training_vectors: Optional[int] = None,
+        num_training_vectors: int,
         sample_training_vectors: bool = False,
         max_iterations: int = 100,
         pq_m: int = 16,
@@ -366,10 +362,14 @@ class IVFPQ(nn.Module):
         Args:
             vectors: All vectors to be indexed [N, d]
             output_dir: Directory to save artifacts
-            num_training_vectors: Number of training vectors to use for k-means (default: all vectors)
+            num_training_vectors: Number of training vectors to use for k-means
             sample_training_vectors: Randomly sample training vectors instead of taking first n (default: False)
             max_iterations: Number of k-means iterations
         """
+
+        # Rule of thumb... sqrt(N) for partitioning
+        n_partitions = int(np.sqrt(vectors.shape[0]))
+
         result = _train_ivfpq(
             vectors=vectors,
             output_dir=output_dir,
@@ -391,25 +391,51 @@ class IVFPQ(nn.Module):
         assert np.all(assignments < ivf.n_partitions)
 
         # Export ONNX model for the forward method
-        onnx_file = output_dir / "ivf_forward.onnx"
+        # Use a minimal class without internal parameters for clean export
+        class IVFCoarseSearch(nn.Module):
+            def forward(self, query_vector: torch.Tensor, partition_centroids: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                distances = torch.cdist(query_vector.unsqueeze(0), partition_centroids).squeeze(0)
+                top_k_distances, top_k_indices = torch.topk(distances, k=k, largest=False)
+                return top_k_indices.to(torch.int32), top_k_distances
+        
+        onnx_file = output_dir / "ivf_coarse.onnx"
         dummy_query = torch.randn(vectors.shape[1])
+        ivf_export = IVFCoarseSearch()
+        
+        # Create dummy centroids with a different size to help ONNX understand it's dynamic
+        dummy_centroids = torch.randn(100, vectors.shape[1])  # Use different size than actual
+        
+        # Try export without explicit dynamic_axes first
         torch.onnx.export(
-            ivf,
+            ivf_export,
             (
                 dummy_query,
-                ivf.centroids.data,
-                4,
-            ),  # Example inputs: query, partition_centroids, k
+                dummy_centroids,
+                torch.tensor(4, dtype=torch.int32),
+            ),
             onnx_file,
             export_params=True,
             opset_version=11,
             do_constant_folding=True,
             input_names=["query_vector", "partition_centroids", "k"],
             output_names=["top_k_indices", "top_k_distances"],
-            # dynamic_axes={
-            #     "query_vector": {0: "d"},
-            # },
         )
+        
+        # Post-process the ONNX model to make partition_centroids dynamic
+        import onnx
+        model = onnx.load(str(onnx_file))
+        
+        # Find partition_centroids input and make first dimension dynamic
+        for inp in model.graph.input:
+            if inp.name == 'partition_centroids':
+                # Clear the fixed dimension and set it as dynamic
+                inp.type.tensor_type.shape.dim[0].ClearField('dim_value')
+                inp.type.tensor_type.shape.dim[0].dim_param = 'num_centroids'
+                break
+        
+        # Save the modified model
+        onnx.save(model, str(onnx_file))
+        logger.info("Modified ONNX model to have dynamic partition_centroids dimension")
 
         logger.info(f"Build completed of IVFPQ model into {output_dir}")
 
@@ -419,7 +445,7 @@ class IVFPQ(nn.Module):
         model_path: Path,
         n_probe: int = 4,
         k: int = 50,
-    ) -> Tuple[List[int], List[float]]:
+    ) -> Tuple[List[int], List[float], set]:
         """
         Search for nearest neighbors using the trained IVF index.
 
@@ -436,7 +462,9 @@ class IVFPQ(nn.Module):
         assert self.pq is not None, "PQ must be initialized before searching"
 
         # Step 1: Coarse centroid search
-        top_partitions, _ = self.forward(query_vector, self.centroids.data, n_probe)
+        top_partitions, _ = self.forward(
+            query_vector, self.centroids.data, torch.tensor(n_probe, dtype=torch.int32)
+        )
 
         # Step 2: Search each partition using PQ
         all_candidates = []

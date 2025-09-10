@@ -2,8 +2,10 @@
   "$schema": "https://json.schemastore.org/prettierrc",
   "trailingComma": "es5",
   "singleQuote": true,
-  "printWidth": 80,
+  "printWidth": 88,
   "tabWidth": 2,
   "useTabs": false,
-  "bracketSpacing": true
+  "bracketSpacing": true,
+  "vueIndentScriptAndStyle": false,
+  "singleAttributePerLine": false
 }

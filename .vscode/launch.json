@@ -22,6 +22,7 @@
       "program": "${workspaceFolder}/scripts/scimilarity_to_embeddings.py",
       "console": "integratedTerminal",
       "args": [
+        "embeddings",
         "data/models/scimilarity/model_v1.1/cellsearch",
         "data/references/dev",
         "--labels",
@@ -167,14 +168,11 @@
       "timeout": 30000,
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js",
-        "${workspaceFolder}/ivfpq/typescript/dist/**/*.js"
       ],
       "sourceMapPathOverrides": {
         "webpack:///./src/*": "${workspaceFolder}/src/*",
         "webpack:///./*": "${workspaceFolder}/*",
         "webpack:///src/*": "${workspaceFolder}/src/*",
-        "../src/*": "${workspaceFolder}/ivfpq/typescript/src/*",
-        "../../ivfpq/typescript/src/*": "${workspaceFolder}/ivfpq/typescript/src/*"
       },
       "sourceMaps": true
     }

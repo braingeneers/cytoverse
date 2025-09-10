@@ -19,17 +19,18 @@
     "pull-model": "rsync -avh --delete rcurrie@hgwdev.gi.ucsc.edu:~/cytoverse/public/models/scimilarity/ public/models/scimilarity/"
   },
   "dependencies": {
-    "@cytoverse/ivfpq": "workspace:*",
+    "@mdi/font": "^7.4.47",
     "csv-parse": "^6.1.0",
     "h5wasm": "^0.8.1",
     "idb": "^8.0.3",
     "onnxruntime-web": "^1.22.0",
     "regl-scatterplot": "^1.14.1",
     "vue": "^3.5.18",
-    "vuetify": "^3.7.7",
-    "@mdi/font": "^7.4.47"
+    "vuetify": "^3.7.7"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "@eslint/js": "^9.25.0",
     "@playwright/test": "^1.53.1",
     "@types/node": "^24.0.3",

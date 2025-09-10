@@ -9,6 +9,11 @@ This module tests the core functionality of the PQ implementation including:
 - ONNX model export for browser-side inference
 - Optimized distance computation
 """
+import sys
+from pathlib import Path
+
+# Add scripts directory to path for ivfpq import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 import pytest
 import torch
@@ -17,7 +22,7 @@ from pathlib import Path
 import json
 import onnxruntime as ort
 
-from ivfpq.pq import (
+from pq import (
     PQ,
     PQDistance,
     create_pq_system,

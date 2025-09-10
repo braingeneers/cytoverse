@@ -8,7 +8,6 @@
     "sourceMap": true,
     "rootDirs": [
       "src",
-      "ivfpq/typescript/src"
     ],
     "lib": [
       "ES2021",
@@ -28,16 +27,4 @@
       "@webgpu/types"
     ]
   },
-  "files": [],
-  "references": [
-    // {
-    //   "path": "./tsconfig.node.json"
-    // },
-    // {
-    //   "path": "./tsconfig.app.json"
-    // },
-    {
-      "path": "./ivfpq/typescript"
-    }
-  ]
 }
