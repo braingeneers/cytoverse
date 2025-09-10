@@ -475,7 +475,8 @@ const selectedCategory = ref('');
 const baseRef = {
   labels: ref<string[]>([]),
   labelIndices: ref<Int16Array>(new Int16Array()),
-  labelIndicesSubset: ref<Int16Array>(new Int16Array()), // Subset for plotted cells
+  // Subset for plotted cells so we can append query
+  labelIndicesSubset: ref<Int16Array>(new Int16Array()),
   x: ref<Float32Array>(new Float32Array()),
   y: ref<Float32Array>(new Float32Array()),
 };
@@ -863,54 +864,9 @@ const loadUserIndexData = async (userIndexId: string) => {
     throw new Error('User index not found');
   }
 
-  // // Load metadata from base model for normalization parameters
-  // const metadataResponse = await fetch(
-  //   `${sitePath}/models/${baseModelId}/pumap/metadata.json`
-  // );
-  // const metadata = await metadataResponse.json();
-
-  // // Store normalization parameters
-  // xCenter.value = metadata.xCenter || 0;
-  // yCenter.value = metadata.yCenter || 0;
-  // maxRange.value = metadata.maxRange || 1;
-
-  // // Use the normalized user index coordinates directly
-  // // They are already normalized to [0,1] range when saved
   userRef.x.value = userIndex.coordinates.x;
   userRef.y.value = userIndex.coordinates.y;
   userRef.labelIndices.value = new Int16Array(userIndex.labelIndices);
-  // categoryLabels.value = userIndex.labels;
-
-  // Create category data by extracting label indices from all partitions
-  // The coordinates are stored in the same order as they were originally processed
-  // So we need to reconstruct the category array in the same order
-  const categoryIndices = new Int16Array(userIndex.cellCount);
-  const cellToLabel = new Map<number, number>();
-
-  // Build a map from original cell index to label index
-  for (const partition of Object.values(userIndex.partitions)) {
-    for (let i = 0; i < partition.cellIndices.length; i++) {
-      cellToLabel.set(partition.cellIndices[i], partition.labelIndices[i]);
-    }
-  }
-
-  console.log(`Cell to label mapping size: ${cellToLabel.size}`);
-
-  // Fill the category array in the same order as coordinates were stored
-  for (let i = 0; i < userIndex.cellCount; i++) {
-    const labelIndex = cellToLabel.get(i);
-    if (labelIndex !== undefined) {
-      categoryIndices[i] = labelIndex;
-    } else {
-      console.warn(`No label found for cell index ${i}, using 0`);
-      categoryIndices[i] = 0;
-    }
-  }
-
-  // baseRef.labelIndices.value = [
-  //   ...baseRef.labelIndices.value,
-  //   ...categoryIndices,
-  // ];
 
   // Force scatter plot update
   setTimeout(() => {
@@ -939,7 +895,7 @@ const loadReferenceData = async () => {
     const metadata = await metadataResponse.json();
 
     // Get category labels from metadata
-    const labels: string[] = metadata.categories?.[selectedCategory.value] as string[];
+    baseRef.labels.value = metadata.categories?.[selectedCategory.value] as string[];
 
     // Store normalization parameters for query data
     xCenter.value = metadata.xCenter || 0;
@@ -956,48 +912,57 @@ const loadReferenceData = async () => {
     ]);
 
     // Check if all responses are successful
-    if (!xResponse.ok) throw new Error(`Failed to fetch x.bin: ${xResponse.status}`);
-    if (!yResponse.ok) throw new Error(`Failed to fetch y.bin: ${yResponse.status}`);
-    if (!labelIndicesResponse.ok)
+    if (!xResponse.ok || !yResponse.ok || !labelIndicesResponse.ok) {
       throw new Error(
-        `Failed to fetch ${selectedCategory.value}.bin: ${labelIndicesResponse.status}`
+        `Failed to fetch model data: ${xResponse.status}, ${yResponse.status}, ${labelIndicesResponse.status}`
       );
+    }
 
+    // Get array buffers from the responses
     const [xBuffer, yBuffer, labelIndicesBuffer] = await Promise.all([
       xResponse.arrayBuffer(),
       yResponse.arrayBuffer(),
       labelIndicesResponse.arrayBuffer(),
     ]);
 
-    // Convert binary buffers to typed arrays
-    console.log(
-      `Buffer sizes: x=${xBuffer.byteLength}, y=${yBuffer.byteLength}, labelIndices=${labelIndicesBuffer.byteLength}`
-    );
-
-    // Check if buffer sizes are valid
-    if (xBuffer.byteLength % 4 !== 0) {
-      throw new Error(`X buffer size ${xBuffer.byteLength} is not a multiple of 4`);
-    }
-    if (yBuffer.byteLength % 4 !== 0) {
-      throw new Error(`Y buffer size ${yBuffer.byteLength} is not a multiple of 4`);
-    }
-    if (labelIndicesBuffer.byteLength % 2 !== 0) {
+    // Check if buffer sizes appear valid
+    if (
+      xBuffer.byteLength % 4 !== 0 ||
+      yBuffer.byteLength % 4 !== 0 ||
+      labelIndicesBuffer.byteLength % 2 !== 0
+    ) {
       throw new Error(
-        `LabelIndices buffer size ${labelIndicesBuffer.byteLength} is not a multiple of 2`
+        `Invalid buffer sizes: x=${xBuffer.byteLength}, y=${yBuffer.byteLength}, labelIndices=${labelIndicesBuffer.byteLength}`
       );
     }
 
+    // Create typed arrays from the buffers that will NOT be sent to workers
     baseRef.x.value = new Float32Array(xBuffer);
     baseRef.y.value = new Float32Array(yBuffer);
-    baseRef.labelIndices.value = new Int16Array(labelIndicesBuffer);
-    // Create an independent copy with its own ArrayBuffer for the subset
-    const subset = baseRef.labelIndices.value.slice(0, baseRef.x.value.length);
-    baseRef.labelIndicesSubset.value = new Int16Array(subset.length);
-    baseRef.labelIndicesSubset.value.set(subset); // Copy the data
-    baseRef.labels.value = labels;
+
+    // Create ArrayBuffer based view for label indices as source
+    const sourceLabelIndices = new Int16Array(labelIndicesBuffer);
+
+    // Create a shared typed array for label indices to transfer to worker
+    if (typeof SharedArrayBuffer === 'undefined') {
+      throw new Error(
+        'SharedArrayBuffer is not available. Ensure cross-origin isolation.'
+      );
+    }
+    const sharedLabelIndicesBuffer = new SharedArrayBuffer(
+      labelIndicesBuffer.byteLength
+    );
+    baseRef.labelIndices.value = new Int16Array(sharedLabelIndicesBuffer);
+    baseRef.labelIndices.value.set(sourceLabelIndices);
+
+    // Create a shared view of only the plotted cells for scatter plot
+    // so that we can append to these the query cells
+    baseRef.labelIndicesSubset.value = new Int16Array(
+      baseRef.labelIndices.value.slice(0, baseRef.x.value.length)
+    );
 
     console.log(
-      `Loaded reference data: ${baseRef.x.value.length} points, ${labels.length} label indices`
+      `Loaded reference data: ${baseRef.x.value.length} points, ${baseRef.labels.value.length} label indices`
     );
 
     // Now load the user index data if applicable
@@ -1070,12 +1035,12 @@ const start = async () => {
         userIndexId: useUserIndex ? selectedModel.value : null,
         h5File: selectedFile.value,
         useWebGPU: useWebGPU.value,
-        labelIndices: baseRef.labelIndices.value, // Always pass baseRef labels
-      },
-      [
-        // Objects listed in the second argument are transferred, not copied
-        baseRef.labelIndices.value.buffer,
-      ]
+        labelIndices: baseRef.labelIndices.value,
+      }
+      // [
+      //   // Objects listed in the second argument are transferred, not copied
+      //   baseRef.labelIndices.value.buffer,
+      // ]
     );
   }
 };
@@ -1280,10 +1245,10 @@ watch(selectedModel, async () => {
   cellIdToIndex.clear();
 
   // Clear training data to refresh scatter plot
-  baseRef.x.value = new Float32Array();
-  baseRef.y.value = new Float32Array();
-  baseRef.labelIndices.value = new Int16Array();
-  baseRef.labels.value = [];
+  // baseRef.x.value = new Float32Array();
+  // baseRef.y.value = new Float32Array();
+  // baseRef.labelIndices.value = new Int16Array();
+  // baseRef.labels.value = [];
 
   // Load categories for the new model
   await loadCategoriesFromMetadata();

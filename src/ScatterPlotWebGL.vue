@@ -33,6 +33,9 @@ interface Props {
   queryLabelIndices: Int16Array;
 }
 
+// Point size for base reference, user reference, query respectively
+const POINT_SIZES = [1, 5, 10];
+
 const props = defineProps<Props>();
 
 // Template refs
@@ -142,7 +145,7 @@ const initializeScatterplot = () => {
     width: containerRef.value.clientWidth,
     height: containerRef.value.clientHeight,
     // Use a range for point sizes: base reference, user reference, query
-    pointSize: [1, 5, 10],
+    pointSize: POINT_SIZES,
     // performanceMode: true, // Enable performance mode for better rendering
   });
 
@@ -185,16 +188,8 @@ const updateColumnData = () => {
     return null;
   }
   return {
-    x: new Float32Array([
-      ...props.baseRefX,
-      ...props.userRefX,
-      ...props.queryX,
-    ]),
-    y: new Float32Array([
-      ...props.baseRefY,
-      ...props.userRefY,
-      ...props.queryY,
-    ]),
+    x: new Float32Array([...props.baseRefX, ...props.userRefX, ...props.queryX]),
+    y: new Float32Array([...props.baseRefY, ...props.userRefY, ...props.queryY]),
     valueA: [
       ...props.baseRefLabelIndices,
       ...props.userRefLabelIndices,
