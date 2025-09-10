@@ -78,12 +78,12 @@ describe('h5wasm H5AD File Loading', () => {
         const dataDataset = xGroup.get('data') as Dataset
         expect(dataDataset).toBeDefined()
         expect(dataDataset.shape).toBeDefined()
-        expect(dataDataset.shape.length).toBeGreaterThan(0)
+        expect(dataDataset.shape?.length).toBeGreaterThan(0)
       }
     } else {
       const xDataset = xEntity as Dataset
       expect(xDataset.shape).toBeDefined()
-      expect(xDataset.shape.length).toBe(2)
+      expect(xDataset.shape?.length).toBe(2)
     }
     
     const obsGroup = file.get('obs')
@@ -133,16 +133,19 @@ describe('h5wasm H5AD File Loading', () => {
       const indptrDataset = xGroup.get('indptr') as Dataset
       const indicesDataset = xGroup.get('indices') as Dataset
       
-      if (indptrDataset && indicesDataset) {
+      if (indptrDataset && indicesDataset && indptrDataset.shape && indicesDataset.value) {
         nCells = indptrDataset.shape[0] - 1
         const indicesMax = Math.max(...Array.from(indicesDataset.value as Float32Array))
         nGenes = indicesMax + 1
       }
     } else {
-      const xDataset = xEntity as Dataset
-      const shape = xDataset.shape
-      nCells = shape[0]
-      nGenes = shape[1]
+      const xDataset = xEntity as Dataset;
+      if (xDataset.shape) {
+        nCells = xDataset.shape[0];
+        nGenes = xDataset.shape[1];
+      } else {
+        throw new Error('xDataset.shape is null');
+      }
     }
     
     expect(nCells).toBeGreaterThan(0)

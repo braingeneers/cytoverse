@@ -133,7 +133,7 @@ export class UserIVFPQ {
       if (!partition) {
         throw new Error(`Partition ${partitionId} not found in user index`);
       }
-      if (partition.size === 0) {
+      if (partition.pqCodeCount === 0) {
         throw new Error(`Partition ${partitionId} is empty`);
       }
 

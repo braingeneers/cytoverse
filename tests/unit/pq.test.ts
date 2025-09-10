@@ -132,7 +132,7 @@ describe('PQDistance', () => {
         2,
         2, // Vector 2
       ]);
-      const pqCodes = new Int32Array(pqCodesUint8);
+      const pqCodes = new Uint8Array(pqCodesUint8);
 
       const results = await pqDistance.search(queryResidual, pqCodes);
 
@@ -147,7 +147,7 @@ describe('PQDistance', () => {
 
       const queryResidual = new Float32Array([0.1, 0.2, 0.3, 0.4]);
       const pqCodesUint8 = new Uint8Array([0, 1]);
-      const pqCodes = new Int32Array(pqCodesUint8);
+      const pqCodes = new Uint8Array(pqCodesUint8);
 
       await expect(pqDistance.search(queryResidual, pqCodes)).rejects.toThrow(
         'Distance model not loaded. Call loadModel() first.'
