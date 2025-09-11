@@ -589,7 +589,8 @@ async function labelCells(
   embeddings: Float32Array,
   batchSize: number,
   embeddingDim: number,
-  labelIndices: Int16Array
+  labelIndices: Int16Array,
+  useUserIndex: boolean
 ): Promise<{
   labelIds: number[];
   confidences: number[];
@@ -624,7 +625,7 @@ async function labelCells(
         // Both work with the same labelIndices array passed from baseRef
         for (const indexValue of searchResults.indices) {
           if (indexValue !== -1 && indexValue < labelIndices.length) {
-            const labelId = labelIndices[indexValue];
+            const labelId = useUserIndex ? indexValue : labelIndices[indexValue];
             if (labelId >= 0) {
               labelVotes[labelId] = (labelVotes[labelId] || 0) + 1;
             }
@@ -805,7 +806,8 @@ async function start(
         embeddingResults.output.data as Float32Array,
         currentBatchSize,
         embeddingDim,
-        labelIndices
+        labelIndices,
+        useUserIndex
       );
 
       // Retain artifacts for user index

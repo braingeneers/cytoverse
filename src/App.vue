@@ -460,6 +460,7 @@ const availableModels = ref<
     isUserIndex: boolean;
     baseModelId?: string;
     cellCount?: number;
+    category?: string;
   }[]
 >([]);
 const isRunning = ref(false);
@@ -808,6 +809,11 @@ const loadCategoriesFromMetadata = async () => {
       availableCategories.value = [selectedModelInfo.category || ''];
       selectedCategory.value = selectedModelInfo.category || '';
     } else {
+      if (!selectedModelInfo) {
+        availableCategories.value = [];
+        selectedCategory.value = '';
+        return;
+      }
       const baseModelId = selectedModelInfo.baseModelId;
       const metadataResponse = await fetch(
         `${sitePath}/models/${baseModelId}/pumap/metadata.json`

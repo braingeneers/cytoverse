@@ -31,27 +31,24 @@ export class UserIVFPQ {
    * Load a user index along with its base model
    */
   async loadUserIndex(userIndexId: string): Promise<void> {
-    await userIndexService.init(); // Ensure IndexedDB is initialized
-    this.baseIVFPQ = new IVFPQ(this.basePath, this.n_probe, this.k);
-
-    // Load the user index from IndexedDB
-    this.userIndex = await userIndexService.getUserIndex(userIndexId);
-    if (!this.userIndex) {
-      throw new Error(`User index ${userIndexId} not found`);
-    }
-
     // Load the base model (centroids, PQ codebooks, etc.)
-    await this.baseIVFPQ.load();
-
-    // Get reference components from base model
+    this.baseIVFPQ = new IVFPQ(this.basePath, this.n_probe, this.k);
     if (!this.baseIVFPQ) {
       throw new Error('BaseIVFPQ not loaded');
     }
+    await this.baseIVFPQ.load();
     const components = this.baseIVFPQ.getReferenceComponents();
     if (!components) {
       throw new Error('Base model not loaded');
     }
     const { centroids, d } = components;
+
+    // Load the user index from IndexedDB
+    await userIndexService.init(); // Ensure IndexedDB is initialized
+    this.userIndex = await userIndexService.getUserIndex(userIndexId);
+    if (!this.userIndex) {
+      throw new Error(`User index ${userIndexId} not found`);
+    }
 
     // Extract partition IDs that exist in user index
     const userPartitionIds = Object.keys(this.userIndex.partitions).map((id) =>
@@ -89,7 +86,7 @@ export class UserIVFPQ {
     }
 
     console.log(
-      `User index loaded: ${this.userIndex.name} with ${this.userIndex.cellCount} cells, ${numUserPartitions} partitions`
+      `User index loaded: ${this.userIndex.name} with ${this.userIndex.cellCount} cells, ${this.userCentroids.length} partitions`
     );
   }
 
@@ -98,7 +95,7 @@ export class UserIVFPQ {
    * This reimplements the search logic but uses user index partitions
    */
   async search(queryVector: Float32Array): Promise<SearchResults> {
-    if (!this.userIndex || !this.userCentroids || !this.userPartitions) {
+    if (!this.userIndex || !this.userCentroids) {
       throw new Error('User index not loaded');
     }
 
@@ -119,22 +116,14 @@ export class UserIVFPQ {
       this.userCentroids,
       this.n_probe
     );
-    const nearestPartition = partitionIds[0]; // Closest partition for artifacts
-
-    // PQ encode the query vector's residual to the partition for a user index
-    // Compute residual for nearest partition
-    const centroidOffset = nearestPartition * d;
-    const nearestResidual = new Float32Array(d);
-    for (let i = 0; i < d; i++) {
-      nearestResidual[i] = queryVector[i] - this.userCentroids[centroidOffset + i];
-    }
-    // Encode the residual
-    const artifactPqCode = await pqDistance.encode(nearestResidual);
 
     // Step 2: Search within each partition and collect all distances
     const allCandidates: Array<{ index: number; distance: number }> = [];
 
     for (const partitionId of partitionIds) {
+      if (!this.userPartitions) {
+        throw new Error('User partitions not loaded');
+      }
       const partition = this.userPartitions[partitionId];
       if (!partition) {
         throw new Error(`Partition ${partitionId} not found in user index`);
@@ -158,9 +147,8 @@ export class UserIVFPQ {
 
       // Convert local indices to global indices and add all distances
       for (let i = 0; i < partitionResults.indices.length; i++) {
-        const localIdx = partitionResults.indices[i];
         allCandidates.push({
-          index: localIdx,
+          index: this.userPartitions[partitionId].labelIndices[partitionResults.indices[i]],
           distance: partitionResults.distances[i],
         });
       }
@@ -173,8 +161,8 @@ export class UserIVFPQ {
     const result: SearchResults = {
       indices: topK.map((c) => c.index),
       distances: topK.map((c) => c.distance),
-      partitionId: nearestPartition,
-      pqCode: artifactPqCode,
+      partitionId: -1, // Not applicable here
+      pqCode: new Uint8Array(0), // Not applicable here
     };
 
     return result;
