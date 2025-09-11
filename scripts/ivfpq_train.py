@@ -184,8 +184,8 @@ def measure_recall(
     ivfpq = IVFPQ.load(model_path)
 
     # Select random indices for testing
-    total_vectors = vectors_tensor.shape[0]
-    test_indices = random.sample(range(total_vectors), min(n_queries, total_vectors))
+    num_vectors = vectors_tensor.shape[0]
+    test_indices = random.sample(range(num_vectors), min(n_queries, num_vectors))
 
     logger.info(
         f"\n=== Testing Self-Accuracy on {len(test_indices)} randomly selected vectors ==="

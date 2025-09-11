@@ -193,10 +193,8 @@ def _train_ivfpq(
         "n_partitions": n_partitions,
         "pq_m": pq_m,
         "pq_k": pq_k,
-        "total_vectors": N,
         "max_iterations": max_iterations,
         "inertia": float(kmeans.inertia_),
-        "partition_sizes": partition_stats,
         "centroids_shape": list(centroids.shape),
         "version": "residual-1.1",
     }

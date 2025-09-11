@@ -1,9 +1,10 @@
 /**
- * IVFPQ (Inverted File with Product Quantization) implementation for approximate nearest neighbor search.
+ * IVFPQ (Inverted File with Product Quantization) for approximate vectore
+ * nearest neighbor search over http in the browser or Node.js
  *
  * - Uses pre-trained IVFPQ models from the Python pipeline to perform ANN search
  * - Combines IVF partitioning with PQ compression
- * - Supports using ONNX models for distance computation with residual vectors.
+ * - Supports using ONNX models for coarse centroid and distance computation
  * - Supports both HTTP and file system access for model artifacts.
  * - Support using a previously searched index as a 'user generated' index
  */
@@ -19,11 +20,6 @@ export interface IVFPQMetadata {
   n_partitions: number;
   pq_m: number;
   pq_k: number;
-  total_vectors: number;
-  max_iterations: number;
-  inertia: number;
-  partition_sizes: { [key: string]: number };
-  centroids_shape: number[];
   version: string;
 }
 

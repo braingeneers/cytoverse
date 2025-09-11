@@ -63,7 +63,6 @@ describe('PQDistance', () => {
         codebooks_shape: [2, 4, 4],
         codebooks_size: 32,
         training_samples: 1000,
-        max_iterations: 100,
         version: '1.0',
       };
 
@@ -100,7 +99,6 @@ describe('PQDistance', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 16,
         training_samples: 1000,
-        max_iterations: 100,
         version: '1.0',
       };
       const mockCodebooks = new Float32Array(16);
@@ -166,7 +164,6 @@ describe('PQDistance', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 16,
         training_samples: 1000,
-        max_iterations: 100,
         version: '1.0',
       };
       const mockCodebooks = new Float32Array(16);
@@ -219,7 +216,6 @@ describe('PQDistance', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 16,
         training_samples: 1000,
-        max_iterations: 100,
         version: '1.0',
       };
       const mockCodebooks = new Float32Array(16);
@@ -265,7 +261,6 @@ describe('PQDistance', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 32,
         training_samples: 1000,
-        max_iterations: 100,
         version: '1.0',
       };
 

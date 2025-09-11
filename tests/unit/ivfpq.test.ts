@@ -46,11 +46,6 @@ describe('IVFPQ System', () => {
         n_partitions: 4,
         pq_m: 16,
         pq_k: 256,
-        total_vectors: 1000,
-        max_iterations: 100,
-        inertia: 1234.5,
-        partition_sizes: { '0': 250, '1': 250, '2': 250, '3': 250 },
-        centroids_shape: [4, 128],
         version: 'residual-1.1',
       };
 
@@ -64,7 +59,6 @@ describe('IVFPQ System', () => {
         codebooks_shape: [16, 256, 8],
         codebooks_size: 16 * 256 * 8,
         training_samples: 10000,
-        max_iterations: 100,
         version: 'residual-1.0',
       };
 
@@ -144,11 +138,6 @@ describe('IVFPQ System', () => {
         n_partitions: 2,
         pq_m: 2,
         pq_k: 4,
-        total_vectors: 10,
-        max_iterations: 10,
-        inertia: 10.0,
-        partition_sizes: { '0': 5, '1': 5 },
-        centroids_shape: [2, 4],
         version: 'residual-1.1',
       };
 
@@ -161,7 +150,6 @@ describe('IVFPQ System', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 2 * 4 * 2,
         training_samples: 100,
-        max_iterations: 10,
         version: 'residual-1.0',
       };
 
@@ -286,11 +274,6 @@ describe('IVFPQ System', () => {
         n_partitions: 2,
         pq_m: 2,
         pq_k: 4,
-        total_vectors: 0,
-        max_iterations: 10,
-        inertia: 0,
-        partition_sizes: { '0': 0, '1': 0 },
-        centroids_shape: [2, 4],
         version: 'residual-1.1',
       };
 
@@ -303,7 +286,6 @@ describe('IVFPQ System', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 2 * 4 * 2,
         training_samples: 100,
-        max_iterations: 10,
         version: 'residual-1.0',
       };
 
@@ -401,11 +383,6 @@ describe('IVFPQ System', () => {
         n_partitions: 3,
         pq_m: 2,
         pq_k: 4,
-        total_vectors: 15,
-        max_iterations: 10,
-        inertia: 10.0,
-        partition_sizes: { '0': 5, '1': 5, '2': 5 },
-        centroids_shape: [3, 4],
         version: 'residual-1.1',
       };
 
@@ -418,7 +395,6 @@ describe('IVFPQ System', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 2 * 4 * 2,
         training_samples: 100,
-        max_iterations: 10,
         version: 'residual-1.0',
       };
 
@@ -573,11 +549,6 @@ describe('IVFPQ System', () => {
         n_partitions: 2,
         pq_m: 2,
         pq_k: 4,
-        total_vectors: 10,
-        max_iterations: 10,
-        inertia: 10.0,
-        partition_sizes: { '0': 5, '1': 5 },
-        centroids_shape: [2, 4],
         version: 'residual-1.1',
       };
 
@@ -590,7 +561,6 @@ describe('IVFPQ System', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 2 * 4 * 2,
         training_samples: 100,
-        max_iterations: 10,
         version: 'residual-1.0',
       };
 
@@ -717,11 +687,6 @@ describe('IVFPQ System', () => {
         n_partitions: 1,
         pq_m: 2,
         pq_k: 4,
-        total_vectors: 10,
-        max_iterations: 10,
-        inertia: 1.0,
-        partition_sizes: { '0': 10 },
-        centroids_shape: [1, 4],
         version: 'residual-1.1',
       };
 
@@ -734,7 +699,6 @@ describe('IVFPQ System', () => {
         codebooks_shape: [2, 4, 2],
         codebooks_size: 2 * 4 * 2,
         training_samples: 100,
-        max_iterations: 10,
         version: 'residual-1.0',
       };
 

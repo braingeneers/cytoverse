@@ -22,7 +22,6 @@ export interface PQMetadata {
   codebooks_shape: number[];
   codebooks_size: number;
   training_samples: number;
-  max_iterations: number;
   version: string;
 }
 
@@ -48,8 +47,7 @@ export class PQDistance {
 
   constructor(basePath: string) {
     this.basePath = basePath;
-    this.useHttp =
-      basePath.startsWith('http://') || basePath.startsWith('https://');
+    this.useHttp = basePath.startsWith('http://') || basePath.startsWith('https://');
   }
 
   /**
@@ -99,8 +97,7 @@ export class PQDistance {
     this.codebooks = new Float32Array(buffer);
 
     // Validate the size matches expected dimensions
-    const expectedSize =
-      this.metadata!.m * this.metadata!.k * this.metadata!.d_sub;
+    const expectedSize = this.metadata!.m * this.metadata!.k * this.metadata!.d_sub;
     if (this.codebooks.length !== expectedSize) {
       throw new Error(
         `Codebooks size mismatch: got ${this.codebooks.length}, expected ${expectedSize} ` +
@@ -260,9 +257,7 @@ export class PQDistance {
     const n = pqCodes.length / this.metadata.m;
 
     // Prepare tensors for ONNX model
-    const queryTensor = new ort.Tensor('float32', queryResidual, [
-      this.metadata.d,
-    ]);
+    const queryTensor = new ort.Tensor('float32', queryResidual, [this.metadata.d]);
     const codesTensor = new ort.Tensor('uint8', pqCodes, [n, this.metadata.m]);
 
     // Run distance computation - model returns sorted distances to all vectors
