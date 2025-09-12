@@ -7,6 +7,6 @@
   "python.testing.pytestEnabled": true,
   "jupyter.notebookFileRoot": "${workspaceFolder}",
   "python.analysis.extraPaths": [
-    "./src"
-  ]
+    "./scripts"
+  ],
 }

@@ -1,6 +1,20 @@
 <template>
   <div ref="containerRef" class="scatterplot-container">
     <canvas ref="canvasRef" class="scatterplot-canvas" />
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-dot base-ref"></div>
+        <span class="legend-label">base reference</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot user-ref"></div>
+        <span class="legend-label">user reference</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot query"></div>
+        <span class="legend-label">query</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -348,11 +362,72 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .scatterplot-canvas {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.legend {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.legend-dot.base-ref::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: #999;
+  display: block;
+}
+
+.legend-dot.user-ref::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #999;
+  display: block;
+}
+
+.legend-dot.query::after {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #999;
+  display: block;
+}
+
+.legend-label {
+  font-size: 12px;
+  color: white;
 }
 </style>

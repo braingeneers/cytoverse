@@ -1,6 +1,0 @@
-Method,n_sub,n_probe,Recall,Time (s),Speedup,Storage,Reduction,BW
-IVFPQ,8,1,0.423,1.8,19.7×,92 MB,98×,1.4 MB
-IVFPQ,8,4,0.566,8.1,4.3×,92 MB,98×,5.2 MB
-IVFPQ,16,1,0.506,1.8,19.3×,153 MB,59×,2.3 MB
-IVFPQ,16,4,0.711,7.7,4.5×,153 MB,59×,8.7 MB
-KNN,-,-,1.000,34.8,1.0×,9023 MB,1.0×,0.0 MB
