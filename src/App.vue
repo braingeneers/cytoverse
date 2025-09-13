@@ -466,6 +466,7 @@ const availableModels = ref<
 const isRunning = ref(false);
 const hasWebGPU = ref(false);
 const useWebGPU = ref(false);
+const maxTextureSize = ref(0);
 const isMobile = ref(window.innerWidth < 768);
 const isLoadingData = ref(false);
 
@@ -699,7 +700,6 @@ const createWorker = () => {
   };
 };
 
-// WebGPU detection
 const loadAvailableModels = async () => {
   try {
     // Load reference models
@@ -745,6 +745,12 @@ const loadAvailableModels = async () => {
 };
 
 const detectWebGPU = async () => {
+  // Check max texture size as a proxy for GPU capability as apple silicon
+  // has a limit of 16384 which is too low for our needs when embedding
+  const gl = document.createElement('canvas').getContext('webgl');
+  maxTextureSize.value = gl?.getParameter(gl.MAX_TEXTURE_SIZE);
+  console.info('Max Texture Size:', maxTextureSize.value);
+
   try {
     const webGPUSupported = await isWebGPUSupported();
     hasWebGPU.value = webGPUSupported;
@@ -755,12 +761,12 @@ const detectWebGPU = async () => {
     useWebGPU.value = false;
   }
 
-  // REMIND: Remove once we have a stable WebGPU implementation
-  console.warn(
-    'WebGPU is currently disabled as Apple silicon limits input vectors to 16384'
-  );
-  hasWebGPU.value = false;
-  useWebGPU.value = false;
+  // // REMIND: Remove once we have a stable WebGPU implementation
+  // console.warn(
+  //   'WebGPU is currently disabled as Apple silicon limits input vectors to 16384'
+  // );
+  // hasWebGPU.value = false;
+  // useWebGPU.value = false;
 };
 
 // Function to check WebGPU support
@@ -1020,6 +1026,7 @@ const start = async () => {
       userIndexId: useUserIndex ? selectedModel.value : null,
       h5File: selectedFile.value,
       useWebGPU: useWebGPU.value,
+      maxTextureSize: maxTextureSize.value,
       labelIndices: baseRef.labelIndices.value,
     });
   }

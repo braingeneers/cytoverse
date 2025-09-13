@@ -66,7 +66,7 @@ export class IVFPQ {
   /**
    * Load the IVFPQ system from artifacts
    */
-  async load(): Promise<void> {
+  async load(useWebGPU: boolean): Promise<void> {
     console.log(`Loading IVFPQ system from ${this.basePath}`);
 
     // Load IVF metadata
@@ -76,17 +76,17 @@ export class IVFPQ {
     await this.loadCentroids();
 
     // Load IVF forward ONNX model
-    await this.loadForwardModel();
+    await this.loadForwardModel(useWebGPU);
 
     // Initialize and load PQ distance calculator
     this.pqDistance = new PQDistance(this.basePath);
     await this.pqDistance.load();
 
     // Load PQ distance ONNX model
-    await this.pqDistance.loadModel();
+    await this.pqDistance.loadModel(useWebGPU);
 
     // Load PQ encode model for building user indexes
-    await this.pqDistance.loadEncodeModel();
+    await this.pqDistance.loadEncodeModel(useWebGPU);
 
     console.log(
       `IVFPQ system loaded: ${this.metadata!.n_partitions} partitions, ${
@@ -129,11 +129,36 @@ export class IVFPQ {
   /**
    * Load IVF forward ONNX model for finding nearest partitions
    */
-  private async loadForwardModel(modelPath?: string): Promise<void> {
+  private async loadForwardModel(
+    useWebGPU: boolean,
+    modelPath?: string
+  ): Promise<void> {
     const path = modelPath || `${this.basePath}/ivf_coarse.onnx`;
+    let sessionOptions = {};
     try {
+      if (useWebGPU) {
+        console.log('Configuring centroid search to use WebGPU...');
+        sessionOptions = {
+          executionProviders: [
+            {
+              name: 'webgpu',
+              deviceType: 'gpu',
+              powerPreference: 'high-performance',
+            },
+            'wasm',
+          ],
+          graphOptimizationLevel: 'all',
+        };
+      } else {
+        console.log('Configuring centroid search to use WebAssembly...');
+        sessionOptions = {
+          executionProviders: ['wasm'],
+          executionMode: 'parallel',
+          graphOptimizationLevel: 'all',
+        };
+      }
       this.forwardSession = await ort.InferenceSession.create(path, {
-        executionProviders: ['wasm'],
+        sessionOptions,
       });
       console.log(`Loaded IVF forward model from ${path}`);
     } catch (error) {

@@ -35,6 +35,7 @@ interface StartMessage {
   userIndexId?: string;
   h5File: File;
   useWebGPU: boolean;
+  maxTextureSize: number;
   labelIndices: Int16Array;
 }
 
@@ -117,6 +118,7 @@ self.addEventListener('message', async function (event: MessageEvent<StartMessag
       event.data.modelsURL,
       event.data.h5File,
       event.data.useWebGPU,
+      event.data.maxTextureSize,
       event.data.labelIndices,
       event.data.useUserIndex,
       event.data.userIndexId
@@ -131,6 +133,7 @@ async function instantiateModel(
   modelsURL: string,
   modelID: string,
   useWebGPU: boolean,
+  maxTextureSize: number,
   useUserIndex: boolean = false,
   userIndexId?: string
 ): Promise<ModelInfo> {
@@ -189,9 +192,10 @@ async function instantiateModel(
   env.wasm.numThreads = Math.max(1, navigator.hardwareConcurrency - 4);
   env.wasm.proxy = true;
 
+  // Create inference sessions
   let sessionOptions = {};
-  if (useWebGPU) {
-    console.log('Configuring ONNX Runtime to use WebGPU...');
+  if (useWebGPU && maxTextureSize >= genes.length) {
+    console.log('Configuring embedding session to use WebGPU...');
     sessionOptions = {
       executionProviders: [
         {
@@ -199,12 +203,17 @@ async function instantiateModel(
           deviceType: 'gpu',
           powerPreference: 'high-performance',
         },
-        'wasm',
       ],
       graphOptimizationLevel: 'all',
     };
   } else {
-    console.log('Configuring ONNX Runtime to use WebAssembly...');
+    if (useWebGPU && maxTextureSize < genes.length) {
+      console.warn(
+        `Embeddings dimention of ${genes.length} exceeds max gpu texture size of ${maxTextureSize} (likely running on Apple Silicon).`
+      );
+      console.warn('Falling back to WebAssembly execution for embedding only');
+    }
+    console.log('Configuring embedding session to use WebAssembly...');
     sessionOptions = {
       executionProviders: ['wasm'],
       executionMode: 'parallel',
@@ -212,12 +221,33 @@ async function instantiateModel(
     };
   }
 
-  // Create inference sessions
   const embeddingSession = await InferenceSession.create(
     modelArray.buffer,
     sessionOptions
   );
   console.log('Model Output names', embeddingSession.outputNames);
+
+  // Create mapping session
+  if (useWebGPU) {
+    console.log('Configuring mapping session to use WebGPU...');
+    sessionOptions = {
+      executionProviders: [
+        {
+          name: 'webgpu',
+          deviceType: 'gpu',
+          powerPreference: 'high-performance',
+        },
+      ],
+      graphOptimizationLevel: 'all',
+    };
+  } else {
+    console.log('Configuring mapping session to use WebAssembly...');
+    sessionOptions = {
+      executionProviders: ['wasm'],
+      executionMode: 'parallel',
+      graphOptimizationLevel: 'all',
+    };
+  }
 
   const mappingSession = await InferenceSession.create(
     `${modelsURL}/${modelID}/pumap/model.onnx`,
@@ -239,7 +269,7 @@ async function instantiateModel(
   } else {
     const ivfpqBasePath = `${modelsURL}/${modelID}/ivfpq`;
     ivfpq = new IVFPQ(ivfpqBasePath, NUM_PARTITIONS_TO_SEARCH, NUM_NEAREST_NEIGHBORS);
-    await ivfpq.load();
+    await ivfpq.load(useWebGPU);
     console.log('IVFPQ system loaded successfully');
   }
 
@@ -667,6 +697,7 @@ async function start(
   modelsURL: string,
   h5File: File,
   useWebGPU: boolean,
+  maxTextureSize: number,
   labelIndices: Int16Array,
   useUserIndex: boolean = false,
   userIndexId?: string
@@ -688,6 +719,7 @@ async function start(
         modelsURL,
         modelID,
         useWebGPU,
+        maxTextureSize,
         useUserIndex,
         userIndexId
       );

@@ -160,14 +160,38 @@ export class PQDistance {
   /**
    * Load ONNX model for distance computation
    */
-  async loadModel(modelPath?: string): Promise<void> {
+  async loadModel(useWebGPU: boolean, modelPath?: string): Promise<void> {
     const path = modelPath || `${this.basePath}/pq_distance.onnx`;
+
+    // Create inference sessions
+    let sessionOptions = {};
     try {
+      if (useWebGPU) {
+        console.log('Configuring pq distance to use WebGPU...');
+        sessionOptions = {
+          executionProviders: [
+            {
+              name: 'webgpu',
+              deviceType: 'gpu',
+              powerPreference: 'high-performance',
+            },
+          ],
+          graphOptimizationLevel: 'all',
+          logSeverityLevel: 0,
+          logIdSeverityLevel: 3,
+          logVerbosityLevel: 0,
+        };
+      } else {
+        console.log('Configuring pq distance to use WebAssembly...');
+        sessionOptions = {
+          executionProviders: ['wasm'],
+          executionMode: 'parallel',
+          graphOptimizationLevel: 'all',
+        };
+      }
+
       this.distanceSession = await ort.InferenceSession.create(path, {
-        executionProviders: ['wasm'],
-        // logSeverityLevel: 0,
-        // logIdSeverityLevel: 3,
-        // logVerbosityLevel: 0,
+        sessionOptions,
       });
       console.log(`Loaded PQ distance model from ${path}`);
     } catch (error) {
@@ -179,14 +203,32 @@ export class PQDistance {
   /**
    * Load ONNX model for PQ encoding
    */
-  async loadEncodeModel(modelPath?: string): Promise<void> {
+  async loadEncodeModel(useWebGPU: boolean, modelPath?: string): Promise<void> {
     const path = modelPath || `${this.basePath}/pq_encode.onnx`;
+    let sessionOptions = {};
     try {
+      if (useWebGPU) {
+        console.log('Configuring pq encoding to use WebGPU...');
+        sessionOptions = {
+          executionProviders: [
+            {
+              name: 'webgpu',
+              deviceType: 'gpu',
+              powerPreference: 'high-performance',
+            },
+          ],
+          graphOptimizationLevel: 'all',
+        };
+      } else {
+        console.log('Configuring pq encoding to use WebAssembly...');
+        sessionOptions = {
+          executionProviders: ['wasm'],
+          executionMode: 'parallel',
+          graphOptimizationLevel: 'all',
+        };
+      }
       this.encodeSession = await ort.InferenceSession.create(path, {
-        executionProviders: ['wasm'],
-        // logSeverityLevel: 3,
-        // logSeverityLevel: 0,
-        // logVerbosityLevel: 0,
+        sessionOptions,
       });
       console.log(`Loaded PQ encode model from ${path}`);
     } catch (error) {

@@ -6,7 +6,7 @@ test('Navigate to root, nothin else...', async ({ page }) => {
 
 test('Run and do NOT wait for results...', async ({ page }) => {
   await page.goto('/');
-  await page.getByTestId('radio-cpu-option').click();
+  // await page.getByTestId('radio-cpu-option').click();
 
   const modelSelector = await page.getByTestId('model-select-dropdown');
   await modelSelector.click();
@@ -24,9 +24,7 @@ test('Run and do NOT wait for results...', async ({ page }) => {
 
   // NOTE: Playwright reads the entire file so in practice only use MB size files...
   const fileInputElement = await page.locator('[type="file"]');
-  await fileInputElement.setInputFiles(
-    'tests/fixtures/GSE136831_subsample_10.h5ad'
-  );
+  await fileInputElement.setInputFiles('tests/fixtures/GSE136831_subsample_10.h5ad');
   await page.getByTestId('run-stop-button').click();
 });
 
@@ -35,9 +33,7 @@ test('Run and WAIT for results...', async ({ page }) => {
 
   // NOTE: Playwright reads the entire file so in practice only use MB size files...
   const fileInputElement = page.locator('[type="file"]');
-  await fileInputElement.setInputFiles(
-    'tests/fixtures/GSE136831_subsample_10.h5ad'
-  );
+  await fileInputElement.setInputFiles('tests/fixtures/GSE136831_subsample_10.h5ad');
 
   await page.getByTestId('run-stop-button').click();
 
@@ -76,9 +72,7 @@ test('Create a user index...', async ({ page }) => {
 
   // NOTE: Playwright reads the entire file so in practice only use MB size files...
   const fileInputElement = await page.locator('[type="file"]');
-  await fileInputElement.setInputFiles(
-    'tests/fixtures/GSE136831_subsample_10.h5ad'
-  );
+  await fileInputElement.setInputFiles('tests/fixtures/GSE136831_subsample_10.h5ad');
   await page.getByTestId('run-stop-button').click();
   await expect(page.getByTestId('status')).toHaveText(/Finished/, {
     timeout: 60000, // Wait up to 60 seconds for the status to change
@@ -97,7 +91,6 @@ test('Create a user index...', async ({ page }) => {
   await page.getByTestId('run-stop-button').click();
 });
 
-
 test('Open non-h5ad file and show error', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('radio-cpu-option').click();
@@ -106,10 +99,7 @@ test('Open non-h5ad file and show error', async ({ page }) => {
   const fileInputElement = page.locator('[type="file"]');
   await fileInputElement.setInputFiles('tests/fixtures/not-anndata.h5ad');
   await page.getByTestId('run-stop-button').click();
-  await expect(page.getByTestId('error-title')).toHaveText(
-    /Failed to extract/,
-    {
-      timeout: 60000, // Wait up to 60 seconds for the status to change
-    }
-  );
+  await expect(page.getByTestId('error-title')).toHaveText(/Failed to extract/, {
+    timeout: 60000, // Wait up to 60 seconds for the status to change
+  });
 });
