@@ -15,7 +15,7 @@ import { UserIVFPQ } from './userIvfpq';
 
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50;
-const NUM_PARTITIONS_TO_SEARCH = 2;
+const NUM_PARTITIONS_TO_SEARCH = 4;
 const BATCH_SIZE = 32;
 
 // TypeScript interfaces
