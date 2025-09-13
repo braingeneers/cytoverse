@@ -760,13 +760,6 @@ const detectWebGPU = async () => {
     hasWebGPU.value = false;
     useWebGPU.value = false;
   }
-
-  // // REMIND: Remove once we have a stable WebGPU implementation
-  // console.warn(
-  //   'WebGPU is currently disabled as Apple silicon limits input vectors to 16384'
-  // );
-  // hasWebGPU.value = false;
-  // useWebGPU.value = false;
 };
 
 // Function to check WebGPU support

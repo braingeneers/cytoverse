@@ -436,8 +436,8 @@ export class IVFPQ {
 /**
  * Create and load an IVFPQ system
  */
-export async function createIVFPQ(basePath: string): Promise<IVFPQ> {
+export async function createIVFPQ(useWebGPU: boolean, basePath: string): Promise<IVFPQ> {
   const ivfpq = new IVFPQ(basePath);
-  await ivfpq.load();
+  await ivfpq.load(useWebGPU);
   return ivfpq;
 }

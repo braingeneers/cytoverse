@@ -5,6 +5,7 @@ test:
 	npx vitest run tests/unit
 	python -m pytest tests/unit
 	python -m pytest tests/e2e
+	npx playwright test tests/e2e/run.spec.ts
 
 benchmark:
 	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG

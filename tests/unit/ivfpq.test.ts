@@ -360,7 +360,7 @@ describe('IVFPQ System', () => {
         } else {
           // This is the distance operation - return empty results for empty partitions
           return Promise.resolve({
-            indices: { data: new BigInt64Array([]) },
+            indices: { data: new Int16Array([]) },
             distances: { data: new Float32Array([]) },
           });
         }
@@ -746,7 +746,7 @@ describe('IVFPQ System', () => {
         return Promise.reject(new Error(`Unexpected URL: ${url}`));
       });
 
-      const ivfpq = await createIVFPQ('http://example.com/models');
+      const ivfpq = await createIVFPQ(false, 'http://example.com/models');
 
       expect(ivfpq).toBeInstanceOf(IVFPQ);
       expect(ivfpq.isReady()).toBe(true);

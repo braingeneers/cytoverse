@@ -13,6 +13,9 @@ import { InferenceSession, Tensor, env } from 'onnxruntime-web';
 import { IVFPQ, SearchResults } from './ivfpq';
 import { UserIVFPQ } from './userIvfpq';
 
+env.logLevel = 'verbose';
+env.debug = true;
+
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50;
 const NUM_PARTITIONS_TO_SEARCH = 4;
