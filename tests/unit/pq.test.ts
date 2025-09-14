@@ -29,7 +29,10 @@ vi.mock('path', () => ({
   resolve: vi.fn((path: string) => path),
 }));
 
-describe('PQDistance', () => {
+describe.each([
+  { useWebGPU: false },
+  { useWebGPU: true },
+])('PQDistance (useWebGPU: $useWebGPU)', ({ useWebGPU }) => {
   let mockSession: any;
 
   beforeEach(() => {
@@ -113,7 +116,7 @@ describe('PQDistance', () => {
 
       const pqDistance = new PQDistance('http://example.com');
       await pqDistance.load();
-      await pqDistance.loadModel();
+      await pqDistance.loadModel(useWebGPU);
 
       // Mock ONNX output
       mockSession.run.mockResolvedValue({
@@ -178,7 +181,7 @@ describe('PQDistance', () => {
 
       const pqDistance = new PQDistance('http://example.com');
       await pqDistance.load();
-      await pqDistance.loadEncodeModel();
+      await pqDistance.loadEncodeModel(useWebGPU);
 
       // Mock ONNX encode output
       mockSession.run.mockResolvedValue({
@@ -240,7 +243,7 @@ describe('PQDistance', () => {
 
     it('should throw error if PQ system not loaded for encoding', async () => {
       const pqDistance = new PQDistance('http://example.com');
-      await pqDistance.loadEncodeModel();
+      await pqDistance.loadEncodeModel(useWebGPU);
 
       const residualVector = new Float32Array([0.1, 0.2, 0.3, 0.4]);
 

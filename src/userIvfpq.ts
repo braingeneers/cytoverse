@@ -30,13 +30,13 @@ export class UserIVFPQ {
   /**
    * Load a user index along with its base model
    */
-  async loadUserIndex(userIndexId: string): Promise<void> {
+  async loadUserIndex(userIndexId: string, useWebGPU: boolean): Promise<void> {
     // Load the base model (centroids, PQ codebooks, etc.)
     this.baseIVFPQ = new IVFPQ(this.basePath, this.n_probe, this.k);
     if (!this.baseIVFPQ) {
       throw new Error('BaseIVFPQ not loaded');
     }
-    await this.baseIVFPQ.load();
+    await this.baseIVFPQ.load(useWebGPU);
     const components = this.baseIVFPQ.getReferenceComponents();
     if (!components) {
       throw new Error('Base model not loaded');

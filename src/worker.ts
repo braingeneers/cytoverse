@@ -267,7 +267,7 @@ async function instantiateModel(
       NUM_PARTITIONS_TO_SEARCH,
       NUM_NEAREST_NEIGHBORS
     );
-    await (ivfpq as UserIVFPQ).loadUserIndex(userIndexId);
+    await (ivfpq as UserIVFPQ).loadUserIndex(userIndexId, useWebGPU);
     console.log('UserIVFPQ system loaded successfully');
   } else {
     const ivfpqBasePath = `${modelsURL}/${modelID}/ivfpq`;

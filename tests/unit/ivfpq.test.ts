@@ -21,7 +21,10 @@ vi.mock('onnxruntime-web', () => ({
 // Mock fetch for loading model artifacts
 global.fetch = vi.fn();
 
-describe('IVFPQ System', () => {
+describe.each([
+  { useWebGPU: false },
+  { useWebGPU: true },
+])('IVFPQ System (useWebGPU: $useWebGPU)', ({ useWebGPU }) => {
   let mockFetch: any;
   let mockSession: any;
 
@@ -110,7 +113,7 @@ describe('IVFPQ System', () => {
       });
 
       const ivfpq = new IVFPQ('http://example.com/models');
-      await ivfpq.load();
+      await ivfpq.load(useWebGPU);
 
       expect(ivfpq.isReady()).toBe(true);
 
@@ -126,7 +129,7 @@ describe('IVFPQ System', () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
       const ivfpq = new IVFPQ('http://example.com/models');
-      await expect(ivfpq.load()).rejects.toThrow('Network error');
+      await expect(ivfpq.load(false)).rejects.toThrow('Network error');
     });
   });
 
@@ -256,7 +259,7 @@ describe('IVFPQ System', () => {
       });
 
       const ivfpq = new IVFPQ('http://example.com/models', 1, 2);
-      await ivfpq.load();
+      await ivfpq.load(useWebGPU);
 
       const queryVector = new Float32Array([0.1, 0.1, 0.1, 0.1]);
       const results = await ivfpq.search(queryVector);
@@ -367,7 +370,7 @@ describe('IVFPQ System', () => {
       });
 
       const ivfpq = new IVFPQ('http://example.com/models', 1, 5);
-      await ivfpq.load();
+      await ivfpq.load(useWebGPU);
 
       const queryVector = new Float32Array([0.1, 0.1, 0.1, 0.1]);
       const results = await ivfpq.search(queryVector);
@@ -524,7 +527,7 @@ describe('IVFPQ System', () => {
       });
 
       const ivfpq = new IVFPQ('http://example.com/models', 2, 3);
-      await ivfpq.load();
+      await ivfpq.load(useWebGPU);
 
       // Test with ONNX model (always used)
       const queryVector = new Float32Array([0.9, 0.9, 0.9, 0.9]); // Close to [1,1,1,1]
@@ -663,7 +666,7 @@ describe('IVFPQ System', () => {
       });
 
       const ivfpq = new IVFPQ('http://example.com/models', 1, 1);
-      await ivfpq.load();
+      await ivfpq.load(useWebGPU);
 
       // Test that ONNX model is always used
       const queryVector = new Float32Array([0.1, 0.1, 0.1, 0.1]); // Close to [0,0,0,0]
@@ -746,7 +749,7 @@ describe('IVFPQ System', () => {
         return Promise.reject(new Error(`Unexpected URL: ${url}`));
       });
 
-      const ivfpq = await createIVFPQ(false, 'http://example.com/models');
+      const ivfpq = await createIVFPQ(useWebGPU, 'http://example.com/models');
 
       expect(ivfpq).toBeInstanceOf(IVFPQ);
       expect(ivfpq.isReady()).toBe(true);
