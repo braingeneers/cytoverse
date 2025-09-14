@@ -1,4 +1,4 @@
-# CytoVerse <img src="web/public/cytoverse.svg" width="32" height="32" alt="Description">
+# CytoVerse <img src="public/cytoverse.svg" width="32" height="32" alt="Cytoverse">
 
 Search, display and label cells in foundation model embedding space
 
@@ -19,9 +19,9 @@ CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed
 
 This architecture ensures privacy, scalability, and collaborative potential without server dependency.
 
-## Data Flow
+## Data and Compute Flow
 
-![Alt text](notebooks/figures/architecture.svg?raw=true)
+![Alt text](notebooks/figures/architecture.svg?raw=true 'CytoVerse Data Flow')
 
 ## Install
 
