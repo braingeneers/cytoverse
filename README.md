@@ -14,29 +14,18 @@ CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed
 - **Efficient Search**: Employs Inverted File with Product Quantization (IVFPQ) for fast approximate nearest neighbor searches across over 20 million samples.
 - **Performance**: Built on WebAssembly and ONNX, enabling high-speed processing directly in the browser.
 - **Scalability**: Supports unlimited streaming analysis of h5ad files via h5wasm, ensuring flexibility for large datasets.
+- **Customization**: Save your labeled cells as a user reference.
 - **Collaboration**: Facilitates distributed discovery by allowing researchers to explore shared embedding spaces, identifying overlapping or complementary assays, particularly for perturbseq-driven research.
 
 This architecture ensures privacy, scalability, and collaborative potential without server dependency.
 
 ## Data Flow
 
-```
-35-60k dimension gene expression counts batch streamed from local h5ad
-↓
-Embedding via SCimilarity ONNX model
-↓
-128-1024 dimension float32 embedding vector
-↓
-UMAP ONNX mapping model to 2d coordinates
-+
-Approximate Nearest Neighor (ANN) search of an Inverted File System (IVF) via partitions over HTTP
-↓
-List of cells in the training set and associated labels
-```
+![Alt text](notebooks/figures/architecture.svg?raw=true)
 
 ## Install
 
-Download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/models/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into data/GSE136831_subsample.h5ad
+Create a ./data/ folder and download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/models/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into ./data/GSE136831_subsample.h5ad
 
 Install python dependencies and create a virtual env:
 
@@ -53,13 +42,12 @@ Export SCimilarity embeddings and labels, train a parametric umap model on a str
 
 ```
 make scimilarity
-cd web
 ```
 
-Verify that web/public/models/scimilarity is populated (~900MB Total):
+Verify that public/models/scimilarity is populated (~1.2G Total):
 
 ```
-> tree -L 2 web/public/models/scimilarity
+> tree public/models/scimilarity
 public/models/scimilarity
 ├── embedding
 │   ├── embedding.onnx
@@ -69,10 +57,11 @@ public/models/scimilarity
 ├── ivfpq
 │   ├── ivf_centroids.bin
 │   ├── ivf_coarse.onnx
+│   ├── ivf_forward_dynamic.onnx
+│   ├── ivf_forward.onnx
 │   ├── ivf_metadata.json
 │   ├── partitions
-│   ├── partitions
-│   │   ├── partition_0000.bin
+│   │   ├── partition_0000.binq
 │   │   ├── partition_0001.bin
 │   │   ....
 │   │   ├── partition_4833.bin
@@ -82,7 +71,6 @@ public/models/scimilarity
 │   ├── pq_encode.onnx
 │   └── pq_metadata.json
 └── pumap
-    ├── author_label.bin
     ├── metadata.json
     ├── model.onnx
     ├── prediction.bin
@@ -104,17 +92,11 @@ Install web app dependencies and run local dev server:
 npm run dev
 ```
 
-## Notes
+Open http://localhost:5173/ in a browser
 
-## Benchmarks
+## Concordance and Performance
 
-### KMeans ONNX Browser Benchmark
-
-public/kmeans-benchmark/ tests the feasibility of running K-means clustering with ONNX Runtime in the browser on large-scale vector datasets towards a future version enabling a user to create their own reference from a local h5ad file. Target is ~300k cells ideally up to 500k.
-
-- `index.html` - Main benchmark HTML page
-- `kmeans_init.onnx` - ONNX model for K-means initialization
-- `kmeans_iteration.onnx` - ONNX model for K-means iteration
+See [the analysis notebook and figures](notebooks/analysis.ipynb) for a detailed comparison with running on a server with the underlying foundation model.
 
 ## References
 

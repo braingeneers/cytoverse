@@ -176,7 +176,7 @@
             prepend-icon="mdi-database-plus"
             data-testid="create-index-button"
             block
-            class="mt-2"
+            class="mt-1"
             @click="createIndexModalOpen = true"
           >
             Create Index
@@ -1306,8 +1306,8 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #424242;
+  padding: 12px;
+  /* border-bottom: 1px solid #424242; */
 }
 
 .drawer-header h2 {
@@ -1323,21 +1323,21 @@ onUnmounted(() => {
 }
 
 .drawer-content {
-  padding: 16px;
+  padding: 12px;
   overflow-y: auto;
   height: calc(100% - 72px);
 }
 
 .form-section {
-  margin-bottom: 16px;
+  margin-bottom: 2px;
 }
 
 .stats-card {
-  margin-bottom: 16px;
+  margin-bottom: 6px;
 }
 
 .stat-item {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-size: 14px;
 }
 
@@ -1351,35 +1351,34 @@ onUnmounted(() => {
 }
 
 .progress-section {
-  margin-top: 16px;
-  padding: 16px;
+  margin-top: 8px;
+  padding: 8px;
   background-color: #2a2a2a;
   border-radius: 4px;
 }
 
 .status-text {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-size: 14px;
 }
 
 .progress-text {
-  margin-top: 4px;
+  margin-top: 2px;
   text-align: right;
   font-size: 12px;
   color: #757575;
 }
 
 .labels-section {
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid #424242;
+  margin-top: 4px;
+  padding-top: 2px;
 }
 
 .labels-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 2px;
 }
 
 .labels-header h3 {
@@ -1390,16 +1389,16 @@ onUnmounted(() => {
 .total-count {
   display: flex;
   justify-content: space-between;
-  padding: 8px 0;
+  padding: 1px 0;
   font-weight: 600;
   border-bottom: 1px solid #424242;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .label-count {
   display: flex;
   justify-content: space-between;
-  padding: 4px 0;
+  padding: 2px 0;
   font-size: 14px;
 }
 

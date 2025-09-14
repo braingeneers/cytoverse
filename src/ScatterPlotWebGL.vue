@@ -48,7 +48,7 @@ interface Props {
 }
 
 // Point size for base reference, user reference, query respectively
-const POINT_SIZES = [1, 5, 10];
+const POINT_SIZES = [1, 3, 6];
 
 const props = defineProps<Props>();
 
@@ -215,71 +215,6 @@ const updateColumnData = () => {
       ...new Array(props.queryX.length).fill(2),
     ],
   };
-
-  // const initialColumnData = {
-  //   x: new Float32Array([...props.baseRefX, ...props.userRefX]),
-  //   y: new Float32Array([...props.baseRefY, ...props.userRefY]),
-  //   valueA: [...props.baseRefLabelIndices, ...props.userRefLabelIndices],
-  //   valueB: [
-  //     ...new Array(props.baseRefX.length).fill(0),
-  //     ...new Array(props.userRefX.length).fill(1),
-  //   ],
-  // };
-
-  // const numPoints = Math.min(
-  //   props.baseRefX.length,
-  //   props.baseRefY.length,
-  //   props.baseRefLabelIndices.length
-  // );
-
-  // // If no query data, return just reference data
-  // if (props.queryX.length === 0 && props.queryY.length === 0) {
-  //   return {
-  //     x: new Float32Array(props.baseRefX),
-  //     y: new Float32Array(props.baseRefY),
-  //     valueA: props.baseRefLabelIndices,
-  //     valueB: new Array(numPoints).fill(0),
-  //   };
-  // }
-
-  // // Combine reference and query data
-  // const allX = new Float32Array([...props.baseRefX, ...props.queryX]);
-  // const allY = new Float32Array([...props.baseRefY, ...props.queryY]);
-
-  // // Create category data for test points
-  // const categoryColors = generateLabelColors(props.baseRefLabels.length);
-  // const testCategories = props.queryX.map((_, index) => {
-  //   if (index < props.queryLabelIndices.length) {
-  //     const labelIndex = props.queryLabelIndices[index];
-  //     return labelIndex >= 0 && labelIndex < props.baseRefLabels.length
-  //       ? labelIndex
-  //       : categoryColors.length - 1;
-  //   }
-  //   return categoryColors.length - 1;
-  // });
-
-  // const allCategories = [
-  //   ...categoryArrayData.slice(0, numPoints),
-  //   ...testCategories,
-  // ];
-
-  // // Create size data
-  // const trainSize = new Array(numPoints).fill(0);
-  // const testSize = props.queryX.map((_, index) => {
-  //   if (index < props.queryLabelIndices.length) {
-  //     const labelIndex = props.queryLabelIndices[index];
-  //     return labelIndex >= 0 && labelIndex < props.baseRefLabels.length ? 2 : 1;
-  //   }
-  //   return 1;
-  // });
-  // const allSizes = [...trainSize, ...testSize];
-
-  // return {
-  //   x: allX,
-  //   y: allY,
-  //   valueA: allCategories,
-  //   valueB: allSizes,
-  // };
 };
 
 // Timer-based update function
@@ -401,28 +336,28 @@ onUnmounted(() => {
 
 .legend-dot.base-ref::after {
   content: '';
-  width: 4px;
-  height: 4px;
+  width: 2px;
+  height: 2px;
   border-radius: 50%;
-  background-color: #999;
+  background-color: #1976d2;
   display: block;
 }
 
 .legend-dot.user-ref::after {
   content: '';
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background-color: #999;
+  background-color: #1976d2;
   display: block;
 }
 
 .legend-dot.query::after {
   content: '';
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background-color: #999;
+  background-color: #1976d2;
   display: block;
 }
 
