@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "export scimilarity model",
+      "name": "export scimilarity model dev",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/scimilarity_export_model.py",
@@ -16,7 +16,7 @@
       ]
     },
     {
-      "name": "export scimilarity embedding",
+      "name": "export scimilarity embedding dev",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/scimilarity_to_embeddings.py",
@@ -39,7 +39,23 @@
       ]
     },
     {
-      "name": "ivfpq train",
+      "name": "export h5ad embeddings",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cytoverse/scripts/h5ad_to_embeddings.py",
+      "console": "integratedTerminal",
+      "args": [
+        "~/data/h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad",
+        "data/scimilarity/model_v1.1",
+        "data/allen",
+        "--labels",
+        "CellType",
+        "--labels",
+        "cortical_layer_label"
+      ]
+    },
+    {
+      "name": "ivfpq train dev",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/ivfpq_train.py",
@@ -61,23 +77,7 @@
       ]
     },
     {
-      "name": "export h5ad embeddings",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/src/cytoverse/scripts/h5ad_to_embeddings.py",
-      "console": "integratedTerminal",
-      "args": [
-        "~/data/h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad",
-        "data/scimilarity/model_v1.1",
-        "data/allen",
-        "--labels",
-        "CellType",
-        "--labels",
-        "cortical_layer_label"
-      ]
-    },
-    {
-      "name": "pumap train",
+      "name": "pumap train dev",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/pumap_train.py",
@@ -125,7 +125,7 @@
       ]
     },
     {
-      "name": "pumap export",
+      "name": "pumap export dev",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/pumap_train.py",

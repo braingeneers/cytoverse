@@ -94,6 +94,27 @@ npm run dev
 
 Open http://localhost:5173/ in a browser
 
+Generate a distribution including all models under public/models:
+```
+npm run dist
+```
+
+## Creating References
+Given an h5ad file you can generate a reference from it via:
+
+```
+export model_id="new_model_id"
+python scripts/h5ad_to_embeddings.py \
+    <path to your h5ad file> \
+	data/models/scimilarity/model_v1.1 \
+	data/references/$model_id
+	--labels <first label in obs> \
+	--labels <second label in obs>
+    ...
+
+make ivfpq-train pumap
+```
+
 ## Concordance and Performance
 
 See [the analysis notebook and figures](notebooks/analysis.ipynb) for a detailed comparison with running on a server with the underlying foundation model.
