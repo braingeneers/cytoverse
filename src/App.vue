@@ -47,46 +47,86 @@
         <div class="drawer-content">
           <!-- File Selection -->
           <div class="form-section">
-            <v-file-input
-              :model-value="selectedFile ? [selectedFile] : []"
-              accept=".h5ad"
-              label="Select an .h5ad file"
-              placeholder="Select an .h5ad file"
-              prepend-icon=""
-              variant="outlined"
-              density="comfortable"
-              @update:model-value="handleFileSelect"
-            />
+            <div style="display: flex; gap: 8px; align-items: stretch">
+              <v-file-input
+                :model-value="selectedFile ? [selectedFile] : []"
+                accept=".h5ad"
+                label="Query"
+                placeholder="Select an .h5ad file"
+                prepend-icon=""
+                variant="outlined"
+                density="comfortable"
+                style="flex: 1"
+                @update:model-value="handleFileSelect"
+              />
+
+              <v-btn
+                variant="text"
+                icon
+                size="small"
+                title="Select .h5ad Query File"
+                style="width: 40px; min-width: 40px; height: 40px"
+                @click="openFileDialog"
+              >
+                <v-icon>mdi-folder-open</v-icon>
+              </v-btn>
+            </div>
           </div>
 
           <!-- Model Selection -->
           <div class="form-section">
-            <v-select
-              v-model="selectedModel"
-              data-testid="model-select-dropdown"
-              :items="availableModels"
-              label="Reference"
-              :disabled="isRunning"
-              variant="outlined"
-              density="comfortable"
-            >
-              <template #item="{ item, props }">
-                <v-list-item v-bind="props">
-                  <template v-if="item.raw.isUserIndex" #append>
-                    <v-btn
-                      icon
-                      size="x-small"
-                      variant="text"
-                      @click.stop.prevent="
-                        confirmDeleteUserIndex(item.raw.value, item.raw.title)
-                      "
-                    >
-                      <v-icon size="small">mdi-delete</v-icon>
-                    </v-btn>
-                  </template>
-                </v-list-item>
-              </template>
-            </v-select>
+            <div style="display: flex; gap: 8px; align-items: stretch">
+              <v-select
+                v-model="selectedModel"
+                data-testid="model-select-dropdown"
+                :items="availableModels"
+                label="Reference"
+                :disabled="isRunning"
+                variant="outlined"
+                density="comfortable"
+                style="flex: 1"
+              >
+                <template #item="{ item, props }">
+                  <v-list-item v-bind="props">
+                    <template v-if="item.raw.isUserIndex" #append>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        title="Share User Reference"
+                        @click.stop.prevent="
+                          exportUserIndexFromDropdown(item.raw.value, item.raw.title)
+                        "
+                      >
+                        <v-icon size="small">mdi-share</v-icon>
+                      </v-btn>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        title="Delete User Reference"
+                        @click.stop.prevent="
+                          confirmDeleteUserIndex(item.raw.value, item.raw.title)
+                        "
+                      >
+                        <v-icon size="small">mdi-delete</v-icon>
+                      </v-btn>
+                    </template>
+                  </v-list-item>
+                </template>
+              </v-select>
+              <v-btn
+                variant="text"
+                icon
+                size="small"
+                title="Import Reference"
+                data-testid="import-index-button"
+                style="width: 40px; min-width: 40px; height: 40px"
+                @click="handleImportIndex"
+              >
+                <v-icon>mdi-folder-open</v-icon>
+              </v-btn>
+            </div>
           </div>
 
           <!-- Category Selection -->
@@ -179,7 +219,7 @@
             class="mt-1"
             @click="createIndexModalOpen = true"
           >
-            Create Index
+            Create Reference
           </v-btn>
 
           <!-- Progress and Status -->
@@ -194,7 +234,7 @@
           <!-- Label Counts -->
           <div v-if="Object.keys(labelCounts).length > 0" class="labels-section">
             <div class="labels-header">
-              <h3>{{ selectedCategory }}</h3>
+              <h3>Labels ({{ selectedCategory }})</h3>
               <div class="header-actions">
                 <v-btn
                   variant="text"
@@ -206,15 +246,6 @@
                   @click="exportResultsToCSV"
                 >
                   <v-icon>mdi-download</v-icon>
-                </v-btn>
-                <v-btn
-                  variant="text"
-                  icon
-                  size="small"
-                  :disabled="Object.keys(labelCounts).length === 0 || isRunning"
-                  @click="shareModalOpen = true"
-                >
-                  <v-icon>mdi-share</v-icon>
                 </v-btn>
               </div>
             </div>
@@ -275,34 +306,18 @@
       <!-- Share Modal -->
       <v-dialog v-model="shareModalOpen" max-width="500px">
         <v-card>
-          <v-card-title>Share Embeddings</v-card-title>
+          <v-card-title>Share User Reference</v-card-title>
           <v-card-text>
-            <v-form>
-              <v-text-field
-                v-model="shareEmail"
-                type="email"
-                label="Email Address"
-                placeholder="Enter your email"
-                variant="outlined"
-                density="comfortable"
-              />
-              <div class="modal-description">
-                Get introduced to others with similar embeddings? Enter your email and
-                we'll connect you. We'll never upload or share your raw data, only your
-                embeddings. (Coming soon...)
-              </div>
-            </v-form>
+            <div class="modal-description">
+              Export this user reference as a JSON file that can be shared with others.
+              The exported file contains all the embeddings and labels from your
+              analysis.
+            </div>
           </v-card-text>
           <v-card-actions>
             <v-spacer />
             <v-btn @click="shareModalOpen = false">Cancel</v-btn>
-            <v-btn
-              color="primary"
-              :disabled="!shareEmail.trim()"
-              @click="handleShareLabels"
-            >
-              Share
-            </v-btn>
+            <v-btn color="primary" @click="handleShareExport"> Export </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -365,19 +380,18 @@
         </v-card>
       </v-dialog>
 
-      <!-- Create Index Modal -->
+      <!-- Create User Reference Modal -->
       <v-dialog v-model="createIndexModalOpen" max-width="500px">
         <v-card>
-          <v-card-title>Create User Index</v-card-title>
+          <v-card-title>Create User Reference</v-card-title>
           <v-card-text>
             <p>
-              Save the current labeled cells as a user index for future reference
-              labeling.
+              Save the current labeled cells as a user reference for future labeling.
             </p>
             <v-text-field
               v-model="newIndexName"
-              label="Index Name"
-              placeholder="Enter a name for your index"
+              label="Reference Name"
+              placeholder="Enter a name for your reference"
               data-testid="new-index-name"
               variant="outlined"
               density="comfortable"
@@ -510,7 +524,7 @@ const totalLabeled = ref(0);
 
 // Modal states
 const shareModalOpen = ref(false);
-const shareEmail = ref('');
+const shareIndexInfo = ref<{ id: string; name: string } | null>(null);
 const helpModalOpen = ref(false);
 const errorModalOpen = ref(false);
 const errorMessage = ref('');
@@ -868,7 +882,6 @@ const loadReferenceData = async () => {
 
     if (!selectedModelInfo) {
       throw new Error('Selected model not found');
-      return;
     }
 
     // Load the base reference model first
@@ -1166,6 +1179,35 @@ const saveUserIndex = async () => {
   }
 };
 
+const handleImportIndex = async () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+
+  input.onchange = async (event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    try {
+      const indexId = await userIndexService.importUserIndex(file);
+
+      // Reload models list to include the imported user index
+      await loadAvailableModels();
+
+      // Select the imported index
+      selectedModel.value = indexId;
+
+      statusMessage.value = 'User index imported successfully';
+    } catch (error) {
+      console.error('Error importing user index:', error);
+      errorMessage.value = `Failed to import user index: ${error}`;
+      errorModalOpen.value = true;
+    }
+  };
+
+  input.click();
+};
+
 const handleRunStopClick = () => {
   if (isRunning.value) {
     stop();
@@ -1174,11 +1216,36 @@ const handleRunStopClick = () => {
   }
 };
 
-const handleShareLabels = () => {
-  console.log('Sharing labels to:', shareEmail.value);
-  // TODO: Implement actual sharing logic
+const exportUserIndexFromDropdown = (indexId: string, indexName: string) => {
+  shareIndexInfo.value = { id: indexId, name: indexName };
+  shareModalOpen.value = true;
+};
+
+const handleShareExport = async () => {
+  if (!shareIndexInfo.value) return;
+
   shareModalOpen.value = false;
-  shareEmail.value = '';
+
+  try {
+    const blob = await userIndexService.exportUserIndex(shareIndexInfo.value.id);
+
+    // Create download link
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${shareIndexInfo.value.name.replace('👤 ', '')}.json`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+
+    statusMessage.value = 'User reference exported successfully';
+  } catch (error) {
+    console.error('Error exporting user index:', error);
+    errorMessage.value = `Failed to export user reference: ${error}`;
+    errorModalOpen.value = true;
+  } finally {
+    shareIndexInfo.value = null;
+  }
 };
 
 const handleFileSelect = (files: File | File[]) => {
@@ -1189,6 +1256,21 @@ const handleFileSelect = (files: File | File[]) => {
   } else {
     selectedFile.value = null;
   }
+};
+
+const openFileDialog = () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.h5ad';
+
+  input.onchange = (event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (file) {
+      handleFileSelect(file);
+    }
+  };
+
+  input.click();
 };
 
 const openGithub = () => {

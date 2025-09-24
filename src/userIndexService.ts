@@ -181,6 +181,98 @@ class UserIndexService {
     };
   }
 
+  async exportUserIndex(id: string): Promise<Blob> {
+    const db = this.ensureDb();
+    const index = await db.get('userIndexes', id);
+
+    if (!index) {
+      throw new Error(`User index with id ${id} not found`);
+    }
+
+    // Convert typed arrays to base64 for JSON serialization
+    interface ExportPartition {
+      pqCodes: string;
+      pqCodeCount: number;
+      labelIndices: string;
+    }
+
+    const exportData = {
+      id: index.id,
+      name: index.name,
+      baseModelId: index.baseModelId,
+      created: index.created.toISOString(),
+      cellCount: index.cellCount,
+      category: index.category,
+      labels: index.labels,
+      // Convert typed arrays to base64
+      x: btoa(String.fromCharCode(...new Uint8Array(index.x.buffer))),
+      y: btoa(String.fromCharCode(...new Uint8Array(index.y.buffer))),
+      labelIndices: btoa(String.fromCharCode(...new Uint8Array(index.labelIndices.buffer))),
+      partitions: Object.entries(index.partitions).reduce((acc, [key, partition]) => {
+        acc[key] = {
+          pqCodes: btoa(String.fromCharCode(...partition.pqCodes)),
+          pqCodeCount: partition.pqCodeCount,
+          labelIndices: btoa(String.fromCharCode(...new Uint8Array(partition.labelIndices.buffer))),
+        };
+        return acc;
+      }, {} as Record<string, ExportPartition>),
+    };
+
+    const jsonString = JSON.stringify(exportData, null, 2);
+    return new Blob([jsonString], { type: 'application/json' });
+  }
+
+  async importUserIndex(file: File): Promise<string> {
+    const text = await file.text();
+    const importData = JSON.parse(text);
+
+    // Convert base64 back to typed arrays
+    const base64ToUint8Array = (base64: string): Uint8Array => {
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes;
+    };
+
+    const base64ToFloat32Array = (base64: string): Float32Array => {
+      const uint8Array = base64ToUint8Array(base64);
+      return new Float32Array(uint8Array.buffer);
+    };
+
+    const base64ToInt16Array = (base64: string): Int16Array => {
+      const uint8Array = base64ToUint8Array(base64);
+      return new Int16Array(uint8Array.buffer);
+    };
+
+    // Reconstruct the UserIndex
+    const index: UserIndex = {
+      id: importData.id,
+      name: importData.name,
+      baseModelId: importData.baseModelId,
+      created: new Date(importData.created),
+      cellCount: importData.cellCount,
+      category: importData.category,
+      labels: importData.labels,
+      x: base64ToFloat32Array(importData.x),
+      y: base64ToFloat32Array(importData.y),
+      labelIndices: base64ToInt16Array(importData.labelIndices),
+      partitions: Object.entries(importData.partitions).reduce((acc, [key, partition]) => {
+        const p = partition as { pqCodes: string; pqCodeCount: number; labelIndices: string };
+        acc[parseInt(key)] = {
+          pqCodes: base64ToUint8Array(p.pqCodes),
+          pqCodeCount: p.pqCodeCount,
+          labelIndices: base64ToInt16Array(p.labelIndices),
+        };
+        return acc;
+      }, {} as Record<number, UserIndexPartition>),
+    };
+
+    await this.saveUserIndex(index);
+    return index.id;
+  }
+
   async close(): Promise<void> {
     if (this.db) {
       this.db.close();

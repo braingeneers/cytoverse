@@ -4,15 +4,15 @@
     <div class="legend">
       <div class="legend-item">
         <div class="legend-dot base-ref"></div>
-        <span class="legend-label">base reference</span>
+        <span class="legend-label">Base Reference</span>
       </div>
       <div class="legend-item">
         <div class="legend-dot user-ref"></div>
-        <span class="legend-label">user reference</span>
+        <span class="legend-label">User Reference</span>
       </div>
       <div class="legend-item">
         <div class="legend-dot query"></div>
-        <span class="legend-label">query</span>
+        <span class="legend-label">Query</span>
       </div>
     </div>
   </div>

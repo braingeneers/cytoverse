@@ -94,12 +94,14 @@ npm run dev
 
 Open http://localhost:5173/ in a browser
 
-Generate a distribution including all models under public/models:
+Generate a distribution including all models under public/models in dist/:
+
 ```
-npm run dist
+npm run build
 ```
 
 ## Creating References
+
 Given an h5ad file you can generate a reference from it via:
 
 ```
