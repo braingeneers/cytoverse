@@ -1313,6 +1313,11 @@ watch(selectedModel, async () => {
   baseRef.labelIndices.value = new Int16Array();
   baseRef.labels.value = [];
 
+  // Clear user reference when the selected model changes
+  userRef.x.value = new Float32Array();
+  userRef.y.value = new Float32Array();
+  userRef.labelIndices.value = new Int16Array();
+
   // Load categories for the new model
   await loadCategoriesFromMetadata();
 
