@@ -93,17 +93,6 @@
                         icon
                         size="x-small"
                         variant="text"
-                        title="Share User Reference"
-                        @click.stop.prevent="
-                          exportUserIndexFromDropdown(item.raw.value, item.raw.title)
-                        "
-                      >
-                        <v-icon size="small">mdi-share</v-icon>
-                      </v-btn>
-                      <v-btn
-                        icon
-                        size="x-small"
-                        variant="text"
                         title="Delete User Reference"
                         @click.stop.prevent="
                           confirmDeleteUserIndex(item.raw.value, item.raw.title)
@@ -220,6 +209,20 @@
             @click="createIndexModalOpen = true"
           >
             Create Reference
+          </v-btn>
+
+          <!-- Share User Reference Button -->
+          <v-btn
+            v-if="selectedModelInfo?.isUserIndex"
+            color="primary"
+            size="large"
+            prepend-icon="mdi-share"
+            data-testid="share-reference-button"
+            block
+            class="mt-1"
+            @click="handleShareExportForSelected"
+          >
+            Share User Reference
           </v-btn>
 
           <!-- Progress and Status -->
@@ -352,6 +355,7 @@
                 <li>Select a category for cell type prediction</li>
                 <li>Choose CPU or GPU processing (if available)</li>
                 <li>Click Start to begin analysis</li>
+                <li>Optionally create a user reference and share</li>
               </ol>
               <p>
                 The tool will display your cells in real-time as they are processed and
@@ -564,6 +568,10 @@ const sitePath =
 // Computed properties
 const sortedLabelCounts = computed(() => {
   return Object.entries(labelCounts.value).sort(([, a], [, b]) => b - a);
+});
+
+const selectedModelInfo = computed(() => {
+  return availableModels.value.find((m) => m.value === selectedModel.value);
 });
 
 // Helper function to normalize coordinates
@@ -1216,8 +1224,12 @@ const handleRunStopClick = () => {
   }
 };
 
-const exportUserIndexFromDropdown = (indexId: string, indexName: string) => {
-  shareIndexInfo.value = { id: indexId, name: indexName };
+const handleShareExportForSelected = () => {
+  if (!selectedModelInfo.value?.isUserIndex) return;
+  shareIndexInfo.value = {
+    id: selectedModelInfo.value.value,
+    name: selectedModelInfo.value.title,
+  };
   shareModalOpen.value = true;
 };
 
