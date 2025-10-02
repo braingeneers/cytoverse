@@ -161,30 +161,25 @@ async function instantiateModel(
     throw new Error('Content-Length header is missing');
   }
   const totalBytes = parseInt(contentLength, 10);
-  let loadedBytes = 0;
+
+  // Pre-allocate buffer since we know the size
+  const modelArray = new Uint8Array(totalBytes);
+  let position = 0;
 
   const reader = response.body!.getReader();
-  const chunks: Uint8Array[] = [];
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value);
-    loadedBytes += value.length;
+    modelArray.set(value, position);
+    position += value.length;
 
     self.postMessage({
       type: 'progress',
       message: 'Downloading model...',
-      countFinished: Math.round(loadedBytes / (1024 * 1024)),
+      countFinished: Math.round(position / (1024 * 1024)),
       totalToProcess: Math.round(totalBytes / (1024 * 1024)),
     } as ProgressMessage);
-  }
-
-  const modelArray = new Uint8Array(loadedBytes);
-  let position = 0;
-  for (const chunk of chunks) {
-    modelArray.set(chunk, position);
-    position += chunk.length;
   }
 
   // Configure ONNX Runtime

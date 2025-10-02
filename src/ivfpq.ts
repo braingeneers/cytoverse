@@ -291,14 +291,13 @@ export class IVFPQ {
     );
     const nearestPartition = partitionIds[0]; // Closest partition for artifacts
 
-    // PQ encode the query vector's residual to the partition for a user index
-    // Compute residual for nearest partition
-    const centroidOffset = nearestPartition * d;
+    // Compute residual for nearest partition once (reused for encoding and search)
+    const nearestCentroidOffset = nearestPartition * d;
     const nearestResidual = new Float32Array(d);
     for (let i = 0; i < d; i++) {
-      nearestResidual[i] = queryVector[i] - this.centroids[centroidOffset + i];
+      nearestResidual[i] = queryVector[i] - this.centroids[nearestCentroidOffset + i];
     }
-    // Encode the residual
+    // Encode the residual for artifact
     const artifactPqCode = await this.pqDistance.encode(nearestResidual);
 
     // Step 2: Search within each partition and collect all distances
@@ -312,11 +311,16 @@ export class IVFPQ {
         continue;
       }
 
-      // Compute query residual for this partition
-      const centroidOffset = partitionId * d;
-      const queryResidual = new Float32Array(d);
-      for (let i = 0; i < d; i++) {
-        queryResidual[i] = queryVector[i] - this.centroids[centroidOffset + i];
+      // Reuse nearestResidual if this is the nearest partition, otherwise compute
+      let queryResidual: Float32Array;
+      if (partitionId === nearestPartition) {
+        queryResidual = nearestResidual;
+      } else {
+        const centroidOffset = partitionId * d;
+        queryResidual = new Float32Array(d);
+        for (let i = 0; i < d; i++) {
+          queryResidual[i] = queryVector[i] - this.centroids[centroidOffset + i];
+        }
       }
 
       // PQ codes are already Uint8Array, which is what the ONNX model expects
