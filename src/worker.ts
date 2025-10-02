@@ -637,12 +637,9 @@ async function labelCells(
 
   for (let i = 0; i < batchSize; i++) {
     try {
-      // Extract embedding for this cell
-      const queryVector = new Float32Array(embeddingDim);
+      // Extract embedding for this cell (zero-copy view)
       const offset = i * embeddingDim;
-      for (let j = 0; j < embeddingDim; j++) {
-        queryVector[j] = embeddings[offset + j];
-      }
+      const queryVector = embeddings.subarray(offset, offset + embeddingDim);
 
       // Search using IVFPQ with optional artifact retention
       const searchResults: SearchResults = await model!.ivfpq.search(queryVector);
