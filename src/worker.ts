@@ -787,14 +787,21 @@ async function start(
     const allPartitionIds: Uint16Array = new Uint16Array(cellNames.length);
     const allPQCodes: Uint8Array[] = new Array(cellNames.length);
 
+    // Reusable batch data buffer (max size)
+    const batchDataBuffer = new Float32Array(BATCH_SIZE * model.genes.length);
+
     // Process batches
     for (let batchStart = 0; batchStart < cellNames.length; batchStart += BATCH_SIZE) {
       // console.log(`Processing batch starting at cell ${batchStart}`);
       const batchEnd = Math.min(batchStart + BATCH_SIZE, cellNames.length);
       const currentBatchSize = batchEnd - batchStart;
 
-      // Prepare batch data
-      const batchData = new Float32Array(currentBatchSize * model.genes.length);
+      // Prepare batch data (reuse buffer, zero only what's needed)
+      const batchData =
+        currentBatchSize === BATCH_SIZE
+          ? batchDataBuffer
+          : batchDataBuffer.subarray(0, currentBatchSize * model.genes.length);
+      batchData.fill(0);
       fillBatchData(
         batchStart,
         currentBatchSize,
