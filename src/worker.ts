@@ -846,7 +846,9 @@ async function start(
 
       // Retain artifacts for user index
       allPartitionIds.set(partitionIds, batchStart);
-      allPQCodes.splice(batchStart, currentBatchSize, ...pqCodes);
+      for (let i = 0; i < currentBatchSize; i++) {
+        allPQCodes[batchStart + i] = pqCodes[i];
+      }
 
       // Send labeled updates as batch
       const labeledBatch: CellUpdate[] = [];
