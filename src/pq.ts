@@ -42,8 +42,10 @@ export class PQDistance {
   private metadata: PQMetadata | null = null;
   private codebooks: Float32Array | null = null;
   private codebooksTensor: ort.Tensor | null = null;
+  private codebooksGpuBuffer: GPUBuffer | null = null;
   private distanceSession: ort.InferenceSession | null = null;
   private encodeSession: ort.InferenceSession | null = null;
+  private useWebGPU: boolean = false;
 
   constructor(basePath: string) {
     this.basePath = basePath;
@@ -162,6 +164,7 @@ export class PQDistance {
    */
   async loadModel(useWebGPU: boolean, modelPath?: string): Promise<void> {
     const path = modelPath || `${this.basePath}/pq_distance.onnx`;
+    this.useWebGPU = useWebGPU;
 
     // Create inference sessions
     let sessionOptions = {};
@@ -194,9 +197,61 @@ export class PQDistance {
         sessionOptions,
       });
       console.log(`Loaded PQ distance model from ${path}`);
+
+      // Create GPU tensor for codebooks if using WebGPU
+      if (useWebGPU && this.codebooks && this.metadata) {
+        await this.createGpuCodebooksTensor();
+      }
     } catch (error) {
       console.error('Failed to load PQ distance model:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Create GPU buffer and tensor for codebooks (WebGPU only)
+   */
+  private async createGpuCodebooksTensor(): Promise<void> {
+    if (!this.codebooks || !this.metadata) {
+      throw new Error('Codebooks not loaded');
+    }
+
+    try {
+      // Get WebGPU device from ONNX Runtime
+      const adapter = await navigator.gpu?.requestAdapter();
+      if (!adapter) {
+        console.warn('WebGPU adapter not available, falling back to CPU tensor');
+        return;
+      }
+
+      const device = await adapter.requestDevice();
+      if (!device) {
+        console.warn('WebGPU device not available, falling back to CPU tensor');
+        return;
+      }
+
+      // Create GPU buffer for codebooks
+      const bufferSize = this.codebooks.byteLength;
+      this.codebooksGpuBuffer = device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true,
+      });
+
+      // Copy codebooks data to GPU
+      new Float32Array(this.codebooksGpuBuffer.getMappedRange()).set(this.codebooks);
+      this.codebooksGpuBuffer.unmap();
+
+      // Create ONNX tensor from GPU buffer
+      this.codebooksTensor = ort.Tensor.fromGpuBuffer(this.codebooksGpuBuffer, {
+        dataType: 'float32',
+        dims: [this.metadata.m, this.metadata.k, this.metadata.d_sub],
+      });
+
+      console.log('Created GPU tensor for codebooks');
+    } catch (error) {
+      console.warn('Failed to create GPU tensor for codebooks, using CPU tensor:', error);
+      // Fallback already created in load()
     }
   }
 
@@ -385,5 +440,16 @@ export class PQDistance {
    */
   isReady(): boolean {
     return !!(this.metadata && this.codebooks && this.codebooksTensor);
+  }
+
+  /**
+   * Cleanup GPU resources
+   */
+  dispose(): void {
+    if (this.codebooksGpuBuffer) {
+      this.codebooksGpuBuffer.destroy();
+      this.codebooksGpuBuffer = null;
+      console.log('Destroyed GPU buffer for codebooks');
+    }
   }
 }
