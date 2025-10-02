@@ -78,7 +78,7 @@ test('Create a user index...', async ({ page }) => {
     timeout: 60000, // Wait up to 60 seconds for the status to change
   });
   await page.getByTestId('create-index-button').click();
-  await page.fill('#input-v-22', 'My Index');
+  await page.fill('#input-v-23', 'My Index');
   await page.getByTestId('save-index-button').click();
 
   // select the last model now
