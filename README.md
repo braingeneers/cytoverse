@@ -61,7 +61,7 @@ public/models/scimilarity
 │   ├── ivf_forward.onnx
 │   ├── ivf_metadata.json
 │   ├── partitions
-│   │   ├── partition_0000.binq
+│   │   ├── partition_0000.bin
 │   │   ├── partition_0001.bin
 │   │   ....
 │   │   ├── partition_4833.bin
