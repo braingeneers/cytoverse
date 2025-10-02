@@ -45,7 +45,6 @@ export class PQDistance {
   private codebooksGpuBuffer: GPUBuffer | null = null;
   private distanceSession: ort.InferenceSession | null = null;
   private encodeSession: ort.InferenceSession | null = null;
-  private useWebGPU: boolean = false;
 
   constructor(basePath: string) {
     this.basePath = basePath;
@@ -164,7 +163,6 @@ export class PQDistance {
    */
   async loadModel(useWebGPU: boolean, modelPath?: string): Promise<void> {
     const path = modelPath || `${this.basePath}/pq_distance.onnx`;
-    this.useWebGPU = useWebGPU;
 
     // Create inference sessions
     let sessionOptions = {};
@@ -250,7 +248,10 @@ export class PQDistance {
 
       console.log('Created GPU tensor for codebooks');
     } catch (error) {
-      console.warn('Failed to create GPU tensor for codebooks, using CPU tensor:', error);
+      console.warn(
+        'Failed to create GPU tensor for codebooks, using CPU tensor:',
+        error
+      );
       // Fallback already created in load()
     }
   }
