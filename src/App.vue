@@ -263,7 +263,13 @@
               :key="label"
               class="label-count"
             >
-              <span class="label-name">{{ label }}</span>
+              <span class="label-name">
+                <span
+                  class="color-dot"
+                  :style="{ backgroundColor: labelColorMap.get(label) }"
+                ></span>
+                {{ label }}
+              </span>
               <span>{{ count.toLocaleString() }}</span>
             </div>
           </div>
@@ -443,6 +449,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import Worker from './worker?worker';
 import ScatterPlotWebGL from './ScatterPlotWebGL.vue';
 import { userIndexService } from './userIndexService';
+import { generateLabelColors } from './colors';
 
 // Constants
 const drawerWidth = 320;
@@ -572,6 +579,17 @@ const sortedLabelCounts = computed(() => {
 
 const selectedModelInfo = computed(() => {
   return availableModels.value.find((m) => m.value === selectedModel.value);
+});
+
+// Generate label colors that match the scatter plot
+const labelColorMap = computed(() => {
+  if (baseRef.labels.value.length === 0) return new Map<string, string>();
+  const colors = generateLabelColors(baseRef.labels.value.length);
+  const colorMap = new Map<string, string>();
+  baseRef.labels.value.forEach((label, index) => {
+    colorMap.set(label, colors[index]);
+  });
+  return colorMap;
 });
 
 // Helper function to normalize coordinates
@@ -1503,6 +1521,17 @@ onUnmounted(() => {
 
 .label-name {
   color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .main-content {
