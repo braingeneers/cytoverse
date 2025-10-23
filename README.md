@@ -1,6 +1,6 @@
 # CytoVerse <img src="public/cytoverse.svg" width="32" height="32" alt="Cytoverse">
 
-Search, display and label cells in foundation model embedding space
+Label, share and display cells using foundation models client side within the browser.
 
 [https://cells-test.gi.ucsc.edu/cytoverse](https://cells-test.gi.ucsc.edu/cytoverse)
 
@@ -14,7 +14,7 @@ CytoVerse is a browser-based platform for single-cell RNA-seq analysis, designed
 - **Efficient Search**: Employs Inverted File with Product Quantization (IVFPQ) for fast approximate nearest neighbor searches across over 20 million samples.
 - **Performance**: Built on WebAssembly and ONNX, enabling high-speed processing directly in the browser.
 - **Scalability**: Supports unlimited streaming analysis of h5ad files via h5wasm, ensuring flexibility for large datasets.
-- **Customization**: Save your labeled cells as a user reference.
+- **Customization**: Save your labeled cells as a user reference and share with other researchers.
 - **Collaboration**: Facilitates distributed discovery by allowing researchers to explore shared embedding spaces, identifying overlapping or complementary assays, particularly for perturbseq-driven research.
 
 This architecture ensures privacy, scalability, and collaborative potential without server dependency.
