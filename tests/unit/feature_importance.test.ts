@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as h5wasm from 'h5wasm';
 import { InferenceSession } from 'onnxruntime-web';
 import { FeatureImportanceCalculator } from '../../src/feature_importance';
+import { parse } from 'csv-parse/sync';
 
 // Match worker.ts interfaces
 interface H5DataSet {
@@ -85,73 +86,28 @@ function getCellNames(annData: H5File): string[] {
 }
 
 /**
- * Get cell type annotations from h5ad file
- * Returns array where index corresponds to cell index and value is the cell type string
+ * Load labels from CSV file
  */
-function getCellTypeAnnotations(annData: H5File): string[] {
-  const obs = annData.get('obs') as H5Group;
-  const cellTypeData = obs.get('CellType');
+interface LabelRecord {
+  cell_id: string;
+  category_label: string;
+  confidence: string;
+}
 
-  // CellType is stored as categorical data (codes + categories)
-  if (cellTypeData.type === 'Group') {
-    const catGroup = cellTypeData as H5Group;
-    const codesData = catGroup.get('codes') as H5DataSet;
-    const categoriesData = catGroup.get('categories') as H5DataSet;
+function loadLabelsFromCSV(csvPath: string): Map<string, string> {
+  const csvContent = fs.readFileSync(csvPath, 'utf-8');
+  const records = parse(csvContent, {
+    columns: true,
+    skip_empty_lines: true,
+  }) as LabelRecord[];
 
-    const codes = codesData.value;
-    const categories = categoriesData.value;
-
-    console.log('DEBUG: codes type:', typeof codes, 'length:', Array.isArray(codes) ? codes.length : 'N/A');
-    console.log('DEBUG: categories type:', typeof categories);
-    console.log('DEBUG: categories:', categories);
-    console.log('DEBUG: first 10 codes:', Array.isArray(codes) ? codes.slice(0, 10) : codes);
-
-    // Handle different possible formats
-    let codeArray: number[];
-    let categoryArray: string[];
-
-    // Convert codes to array if needed
-    if (Array.isArray(codes)) {
-      codeArray = codes;
-    } else if (
-      codes instanceof Float32Array ||
-      codes instanceof Int32Array ||
-      codes instanceof Uint32Array ||
-      codes instanceof Int8Array ||
-      codes instanceof Uint8Array ||
-      codes instanceof Int16Array ||
-      codes instanceof Uint16Array
-    ) {
-      codeArray = Array.from(codes);
-    } else {
-      const constructorName = codes && typeof codes === 'object' && 'constructor' in codes
-        ? (codes as { constructor: { name: string } }).constructor.name
-        : 'unknown';
-      throw new Error(`Unexpected codes type: ${typeof codes}, constructor: ${constructorName}`);
-    }
-
-    // Convert categories to string array if needed
-    if (Array.isArray(categories)) {
-      // Categories might be an array of strings or an array of byte arrays
-      categoryArray = categories.map(c => {
-        if (typeof c === 'string') return c;
-        if (c instanceof Uint8Array) return new TextDecoder().decode(c);
-        return String(c);
-      });
-    } else {
-      throw new Error(`Unexpected categories type: ${typeof categories}`);
-    }
-
-    console.log('DEBUG: categoryArray:', categoryArray);
-    console.log('DEBUG: codeArray length:', codeArray.length);
-
-    // Map codes to category strings - this gives us array[cellIndex] = cellType
-    const result = codeArray.map(code => categoryArray[code]);
-    console.log('DEBUG: first 5 mapped cell types:', result.slice(0, 5));
-    return result;
+  // Create a map of cell_id -> category_label
+  const labelMap = new Map<string, string>();
+  for (const record of records) {
+    labelMap.set(record.cell_id, record.category_label);
   }
 
-  throw new Error('CellType not found or not in expected categorical format');
+  return labelMap;
 }
 
 /**
@@ -453,15 +409,19 @@ describe('Occlusion-based Feature Importance', () => {
     expect(modelGenes.length).toBeGreaterThan(10000);
   });
 
-  it('should identify top 10 genes for cells from each cell type', async () => {
+  it('should identify top 10 genes for cells from each category label', async () => {
     if (!calculator) {
       console.warn('Skipping: calculator not initialized');
       return;
     }
 
-    const os = await import('os');
-    const homeDir = os.homedir();
-    const h5adPath = path.join(homeDir, 'data/cytoverse/allen-celltypes+human-cortex+m1-500.h5ad');
+    // Load labels from CSV
+    const csvPath = path.join(process.cwd(), 'tests/fixtures/allen-celltypes+human-cortex+m1-500_labels.csv');
+    const labelMap = loadLabelsFromCSV(csvPath);
+    console.log(`Loaded ${labelMap.size} cell labels from CSV`);
+
+    // Load h5ad file
+    const h5adPath = path.join(process.cwd(), 'tests/fixtures/allen-celltypes+human-cortex+m1-500.h5ad');
 
     if (!fs.existsSync(h5adPath)) {
       console.warn(`Skipping: H5AD not found at ${h5adPath}`);
@@ -484,41 +444,30 @@ describe('Occlusion-based Feature Importance', () => {
     // Extract metadata
     const cellNames = getCellNames(annData);
     const sampleGenes = getSampleGenes(annData);
-
-    // Debug: Check what's in obs
-    const obs = annData.get('obs');
-    if (obs && obs.type === 'Group') {
-      const obsGroup = obs as H5Group;
-      console.log('Available obs fields:', obsGroup.keys());
-    }
-
-    const cellTypeAnnotations = getCellTypeAnnotations(annData);
     const rawCounts = getRawCounts(annData);
 
     console.log(`Found ${cellNames.length} cells and ${sampleGenes.length} genes`);
-    console.log(`Cell type annotations length: ${cellTypeAnnotations.length}`);
-    console.log('First 5 cell types:', cellTypeAnnotations.slice(0, 5));
 
-    // Get unique cell types
-    const uniqueCellTypes = [...new Set(cellTypeAnnotations)];
-    console.log(`Found ${uniqueCellTypes.length} unique cell types`);
+    // Find unique category labels and select one cell from each
+    const categoryToCellMap = new Map<string, { cellId: string; cellIndex: number }>();
 
-    // Select one cell from each cell type
-    const selectedIndices: number[] = [];
-    const cellTypeLabels: string[] = [];
+    for (let i = 0; i < cellNames.length; i++) {
+      const cellId = cellNames[i];
+      const categoryLabel = labelMap.get(cellId);
 
-    // For each unique cell type, find the first cell with that type
-    for (const cellType of uniqueCellTypes) {
-      // Find first cell index with this cell type
-      const idx = cellTypeAnnotations.findIndex(ct => ct === cellType);
-      if (idx !== -1) {
-        selectedIndices.push(idx);
-        cellTypeLabels.push(cellType);
+      if (categoryLabel && !categoryToCellMap.has(categoryLabel)) {
+        categoryToCellMap.set(categoryLabel, { cellId, cellIndex: i });
       }
     }
 
-    console.log(`Selected ${selectedIndices.length} cells (one per cell type)`);
-    console.log('Cell types:', cellTypeLabels);
+    const selectedCells = Array.from(categoryToCellMap.entries()).map(([label, info]) => ({
+      categoryLabel: label,
+      cellId: info.cellId,
+      cellIndex: info.cellIndex,
+    }));
+
+    console.log(`Found ${selectedCells.length} unique category labels`);
+    console.log('Category labels:', selectedCells.map(c => c.categoryLabel));
 
     // Precompute inflation indices
     const inflationIndices = precomputeInflationIndices(modelGenes, sampleGenes);
@@ -528,12 +477,13 @@ describe('Occlusion-based Feature Importance', () => {
     // Process each selected cell
     console.log('\n=== Computing Feature Importance ===\n');
 
-    for (let i = 0; i < selectedIndices.length; i++) {
-      const cellIdx = selectedIndices[i];
-      const cellName = cellNames[cellIdx];
-      const cellType = cellTypeLabels[i];
+    for (let i = 0; i < selectedCells.length; i++) {
+      const cell = selectedCells[i];
+      const cellIdx = cell.cellIndex;
+      const cellName = cell.cellId;
+      const categoryLabel = cell.categoryLabel;
 
-      console.log(`\n[${i + 1}/${selectedIndices.length}] Cell Type: ${cellType}`);
+      console.log(`\n[${i + 1}/${selectedCells.length}] Category: ${categoryLabel}`);
       console.log(`Cell: ${cellName} (Index: ${cellIdx})`);
       console.log('─'.repeat(80));
 
