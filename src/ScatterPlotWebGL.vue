@@ -15,6 +15,30 @@
         <span class="legend-label">Query</span>
       </div>
     </div>
+    <!-- Cell Info Popup -->
+    <div
+      v-if="selectedCell"
+      class="cell-info-popup"
+      :style="{
+        left: `${popupPosition.x}px`,
+        top: `${popupPosition.y}px`,
+      }"
+    >
+      <div class="popup-header">
+        <span class="popup-title">Cell Information</span>
+        <button class="popup-close" @click="closePopup">×</button>
+      </div>
+      <div class="popup-content">
+        <div class="popup-row">
+          <span class="popup-label">Cell ID:</span>
+          <span class="popup-value">{{ selectedCell.cellId }}</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Label:</span>
+          <span class="popup-value">{{ selectedCell.label }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -46,6 +70,7 @@ interface Props {
   queryX: Float32Array;
   queryY: Float32Array;
   queryLabelIndices: Int16Array;
+  queryCellNames?: string[];
 }
 
 // Point size for base reference, user reference, query respectively
@@ -63,6 +88,10 @@ const isInitializedRef = ref(false);
 const isDrawingRef = ref(false);
 let updateInterval: number | null = null;
 
+// Popup state
+const selectedCell = ref<{ cellId: string; label: string } | null>(null);
+const popupPosition = ref({ x: 0, y: 0 });
+
 // Handle resize
 const handleResize = () => {
   if (containerRef.value && scatterplotRef) {
@@ -71,6 +100,71 @@ const handleResize = () => {
       height: containerRef.value.clientHeight,
     });
   }
+};
+
+// Handle cell click
+const handleCellClick = (event: { points: number[] }) => {
+  if (!event.points || event.points.length === 0) {
+    closePopup();
+    return;
+  }
+
+  const pointIndex = event.points[0];
+  const baseRefCount = props.baseRefX.length;
+  const userRefCount = props.userRefX.length;
+  const queryStartIndex = baseRefCount + userRefCount;
+
+  let cellId: string;
+  let label: string;
+
+  if (pointIndex < baseRefCount) {
+    // Base reference cell
+    cellId = `Base Ref ${pointIndex}`;
+    const labelIndex = props.baseRefLabelIndices[pointIndex];
+    label =
+      labelIndex >= 0 && labelIndex < props.baseRefLabels.length
+        ? props.baseRefLabels[labelIndex]
+        : 'Unknown';
+  } else if (pointIndex < queryStartIndex) {
+    // User reference cell
+    const userRefIndex = pointIndex - baseRefCount;
+    cellId = `User Ref ${userRefIndex}`;
+    const labelIndex = props.userRefLabelIndices[userRefIndex];
+    label =
+      labelIndex >= 0 && labelIndex < props.baseRefLabels.length
+        ? props.baseRefLabels[labelIndex]
+        : 'Unknown';
+  } else {
+    // Query cell
+    const queryCellIndex = pointIndex - queryStartIndex;
+    if (queryCellIndex < props.queryX.length) {
+      cellId = props.queryCellNames?.[queryCellIndex] || `Query ${queryCellIndex}`;
+      const labelIndex = props.queryLabelIndices[queryCellIndex];
+      label =
+        labelIndex >= 0 && labelIndex < props.baseRefLabels.length
+          ? props.baseRefLabels[labelIndex]
+          : 'Unknown';
+    } else {
+      closePopup();
+      return;
+    }
+  }
+
+  selectedCell.value = { cellId, label };
+
+  // Position popup near the mouse cursor
+  // We'll use a simple offset from the canvas center for now
+  if (containerRef.value) {
+    popupPosition.value = {
+      x: containerRef.value.clientWidth / 2 - 150,
+      y: 50,
+    };
+  }
+};
+
+// Close popup
+const closePopup = () => {
+  selectedCell.value = null;
 };
 
 // Initial setup and reference rendering
@@ -105,6 +199,9 @@ const initializeScatterplot = () => {
   });
 
   scatterplotRef = scatterplot;
+
+  // Subscribe to click events
+  scatterplot.subscribe('select', handleCellClick);
 
   const initialColumnData = {
     x: new Float32Array([...props.baseRefX, ...props.userRefX]),
@@ -298,5 +395,79 @@ onUnmounted(() => {
 .legend-label {
   font-size: 12px;
   color: white;
+}
+
+.cell-info-popup {
+  position: absolute;
+  z-index: 20;
+  background-color: rgba(30, 30, 30, 0.95);
+  border: 1px solid #424242;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  min-width: 300px;
+  max-width: 400px;
+  pointer-events: auto;
+}
+
+.popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #424242;
+  background-color: rgba(25, 25, 25, 0.95);
+  border-radius: 6px 6px 0 0;
+}
+
+.popup-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+}
+
+.popup-close {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.popup-close:hover {
+  color: white;
+}
+
+.popup-content {
+  padding: 12px 16px;
+}
+
+.popup-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.popup-row:last-child {
+  margin-bottom: 0;
+}
+
+.popup-label {
+  font-weight: 600;
+  color: #999;
+  min-width: 60px;
+}
+
+.popup-value {
+  color: white;
+  word-break: break-all;
 }
 </style>

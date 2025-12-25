@@ -305,6 +305,7 @@
             :query-x="query.x.value"
             :query-y="query.y.value"
             :query-label-indices="query.labelIndices.value"
+            :query-cell-names="query.cellNames.value"
           />
           <div v-else class="loading-container">
             <div>No data available</div>
