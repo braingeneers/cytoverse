@@ -40,6 +40,7 @@ interface StartMessage {
   useWebGPU: boolean;
   maxTextureSize: number;
   labelIndices: Int16Array;
+  featureImportanceOnly?: boolean; // If true, skip IVFPQ loading and cell processing
 }
 
 interface H5DataSet {
@@ -109,25 +110,103 @@ interface FinishedMessage {
   pqCodes: Uint8Array[];
 }
 
+interface FeatureImportanceRequestMessage {
+  type: 'calculate_feature_importance';
+  cellId: string;
+  cellIndex: number;
+  topN?: number;
+}
+
+interface FeatureImportanceProgressMessage {
+  type: 'feature_importance_progress';
+  cellId: string;
+  progress: number;
+}
+
+interface FeatureImportanceResultMessage {
+  type: 'feature_importance_result';
+  cellId: string;
+  genes: Array<{
+    gene: string;
+    importance: number;
+    expression: number;
+    index: number;
+  }>;
+}
+
 // Global state
 let model: ModelInfo | null = null;
 // let labelIndices: Int16Array | null = null;
 
+// Global state for h5 file and feature importance
+// @ts-ignore - Used for future feature importance operations
+let currentH5File: any = null;
+// @ts-ignore - Used for future feature importance operations
+let currentCellNames: string[] = [];
+let currentRawData: {
+  data: H5DataSet;
+  indices: H5DataSet | null;
+  indptr: H5DataSet | null;
+  isSparse: boolean;
+  sampleGenes: string[];
+  inflationIndices: number[];
+} | null = null;
+
+// Feature importance cancellation
+let currentFeatureImportanceCellId: string | null = null;
+let cancelFeatureImportance = false;
+
 // Handle messages from main thread
-self.addEventListener('message', async function (event: MessageEvent<StartMessage>) {
-  if (event.data.type === 'start') {
-    start(
-      event.data.modelID,
-      event.data.modelsURL,
-      event.data.h5File,
-      event.data.useWebGPU,
-      event.data.maxTextureSize,
-      event.data.labelIndices,
-      event.data.useUserIndex,
-      event.data.userIndexId
-    );
+self.addEventListener(
+  'message',
+  async function (
+    event: MessageEvent<StartMessage | FeatureImportanceRequestMessage>
+  ) {
+    console.log('Worker received message:', event.data.type);
+
+    if (event.data.type === 'start') {
+      start(
+        event.data.modelID,
+        event.data.modelsURL,
+        event.data.h5File,
+        event.data.useWebGPU,
+        event.data.maxTextureSize,
+        event.data.labelIndices,
+        event.data.useUserIndex,
+        event.data.userIndexId,
+        event.data.featureImportanceOnly || false
+      );
+    } else if (event.data.type === 'calculate_feature_importance') {
+      console.log('Worker: calculate_feature_importance message received');
+      // Cancel any existing feature importance calculation
+      if (currentFeatureImportanceCellId !== null) {
+        console.log(
+          `Cancelling feature importance for ${currentFeatureImportanceCellId}, starting new calculation for ${event.data.cellId}`
+        );
+        cancelFeatureImportance = true;
+        // Wait a bit for the cancellation to take effect
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      // Reset cancellation flag and start new calculation
+      cancelFeatureImportance = false;
+      currentFeatureImportanceCellId = event.data.cellId;
+
+      // Don't await - let it run in background
+      calculateFeatureImportance(
+        event.data.cellId,
+        event.data.cellIndex,
+        event.data.topN || 10
+      ).catch((error) => {
+        console.error('Unhandled error in calculateFeatureImportance:', error);
+        self.postMessage({
+          type: 'error',
+          error: `Feature importance failed: ${error instanceof Error ? error.message : String(error)}`,
+        } as ErrorMessage);
+      });
+    }
   }
-});
+);
 
 /**
  * Initialize model and IVFPQ components
@@ -138,7 +217,8 @@ async function instantiateModel(
   useWebGPU: boolean,
   maxTextureSize: number,
   useUserIndex: boolean = false,
-  userIndexId?: string
+  userIndexId?: string,
+  skipIVFPQ: boolean = false
 ): Promise<ModelInfo> {
   console.log(`Instantiating model ${modelID} from ${modelsURL}`);
   // self.postMessage({ type: 'status', message: 'Downloading model...' } as StatusMessage)
@@ -253,22 +333,28 @@ async function instantiateModel(
   );
   console.log('Mapper Output names', mappingSession.outputNames);
 
-  // Load IVFPQ or UserIVFPQ system
+  // Load IVFPQ or UserIVFPQ system (skip if only doing feature importance)
   let ivfpq: IVFPQ | UserIVFPQ;
-  const ivfpqBasePath = `${modelsURL}/${modelID}/ivfpq`;
-  if (useUserIndex && userIndexId) {
-    ivfpq = new UserIVFPQ(
-      ivfpqBasePath,
-      NUM_PARTITIONS_TO_SEARCH,
-      NUM_NEAREST_NEIGHBORS
-    );
-    await (ivfpq as UserIVFPQ).loadUserIndex(userIndexId, useWebGPU);
-    console.log('UserIVFPQ system loaded successfully');
-  } else {
+  if (!skipIVFPQ) {
     const ivfpqBasePath = `${modelsURL}/${modelID}/ivfpq`;
-    ivfpq = new IVFPQ(ivfpqBasePath, NUM_PARTITIONS_TO_SEARCH, NUM_NEAREST_NEIGHBORS);
-    await ivfpq.load(useWebGPU);
-    console.log('IVFPQ system loaded successfully');
+    if (useUserIndex && userIndexId) {
+      ivfpq = new UserIVFPQ(
+        ivfpqBasePath,
+        NUM_PARTITIONS_TO_SEARCH,
+        NUM_NEAREST_NEIGHBORS
+      );
+      await (ivfpq as UserIVFPQ).loadUserIndex(userIndexId, useWebGPU);
+      console.log('UserIVFPQ system loaded successfully');
+    } else {
+      ivfpq = new IVFPQ(ivfpqBasePath, NUM_PARTITIONS_TO_SEARCH, NUM_NEAREST_NEIGHBORS);
+      await ivfpq.load(useWebGPU);
+      console.log('IVFPQ system loaded successfully');
+    }
+  } else {
+    console.log('Skipping IVFPQ loading (feature importance only mode)');
+    // Create a dummy IVFPQ for type safety (won't be used for feature importance)
+    // @ts-expect-error - IVFPQ not needed for feature importance calculations
+    ivfpq = null;
   }
 
   return { modelID, genes, embeddingSession, mappingSession, ivfpq };
@@ -695,9 +781,12 @@ async function start(
   maxTextureSize: number,
   labelIndices: Int16Array,
   useUserIndex: boolean = false,
-  userIndexId?: string
+  userIndexId?: string,
+  featureImportanceOnly: boolean = false
 ): Promise<void> {
-  console.log(`Starting unified worker for model ${modelID} with file ${h5File.name}`);
+  console.log(
+    `Starting unified worker for model ${modelID} with file ${h5File.name}${featureImportanceOnly ? ' (feature importance only)' : ''}`
+  );
 
   self.postMessage({
     type: 'status',
@@ -716,7 +805,8 @@ async function start(
         useWebGPU,
         maxTextureSize,
         useUserIndex,
-        userIndexId
+        userIndexId,
+        featureImportanceOnly
       );
     }
 
@@ -733,10 +823,14 @@ async function start(
     const annData = new h5wasm.File(`/work/${h5File.name}`, 'r') as H5File;
     console.log(`Top level keys: ${annData.keys()}`);
 
+    // Store globally for feature importance
+    currentH5File = annData;
+
     // Extract metadata
     let cellNames: string[];
     try {
       cellNames = getCellNames(annData);
+      currentCellNames = cellNames;
       console.log(`Found ${cellNames.length} cells`);
     } catch (error) {
       throw new Error(
@@ -773,6 +867,27 @@ async function start(
 
     const { isSparse, data, indices, indptr } = rawCountsData;
     const inflationIndices = precomputeInflationIndices(model.genes, sampleGenes);
+
+    // Store data globally for feature importance
+    currentRawData = {
+      data,
+      indices,
+      indptr,
+      isSparse,
+      sampleGenes,
+      inflationIndices,
+    };
+
+    // Notify that we're ready for feature importance calculations
+    self.postMessage({
+      type: 'ready_for_feature_importance',
+    });
+
+    // If feature importance only mode, skip cell processing
+    if (featureImportanceOnly) {
+      console.log('Feature importance only mode - skipping cell processing');
+      return;
+    }
 
     self.postMessage({
       type: 'status',
@@ -886,8 +1001,9 @@ async function start(
     }
 
     // Clean up
-    annData.close();
-    FS.unmount('/work');
+    // Keep annData open for feature importance calculations
+    // annData.close();
+    // FS.unmount('/work');
 
     const finishedMessage: FinishedMessage = {
       type: 'finished',
@@ -911,6 +1027,190 @@ async function start(
     self.postMessage({
       type: 'error',
       error: errorMessage,
+    } as ErrorMessage);
+  }
+}
+
+/**
+ * Calculate feature importance for a specific cell
+ */
+async function calculateFeatureImportance(
+  cellId: string,
+  cellIndex: number,
+  topN: number
+) {
+  try {
+    console.log('Feature importance request received:', { cellId, cellIndex, topN });
+    console.log('Model initialized:', !!model);
+    console.log('Current raw data initialized:', !!currentRawData);
+
+    if (!model || !currentRawData) {
+      throw new Error(`Model or data not initialized (model: ${!!model}, data: ${!!currentRawData})`);
+    }
+
+    console.log(`Calculating feature importance for cell ${cellId} (index ${cellIndex})`);
+
+    // Extract cell expression data
+    const cellExpression = new Float32Array(model.genes.length);
+    const { data, indices, indptr, isSparse, inflationIndices } = currentRawData;
+
+    if (isSparse) {
+      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]) as number[];
+      const values = data.slice([[start, end]]) as number[];
+      const valueIndices = indices!.slice([[start, end]]) as number[];
+
+      for (let j = 0; j < valueIndices.length; j++) {
+        const sampleIndex = inflationIndices[valueIndices[j]];
+        if (sampleIndex !== -1) {
+          cellExpression[sampleIndex] = Number(values[j]);
+        }
+      }
+    } else {
+      let sampleExpression: number[] | null = null;
+      if (data.shape.length === 1) {
+        sampleExpression = data.slice([
+          [
+            cellIndex * currentRawData.sampleGenes.length,
+            (cellIndex + 1) * currentRawData.sampleGenes.length,
+          ],
+        ]) as number[];
+      } else if (data.shape.length === 2) {
+        sampleExpression = data.slice([
+          [cellIndex, cellIndex + 1],
+          [0, currentRawData.sampleGenes.length],
+        ]) as number[];
+      } else {
+        throw new Error('Unsupported data shape');
+      }
+
+      for (let j = 0; j < inflationIndices.length; j++) {
+        const sampleIndex = inflationIndices[j];
+        if (sampleIndex !== -1) {
+          cellExpression[sampleIndex] = Number(sampleExpression[j]);
+        }
+      }
+    }
+
+    // Get baseline embedding
+    const baselineTensor = new Tensor('float32', cellExpression, [1, model.genes.length]);
+    const baselineResults = await model.embeddingSession.run({ input: baselineTensor });
+    const baselineEmbedding = new Float32Array(
+      baselineResults.output.data as Float32Array
+    );
+
+    // Find expressed genes (above threshold)
+    const minExpression = 0.1;
+    const expressedGenes: number[] = [];
+    for (let i = 0; i < cellExpression.length; i++) {
+      if (cellExpression[i] > minExpression) {
+        expressedGenes.push(i);
+      }
+    }
+
+    console.log(
+      `Found ${expressedGenes.length} expressed genes out of ${cellExpression.length}`
+    );
+
+    // Calculate importance for each expressed gene
+    const importances = new Float32Array(model.genes.length);
+    const batchSize = 50;
+
+    for (let i = 0; i < expressedGenes.length; i += batchSize) {
+      // Check if calculation was cancelled
+      if (cancelFeatureImportance) {
+        console.log(`Feature importance calculation cancelled for cell ${cellId}`);
+        baselineResults.output.dispose();
+        currentFeatureImportanceCellId = null;
+        return;
+      }
+
+      const batchGenes = expressedGenes.slice(i, Math.min(i + batchSize, expressedGenes.length));
+
+      for (const geneIdx of batchGenes) {
+        // Check cancellation frequently
+        if (cancelFeatureImportance) {
+          console.log(`Feature importance calculation cancelled for cell ${cellId}`);
+          baselineResults.output.dispose();
+          currentFeatureImportanceCellId = null;
+          return;
+        }
+
+        // Create perturbed version (zero out gene)
+        const perturbed = new Float32Array(cellExpression);
+        perturbed[geneIdx] = 0.0;
+
+        // Get embedding for perturbed input
+        const perturbedTensor = new Tensor('float32', perturbed, [1, model.genes.length]);
+        const perturbedResults = await model.embeddingSession.run({
+          input: perturbedTensor,
+        });
+        const perturbedEmbedding = new Float32Array(
+          perturbedResults.output.data as Float32Array
+        );
+
+        // Calculate L2 distance
+        let sum = 0;
+        for (let j = 0; j < baselineEmbedding.length; j++) {
+          const diff = baselineEmbedding[j] - perturbedEmbedding[j];
+          sum += diff * diff;
+        }
+        importances[geneIdx] = Math.sqrt(sum);
+
+        perturbedResults.output.dispose();
+      }
+
+      // Report progress
+      const progress = Math.min(100, ((i + batchSize) / expressedGenes.length) * 100);
+      self.postMessage({
+        type: 'feature_importance_progress',
+        cellId,
+        progress,
+      } as FeatureImportanceProgressMessage);
+
+      // Yield to event loop
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    // Get top N genes
+    const results: Array<{
+      gene: string;
+      importance: number;
+      expression: number;
+      index: number;
+    }> = [];
+
+    for (let i = 0; i < importances.length; i++) {
+      if (importances[i] > 0) {
+        results.push({
+          gene: model.genes[i],
+          importance: importances[i],
+          expression: cellExpression[i],
+          index: i,
+        });
+      }
+    }
+
+    results.sort((a, b) => b.importance - a.importance);
+    const topGenes = results.slice(0, topN);
+
+    console.log(`Top ${topN} genes for cell ${cellId}:`, topGenes);
+
+    // Send results
+    self.postMessage({
+      type: 'feature_importance_result',
+      cellId,
+      genes: topGenes,
+    } as FeatureImportanceResultMessage);
+
+    baselineResults.output.dispose();
+    currentFeatureImportanceCellId = null;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Feature importance error:', errorMessage);
+    currentFeatureImportanceCellId = null;
+    self.postMessage({
+      type: 'error',
+      error: `Failed to calculate feature importance: ${errorMessage}`,
     } as ErrorMessage);
   }
 }

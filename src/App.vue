@@ -306,6 +306,8 @@
             :query-y="query.y.value"
             :query-label-indices="query.labelIndices.value"
             :query-cell-names="query.cellNames.value"
+            :feature-importance="featureImportance"
+            @query-cell-clicked="handleQueryCellClicked"
           />
           <div v-else class="loading-container">
             <div>No data available</div>
@@ -557,6 +559,28 @@ const xCenter = ref(0);
 const yCenter = ref(0);
 const maxRange = ref(1);
 
+// Feature importance state
+const featureImportance = ref<{
+  genes: Array<{
+    gene: string;
+    importance: number;
+    expression: number;
+    index: number;
+  }>;
+  isLoading: boolean;
+  progress: number;
+} | null>(null);
+
+// Track which cell we're currently calculating feature importance for
+let currentFeatureImportanceCellId: string | null = null;
+
+// Pending feature importance request (for when worker needs to be restarted)
+const pendingFeatureImportanceRequest = ref<{
+  cellId: string;
+  cellIndex: number;
+  topN: number;
+} | null>(null);
+
 // Worker management - single worker
 let worker: Worker | null = null;
 const cellPositions = new Map<string, { x: number; y: number }>(); // Track cell positions
@@ -565,6 +589,7 @@ const cellPositions = new Map<string, { x: number; y: number }>(); // Track cell
 const scatterPlotRef = ref<{
   startTimerUpdates: () => void;
   stopTimerUpdates: () => void;
+  closePopup: () => void;
   forceUpdate: () => void;
 } | null>(null);
 
@@ -694,6 +719,48 @@ const createWorker = () => {
         break;
       case 'cell_batch_update':
         handleCellBatchUpdate(evt.data as CellBatchUpdate);
+        break;
+      case 'ready_for_feature_importance':
+        console.log('Worker is ready for feature importance calculations');
+        // If we have a pending feature importance request, send it now
+        if (pendingFeatureImportanceRequest.value) {
+          const { cellId, cellIndex, topN } = pendingFeatureImportanceRequest.value;
+          console.log('Sending pending feature importance request:', {
+            cellId,
+            cellIndex,
+          });
+          worker?.postMessage({
+            type: 'calculate_feature_importance',
+            cellId,
+            cellIndex,
+            topN,
+          });
+          pendingFeatureImportanceRequest.value = null;
+        }
+        break;
+      case 'feature_importance_progress':
+        // Only update if this is for the current cell
+        if (
+          featureImportance.value &&
+          evt.data.cellId === currentFeatureImportanceCellId
+        ) {
+          featureImportance.value.progress = evt.data.progress;
+        }
+        break;
+      case 'feature_importance_result':
+        // Only update if this is for the current cell (ignore stale results)
+        if (evt.data.cellId === currentFeatureImportanceCellId) {
+          featureImportance.value = {
+            genes: evt.data.genes,
+            isLoading: false,
+            progress: 100,
+          };
+          console.log('Feature importance calculated:', evt.data.genes);
+        } else {
+          console.log(
+            `Ignoring stale feature importance result for ${evt.data.cellId} (current: ${currentFeatureImportanceCellId})`
+          );
+        }
         break;
       case 'finished':
         console.log('Worker finished processing');
@@ -1016,6 +1083,11 @@ const start = async () => {
   canCreateIndex.value = false;
   currentUserIndexArtifacts.value = null;
   cellPositions.clear();
+
+  // Close cell info popup and clear feature importance
+  scatterPlotRef.value?.closePopup();
+  featureImportance.value = null;
+  currentFeatureImportanceCellId = null;
   cellIdToIndex.clear();
 
   // Start time tracking
@@ -1133,6 +1205,65 @@ const exportResultsToCSV = async () => {
 
 const handleDrawerToggle = () => {
   sidebarOpen.value = !sidebarOpen.value;
+};
+
+const handleQueryCellClicked = (cellId: string, cellIndex: number) => {
+  console.log(`Query cell clicked: ${cellId} (index ${cellIndex})`);
+  console.log('Worker exists:', !!worker);
+
+  // Update current cell ID
+  currentFeatureImportanceCellId = cellId;
+
+  // Initialize loading state
+  featureImportance.value = {
+    genes: [],
+    isLoading: true,
+    progress: 0,
+  };
+
+  // If worker doesn't exist, create a new one and load the file for feature importance
+  if (!worker && selectedFile.value) {
+    console.log('Worker is null - creating new worker for feature importance');
+
+    // Store the pending request
+    pendingFeatureImportanceRequest.value = {
+      cellId,
+      cellIndex,
+      topN: 10,
+    };
+
+    // Create worker and start it with the file
+    createWorker();
+
+    // The worker will send 'ready_for_feature_importance' when it's loaded the data
+    // At that point, the message handler will send the pending request
+    if (worker && selectedFile.value) {
+      console.log('Starting worker with file for feature importance');
+      worker.postMessage({
+        type: 'start',
+        modelID: selectedModel.value,
+        modelsURL: import.meta.env.VITE_MODELS_URL || '/models',
+        h5File: selectedFile.value,
+        useWebGPU: useWebGPU.value,
+        maxTextureSize: maxTextureSize.value,
+        labelIndices: baseRef.labelIndices.value,
+        useUserIndex: false,
+        featureImportanceOnly: true, // Skip IVFPQ loading and cell processing
+      });
+    }
+  } else if (worker) {
+    // Worker already exists, send request immediately
+    console.log('Posting message to existing worker:', { cellId, cellIndex, topN: 10 });
+    worker.postMessage({
+      type: 'calculate_feature_importance',
+      cellId,
+      cellIndex,
+      topN: 10,
+    });
+  } else {
+    console.error('No file selected - cannot calculate feature importance');
+    featureImportance.value = null;
+  }
 };
 
 const confirmDeleteUserIndex = (indexId: string, indexName: string) => {
@@ -1337,6 +1468,11 @@ watch(selectedModel, async () => {
   totalLabeled.value = 0;
   cellPositions.clear();
   cellIdToIndex.clear();
+
+  // Close cell info popup and clear feature importance
+  scatterPlotRef.value?.closePopup();
+  featureImportance.value = null;
+  currentFeatureImportanceCellId = null;
 
   // Clear training data to refresh scatter plot
   baseRef.x.value = new Float32Array();

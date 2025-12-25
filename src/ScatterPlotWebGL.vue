@@ -37,6 +37,42 @@
           <span class="popup-label">Label:</span>
           <span class="popup-value">{{ selectedCell.label }}</span>
         </div>
+
+        <!-- Feature Importance Section (only for query cells) -->
+        <div v-if="selectedCell.isQueryCell" class="feature-importance-section">
+          <div class="section-header">Important Genes</div>
+
+          <!-- Loading state -->
+          <div v-if="featureImportance?.isLoading" class="loading-state">
+            <div class="loading-text">Calculating gene importance...</div>
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                :style="{ width: `${featureImportance.progress}%` }"
+              ></div>
+            </div>
+            <div class="progress-text">{{ featureImportance.progress.toFixed(0) }}%</div>
+          </div>
+
+          <!-- Results -->
+          <div
+            v-else-if="featureImportance?.genes && featureImportance.genes.length > 0"
+            class="gene-list"
+          >
+            <div
+              v-for="(gene, index) in featureImportance.genes"
+              :key="gene.index"
+              class="gene-item"
+            >
+              <span class="gene-rank">{{ index + 1 }}</span>
+              <span class="gene-name">{{ gene.gene }}</span>
+              <span class="gene-score">{{ gene.importance.toFixed(4) }}</span>
+            </div>
+          </div>
+
+          <!-- No results yet -->
+          <div v-else class="no-results">Click to calculate gene importance</div>
+        </div>
       </div>
     </div>
   </div>
@@ -58,6 +94,14 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import createScatterplot from 'regl-scatterplot';
 import { generateLabelColors } from './colors';
 
+// Gene importance data
+export interface GeneImportance {
+  gene: string;
+  importance: number;
+  expression: number;
+  index: number;
+}
+
 // Props interface
 interface Props {
   baseRefX: Float32Array;
@@ -71,12 +115,23 @@ interface Props {
   queryY: Float32Array;
   queryLabelIndices: Int16Array;
   queryCellNames?: string[];
+  featureImportance?: {
+    genes: GeneImportance[];
+    isLoading: boolean;
+    progress: number;
+  } | null;
+}
+
+// Emits
+interface Emits {
+  (e: 'queryCellClicked', cellId: string, cellIndex: number): void;
 }
 
 // Point size for base reference, user reference, query respectively
 const POINT_SIZES = [1, 3, 6];
 
 const props = defineProps<Props>();
+const emit = defineEmits<Emits>();
 
 // Template refs
 const containerRef = ref<HTMLDivElement>();
@@ -89,8 +144,16 @@ const isDrawingRef = ref(false);
 let updateInterval: number | null = null;
 
 // Popup state
-const selectedCell = ref<{ cellId: string; label: string } | null>(null);
+interface SelectedCellInfo {
+  cellId: string;
+  label: string;
+  cellIndex?: number;
+  isQueryCell: boolean;
+}
+
+const selectedCell = ref<SelectedCellInfo | null>(null);
 const popupPosition = ref({ x: 0, y: 0 });
+const selectedPointIndex = ref<number | null>(null);
 
 // Handle resize
 const handleResize = () => {
@@ -125,6 +188,7 @@ const handleCellClick = (event: { points: number[] }) => {
       labelIndex >= 0 && labelIndex < props.baseRefLabels.length
         ? props.baseRefLabels[labelIndex]
         : 'Unknown';
+    selectedCell.value = { cellId, label, isQueryCell: false };
   } else if (pointIndex < queryStartIndex) {
     // User reference cell
     const userRefIndex = pointIndex - baseRefCount;
@@ -134,6 +198,7 @@ const handleCellClick = (event: { points: number[] }) => {
       labelIndex >= 0 && labelIndex < props.baseRefLabels.length
         ? props.baseRefLabels[labelIndex]
         : 'Unknown';
+    selectedCell.value = { cellId, label, isQueryCell: false };
   } else {
     // Query cell
     const queryCellIndex = pointIndex - queryStartIndex;
@@ -144,13 +209,15 @@ const handleCellClick = (event: { points: number[] }) => {
         labelIndex >= 0 && labelIndex < props.baseRefLabels.length
           ? props.baseRefLabels[labelIndex]
           : 'Unknown';
+      selectedCell.value = { cellId, label, cellIndex: queryCellIndex, isQueryCell: true };
+
+      // Emit event for query cell clicks
+      emit('queryCellClicked', cellId, queryCellIndex);
     } else {
       closePopup();
       return;
     }
   }
-
-  selectedCell.value = { cellId, label };
 
   // Position popup near the mouse cursor
   // We'll use a simple offset from the canvas center for now
@@ -160,11 +227,22 @@ const handleCellClick = (event: { points: number[] }) => {
       y: 50,
     };
   }
+
+  // Highlight the selected point
+  selectedPointIndex.value = pointIndex;
+  if (scatterplotRef) {
+    scatterplotRef.select([pointIndex]);
+  }
 };
 
 // Close popup
 const closePopup = () => {
   selectedCell.value = null;
+  selectedPointIndex.value = null;
+  // Deselect the point
+  if (scatterplotRef) {
+    scatterplotRef.deselect();
+  }
 };
 
 // Initial setup and reference rendering
@@ -188,6 +266,7 @@ const initializeScatterplot = () => {
     height: containerRef.value.clientHeight,
     // Use a range for point sizes: base reference, user reference, query
     pointSize: POINT_SIZES,
+    pointSizeSelected: 1.5,
     // performanceMode: true, // Enable performance mode for better rendering
   });
 
@@ -196,6 +275,8 @@ const initializeScatterplot = () => {
     pointColor: labelColors,
     colorBy: 'valueA',
     sizeBy: 'valueB',
+    pointOutlineWidth: 2,
+    opacity: 0.8,
   });
 
   scatterplotRef = scatterplot;
@@ -307,6 +388,7 @@ defineExpose({
   startTimerUpdates,
   stopTimerUpdates,
   forceUpdate,
+  closePopup,
 });
 
 onMounted(() => {
@@ -469,5 +551,112 @@ onUnmounted(() => {
 .popup-value {
   color: white;
   word-break: break-all;
+}
+
+.feature-importance-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #424242;
+}
+
+.section-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 12px;
+}
+
+.loading-state {
+  padding: 8px 0;
+}
+
+.loading-text {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background-color: #424242;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: #1976d2;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #999;
+  text-align: right;
+}
+
+.gene-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.gene-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.gene-list::-webkit-scrollbar-track {
+  background: #2a2a2a;
+  border-radius: 3px;
+}
+
+.gene-list::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 3px;
+}
+
+.gene-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.gene-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 12px;
+  border-bottom: 1px solid #333;
+}
+
+.gene-item:last-child {
+  border-bottom: none;
+}
+
+.gene-rank {
+  color: #999;
+  min-width: 20px;
+  text-align: right;
+  font-weight: 600;
+}
+
+.gene-name {
+  flex: 1;
+  color: white;
+  font-family: monospace;
+}
+
+.gene-score {
+  color: #1976d2;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.no-results {
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+  padding: 8px 0;
 }
 </style>
