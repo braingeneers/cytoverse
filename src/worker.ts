@@ -237,6 +237,10 @@ async function instantiateModel(
     throw new Error(`Error fetching onnx file: ${response.status}`);
   }
 
+  // Get total size from Content-Length header if available
+  const contentLength = response.headers.get('content-length');
+  const totalBytes = contentLength ? parseInt(contentLength, 10) : null;
+
   // Collect chunks dynamically (Content-Length may not be available in all servers)
   const chunks: Uint8Array[] = [];
   const reader = response.body!.getReader();
@@ -252,7 +256,7 @@ async function instantiateModel(
       type: 'progress',
       message: 'Downloading model...',
       countFinished: Math.round(receivedBytes / (1024 * 1024)),
-      totalToProcess: 0, // Unknown total when Content-Length is missing
+      totalToProcess: totalBytes ? Math.round(totalBytes / (1024 * 1024)) : 0,
     } as ProgressMessage);
   }
 

@@ -10,7 +10,7 @@ test:
 build:
 	npm run build
 	echo "Removing dev from models list"
-	sed -i '' '/^dev$/d' ./dist/models/models.txt
+	sed -i '' '/^dev$$/d' ./dist/models/models.txt
 	rm -rf dist/models/dev
 
 deploy:
