@@ -34,7 +34,7 @@
           <span class="popup-value">{{ selectedCell.cellId }}</span>
         </div>
         <div class="popup-row">
-          <span class="popup-label">Label:</span>
+          <span class="popup-label">Reference Label:</span>
           <span class="popup-value">{{ selectedCell.label }}</span>
         </div>
 
