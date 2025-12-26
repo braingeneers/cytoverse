@@ -1242,7 +1242,7 @@ const handleQueryCellClicked = (cellId: string, cellIndex: number) => {
       worker!.postMessage({
         type: 'start',
         modelID: selectedModel.value,
-        modelsURL: import.meta.env.VITE_MODELS_URL || '/models',
+        modelsURL: `${sitePath}/models`,
         h5File: selectedFile.value,
         useWebGPU: useWebGPU.value,
         maxTextureSize: maxTextureSize.value,
