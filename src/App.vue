@@ -124,7 +124,7 @@
               v-model="selectedCategory"
               data-testid="category-select-dropdown"
               :items="availableCategories"
-              label="Category"
+              label="Labels"
               :disabled="isRunning"
               variant="outlined"
               density="comfortable"
@@ -1237,9 +1237,9 @@ const handleQueryCellClicked = (cellId: string, cellIndex: number) => {
 
     // The worker will send 'ready_for_feature_importance' when it's loaded the data
     // At that point, the message handler will send the pending request
-    if (worker && selectedFile.value) {
+    if (selectedFile.value) {
       console.log('Starting worker with file for feature importance');
-      worker.postMessage({
+      worker!.postMessage({
         type: 'start',
         modelID: selectedModel.value,
         modelsURL: import.meta.env.VITE_MODELS_URL || '/models',
