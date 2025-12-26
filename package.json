@@ -8,15 +8,9 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
     "type-check": "vue-tsc --noEmit",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "serve-dist-python": "python3 -m http.server 4173 -d dist/",
-    "deploy": "rsync -avh --delete dist/ rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/",
-    "pull-model": "rsync -avh --delete rcurrie@hgwdev.gi.ucsc.edu:~/cytoverse/public/models/scimilarity/ public/models/scimilarity/"
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",

@@ -7,6 +7,17 @@ test:
 	python -m pytest tests/e2e
 	npx playwright test tests/e2e/run.spec.ts
 
+build:
+	npm run build
+	echo "Removing dev from models list"
+	sed -i '' '/^dev$/d' ./dist/models/models.txt
+	rm -rf dist/models/dev
+
+deploy:
+	echo "Updating https://cells-test.gi.ucsc.edu/cytoverse/..."
+	rsync -avh --delete dist/ \
+		rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/
+
 benchmark:
 	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
 
