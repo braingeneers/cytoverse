@@ -1,13 +1,11 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import { viteStaticCopy } from 'vite-plugin-static-copy'
-import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
   optimizeDeps: {
-    exclude: [
-      'onnxruntime-web', 
-    ],
+    exclude: ['onnxruntime-web'],
   },
   base: './', // For gh-pages
   server: {
@@ -65,6 +63,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     minify: 'terser',
+    chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -76,10 +75,10 @@ export default defineConfig({
       },
       onwarn(warning, warn) {
         if (warning.message.includes('"use client"')) {
-          return
+          return;
         }
-        warn(warning)
+        warn(warning);
       },
     },
   },
-})
+});

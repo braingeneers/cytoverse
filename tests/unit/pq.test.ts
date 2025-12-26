@@ -18,17 +18,6 @@ vi.mock('onnxruntime-web', () => ({
   })),
 }));
 
-// Mock fs for file operations
-vi.mock('fs', () => ({
-  promises: {
-    readFile: vi.fn(),
-  },
-}));
-
-vi.mock('path', () => ({
-  resolve: vi.fn((path: string) => path),
-}));
-
 describe.each([
   { useWebGPU: false },
   { useWebGPU: true },

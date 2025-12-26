@@ -38,7 +38,6 @@ export interface PQSearchResults {
  */
 export class PQDistance {
   private basePath: string;
-  private useHttp: boolean;
   private metadata: PQMetadata | null = null;
   private codebooks: Float32Array | null = null;
   private codebooksTensor: ort.Tensor | null = null;
@@ -48,7 +47,6 @@ export class PQDistance {
 
   constructor(basePath: string) {
     this.basePath = basePath;
-    this.useHttp = basePath.startsWith('http://') || basePath.startsWith('https://');
   }
 
   /**
@@ -110,37 +108,18 @@ export class PQDistance {
   }
 
   /**
-   * Fetch data from HTTP or file system
+   * Fetch data from HTTP
    */
   private async fetchData(
     path: string,
     type: 'json' | 'arraybuffer'
   ): Promise<unknown> {
     const fullPath = `${this.basePath}/${path}`;
-
-    if (this.useHttp) {
-      const response = await fetch(fullPath);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`);
-      }
-      return type === 'json' ? response.json() : response.arrayBuffer();
-    } else {
-      // For Node.js file system access
-      const fs = await import('fs');
-      const fsPath = await import('path');
-      const resolvedPath = fsPath.resolve(fullPath);
-
-      if (type === 'json') {
-        const data = await fs.promises.readFile(resolvedPath, 'utf-8');
-        return JSON.parse(data);
-      } else {
-        const buffer = await fs.promises.readFile(resolvedPath);
-        return buffer.buffer.slice(
-          buffer.byteOffset,
-          buffer.byteOffset + buffer.byteLength
-        );
-      }
+    const response = await fetch(fullPath);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`);
     }
+    return type === 'json' ? response.json() : response.arrayBuffer();
   }
 
   /**

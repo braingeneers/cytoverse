@@ -1,12 +1,12 @@
 /**
- * IVFPQ (Inverted File with Product Quantization) for approximate vectore
- * nearest neighbor search over http in the browser or Node.js
+ * IVFPQ (Inverted File with Product Quantization) for approximate vector
+ * nearest neighbor search over HTTP in the browser
  *
  * - Uses pre-trained IVFPQ models from the Python pipeline to perform ANN search
  * - Combines IVF partitioning with PQ compression
  * - Supports using ONNX models for coarse centroid and distance computation
- * - Supports both HTTP and file system access for model artifacts.
- * - Support using a previously searched index as a 'user generated' index
+ * - Supports HTTP access for model artifacts
+ * - Supports using a previously searched index as a 'user generated' index
  */
 
 import * as ort from 'onnxruntime-web';
@@ -49,7 +49,6 @@ export class IVFPQ {
   private basePath: string;
   private n_probe: number;
   private k: number;
-  private useHttp: boolean;
   private metadata: IVFPQMetadata | null = null;
   private centroids: Float32Array | null = null;
   private pqDistance: PQDistance | null = null;
@@ -58,7 +57,6 @@ export class IVFPQ {
 
   constructor(basePath: string, n_probe: number = 1, k: number = 10) {
     this.basePath = basePath;
-    this.useHttp = basePath.startsWith('http://') || basePath.startsWith('https://');
     this.n_probe = n_probe;
     this.k = k;
   }
@@ -357,37 +355,18 @@ export class IVFPQ {
   }
 
   /**
-   * Fetch data from HTTP or file system
+   * Fetch data from HTTP
    */
   private async fetchData(
     path: string,
     type: 'json' | 'arraybuffer'
   ): Promise<unknown> {
     const fullPath = `${this.basePath}/${path}`;
-
-    if (this.useHttp) {
-      const response = await fetch(fullPath);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`);
-      }
-      return type === 'json' ? response.json() : response.arrayBuffer();
-    } else {
-      // For Node.js file system access
-      const fs = await import('fs');
-      const fsPath = await import('path');
-      const resolvedPath = fsPath.resolve(fullPath);
-
-      if (type === 'json') {
-        const data = await fs.promises.readFile(resolvedPath, 'utf-8');
-        return JSON.parse(data);
-      } else {
-        const buffer = await fs.promises.readFile(resolvedPath);
-        return buffer.buffer.slice(
-          buffer.byteOffset,
-          buffer.byteOffset + buffer.byteLength
-        );
-      }
+    const response = await fetch(fullPath);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`);
     }
+    return type === 'json' ? response.json() : response.arrayBuffer();
   }
 
   /**
