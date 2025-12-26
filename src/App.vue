@@ -124,7 +124,7 @@
               v-model="selectedCategory"
               data-testid="category-select-dropdown"
               :items="availableCategories"
-              label="Labels"
+              label="Label"
               :disabled="isRunning"
               variant="outlined"
               density="comfortable"
