@@ -17,14 +17,9 @@ these merged results are returned, but internally all vectors from all probed
 partitions are considered and sorted globally.
 """
 
-import sys
-from pathlib import Path
-
-# Add src directory to path for ivfpq import
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from unittest import result
 import pytest
+from pathlib import Path
+from unittest import result
 import torch
 import numpy as np
 from pathlib import Path

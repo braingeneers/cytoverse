@@ -2,13 +2,8 @@
 Unit tests for embedding data validation.
 """
 
-import sys
-from pathlib import Path
-
-# Add src directory to path for ivfpq import
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 import pytest
+from pathlib import Path
 import anndata
 import tiledb
 import pandas as pd

@@ -10,13 +10,8 @@ The new IVFPQ implementation returns distances and vector IDs from all partition
 which are then merged and sorted. A consensus is computed from the top-k (default 50)
 results from this merged list to determine the final nearest neighbors.
 """
-import sys
-from pathlib import Path
-
-# Add src directory to path for ivfpq import
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 import pytest
+from pathlib import Path
 import torch
 import numpy as np
 from pathlib import Path

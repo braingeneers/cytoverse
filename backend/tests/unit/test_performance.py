@@ -9,13 +9,8 @@ This test:
 4. Compares accuracy between the two methods
 """
 
-import sys
-from pathlib import Path
-
-# Add src directory to path for ivfpq import
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 import pytest
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import anndata
