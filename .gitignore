@@ -1,11 +1,11 @@
 data
 public/models
-public/sample.h5ad
+
+.claude/
 
 .tsbuildinfo.*
 tsconfig.tsbuildinfo
 
-node_modules
 frontend/node_modules
 dist
 

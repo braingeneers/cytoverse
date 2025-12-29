@@ -8,7 +8,7 @@
       "name": "export scimilarity model dev",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/scimilarity_export_model.py",
+      "program": "${workspaceFolder}/backend/src/scimilarity_export_model.py",
       "console": "integratedTerminal",
       "args": [
         "data/models/scimilarity/model_v1.1",
@@ -19,7 +19,7 @@
       "name": "export scimilarity embedding dev",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/scimilarity_to_embeddings.py",
+      "program": "${workspaceFolder}/backend/src/scimilarity_to_embeddings.py",
       "console": "integratedTerminal",
       "args": [
         "embeddings",
@@ -42,7 +42,7 @@
       "name": "export h5ad embeddings",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/h5ad_to_embeddings.py",
+      "program": "${workspaceFolder}/backend/src/h5ad_to_embeddings.py",
       "console": "integratedTerminal",
       "args": [
         "~/data/h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad",
@@ -58,7 +58,7 @@
       "name": "ivfpq train dev",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/ivfpq_train.py",
+      "program": "${workspaceFolder}/backend/src/ivfpq_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
@@ -80,7 +80,7 @@
       "name": "pumap train dev",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/backend/src/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
@@ -95,7 +95,7 @@
       "name": "pumap train sspsygene",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/backend/src/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "train",
@@ -112,7 +112,7 @@
       "name": "pumap map dev",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/backend/src/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "map",
@@ -128,7 +128,7 @@
       "name": "pumap export dev",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/scripts/pumap_train.py",
+      "program": "${workspaceFolder}/backend/src/pumap_train.py",
       "console": "integratedTerminal",
       "args": [
         "export",

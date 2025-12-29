@@ -45,13 +45,13 @@ sspsygene: notice scimilarity-model \
 
 # Embedding Model (only one for now)
 scimilarity-model:
-	cd backend && python scripts/scimilarity_export_model.py \
+	cd backend && python src/scimilarity_export_model.py \
 	../data/models/scimilarity/model_v1.1 \
 	../public/models/$(model_id)/embedding
 
 # Embeddings (Must be first as model uses these to validate the export)
 scimilarity-embeddings:
-	cd backend && python scripts/scimilarity_to_embeddings.py embeddings \
+	cd backend && python src/scimilarity_to_embeddings.py embeddings \
 	../data/models/scimilarity/model_v1.1/cellsearch \
 	../data/references/$(model_id)/ \
 	--labels prediction \
@@ -60,12 +60,12 @@ scimilarity-embeddings:
 	--validate
 
 scimilarity-aligned-embeddings:
-	cd backend && python scripts/scimilarity_to_embeddings.py annotation-aligned \
+	cd backend && python src/scimilarity_to_embeddings.py annotation-aligned \
 	../data/models/scimilarity/model_v1.1 \
 	../data/references/$(model_id)
 
 sspsygene-embeddings:
-	cd backend && python scripts/h5ad_to_embeddings.py \
+	cd backend && python src/h5ad_to_embeddings.py \
 	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
 	../data/models/scimilarity/model_v1.1 \
 	../data/references/sspsygene \
@@ -77,7 +77,7 @@ sspsygene-embeddings:
 
 # IVF
 ivfpq-train:
-	cd backend && python scripts/ivfpq_train.py train \
+	cd backend && python src/ivfpq_train.py train \
 	../data/references/$(model_id)/embeddings.npy \
 	../public/models/$(model_id)/ivfpq \
 	--max-vectors-for-training 2_400_000 \
@@ -88,7 +88,7 @@ ivfpq-train:
 
 # PUMAP
 pumap-train:
-	cd backend && python scripts/pumap_train.py train \
+	cd backend && python src/pumap_train.py train \
 	../data/references/$(model_id)/embeddings.npy \
 	../data/references/$(model_id)/labels.parquet \
 	../public/models/$(model_id)/pumap \
@@ -96,7 +96,7 @@ pumap-train:
 	--num-vectors 250000
 
 pumap-map:
-	cd backend && python scripts/pumap_train.py map \
+	cd backend && python src/pumap_train.py map \
 	../public/models/$(model_id)/pumap/model.onnx \
 	../data/references/$(model_id)/embeddings.npy \
 	../data/references/$(model_id)/ \
@@ -104,7 +104,7 @@ pumap-map:
 	--num-vectors 1_000_000
 
 pumap-export:
-	cd backend && python scripts/pumap_train.py export \
+	cd backend && python src/pumap_train.py export \
 	../data/references/$(model_id)/ \
 	../public/models/$(model_id)/pumap/
 
@@ -112,9 +112,9 @@ pumap: pumap-train pumap-map pumap-export
 
 # Testing
 update-validations:
-	cd backend && python scripts/label.py \
+	cd backend && python src/label.py \
 	      ../frontend/tests/fixtures/GSE136831_subsample_100.h5ad \
 	      ../frontend/tests/fixtures/GSE136831_subsample_100.labels.csv
-	cd backend && python scripts/label.py \
+	cd backend && python src/label.py \
 	      ../public/sample.h5ad \
 	      ../frontend/tests/fixtures/sample.labels.csv

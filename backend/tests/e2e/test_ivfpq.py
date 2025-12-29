@@ -20,8 +20,8 @@ partitions are considered and sorted globally.
 import sys
 from pathlib import Path
 
-# Add scripts directory to path for ivfpq import
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+# Add src directory to path for ivfpq import
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from unittest import result
 import pytest
