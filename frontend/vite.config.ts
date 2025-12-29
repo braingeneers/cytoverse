@@ -4,6 +4,7 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
+  root: 'frontend',
   optimizeDeps: {
     exclude: ['onnxruntime-web'],
   },
@@ -39,7 +40,7 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-          src: 'node_modules/onnxruntime-web/dist/*.wasm',
+          src: '../node_modules/onnxruntime-web/dist/*.wasm',
           dest: 'assets',
         },
         {

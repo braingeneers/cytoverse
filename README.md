@@ -106,7 +106,7 @@ Given an h5ad file you can generate a reference from it via:
 
 ```
 export model_id="new_model_id"
-python scripts/h5ad_to_embeddings.py \
+python backend/src/h5ad_to_embeddings.py \
     <path to your h5ad file> \
 	data/models/scimilarity/model_v1.1 \
 	data/references/$model_id

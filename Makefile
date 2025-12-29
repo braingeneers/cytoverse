@@ -2,13 +2,13 @@
 export model_id=scimilarity
 
 test:
-	cd frontend && npx vitest run tests/unit
-	cd backend && python -m pytest tests/unit
-	cd backend && python -m pytest tests/e2e
-	cd frontend && npx playwright test tests/e2e/run.spec.ts
+	python -m pytest backend/tests/unit
+	python -m pytest backend/tests/e2e
+	npx vitest run frontend/tests/unit --silent
+	npx playwright test --config frontend/playwright.config.ts
 
 build:
-	cd frontend && npm run build
+	npm run build
 	echo "Removing dev from models list"
 	sed -i '' '/^dev$$/d' ./dist/models/models.txt
 	rm -rf dist/models/dev
@@ -112,9 +112,9 @@ pumap: pumap-train pumap-map pumap-export
 
 # Testing
 update-validations:
-	cd backend && python src/label.py \
-	      ../frontend/tests/fixtures/GSE136831_subsample_100.h5ad \
-	      ../frontend/tests/fixtures/GSE136831_subsample_100.labels.csv
-	cd backend && python src/label.py \
-	      ../public/sample.h5ad \
-	      ../frontend/tests/fixtures/sample.labels.csv
+	python backend/src/label.py \
+	      fixtures/GSE136831_subsample_100.h5ad \
+	      fixtures/GSE136831_subsample_100.labels.csv
+	python backend/src/label.py \
+	      public/sample.h5ad \
+	      fixtures/sample.labels.csv

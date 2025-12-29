@@ -2,12 +2,13 @@
 data
 public/models
 
+# Claude AI files
 .claude/
 
+# JavaScript/TypeScript
+dist/
+node_modules/
 .tsbuildinfo.*
-
-frontend/node_modules
-dist
 
 # Python
 __pycache__/
@@ -20,7 +21,7 @@ venv/
 .venv/
 pip-wheel-metadata/
 *.egg-info/
-dist/a``
+dist/
 build/
 *.whl
 

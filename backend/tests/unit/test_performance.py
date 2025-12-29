@@ -3,7 +3,7 @@
 Test accuracy and performance of IVFPQ system compared to SCimilarity.
 
 This test:
-1. Uses data/GSE136831_subsample.h5ad as query file
+1. Uses fixtures/GSE136831_subsample.h5ad as query file
 2. Generates embeddings and labels using SCimilarity
 3. Uses IVFPQ to generate labels for the same cells
 4. Compares accuracy between the two methods
@@ -29,43 +29,24 @@ from ivfpq import IVFPQ
 @pytest.fixture
 def test_data_path():
     """Path to test h5ad file."""
-    return Path(__file__).parent.parent / "fixtures" / "GSE136831_subsample_100.h5ad"
+    return Path("fixtures") / "GSE136831_subsample_100.h5ad"
 
 
 @pytest.fixture
 def scimilarity_model_path():
-    """Path to SCimilarity model."""
-    return (
-        Path(__file__).parent.parent.parent
-        / "data"
-        / "models"
-        / "scimilarity"
-        / "model_v1.1"
-    )
+    return Path("data") / "models" / "scimilarity" / "model_v1.1"
 
 
 @pytest.fixture
 def ivfpq_model_path():
     """Path to IVFPQ model artifacts."""
-    return (
-        Path(__file__).parent.parent.parent
-        / "public"
-        / "models"
-        / "scimilarity"
-        / "ivfpq"
-    )
+    return Path("public") / "models" / "scimilarity" / "ivfpq"
 
 
 @pytest.fixture
 def reference_labels_path():
     """Path to reference labels."""
-    return (
-        Path(__file__).parent.parent.parent
-        / "data"
-        / "references"
-        / "scimilarity"
-        / "labels.parquet"
-    )
+    return Path("data") / "references" / "scimilarity" / "labels.parquet"
 
 
 def get_scimilarity_predictions(
@@ -183,13 +164,7 @@ def test_ivfpq_self_accuracy(ivfpq_model_path, reference_labels_path):
     import json
 
     # Load reference embeddings
-    reference_embeddings_path = (
-        Path(__file__).parent.parent.parent
-        / "data"
-        / "references"
-        / "scimilarity"
-        / "embeddings.npy"
-    )
+    reference_embeddings_path = Path("data/references/scimilarity/embeddings.npy")
 
     print("Loading reference embeddings...")
     reference_embeddings = np.load(reference_embeddings_path)

@@ -47,6 +47,21 @@ umap-pytorch = { git = "https://github.com/rcurrie/umap_pytorch.git" }
 [tool.uv]
 override-dependencies = ["umap-learn>=0.5.0", "numba>=0.60.0"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["backend/src"]
+
 [tool.pytest.ini_options]
 pythonpath = ["backend/src"]
 testpaths = ["backend/tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:anndata._settings",
+    "ignore:You are using the legacy TorchScript-based ONNX export:DeprecationWarning",
+    "ignore:The feature will be removed. Please remove usage of this function:DeprecationWarning:torch.onnx.utils",
+    "ignore:divide by zero encountered in matmul:RuntimeWarning:sklearn.utils.extmath",
+    "ignore:overflow encountered in matmul:RuntimeWarning:sklearn.utils.extmath",
+    "ignore:invalid value encountered in matmul:RuntimeWarning:sklearn.utils.extmath",
+    "ignore:divide by zero encountered in matmul:RuntimeWarning:sklearn.cluster._kmeans",
+    "ignore:overflow encountered in matmul:RuntimeWarning:sklearn.cluster._kmeans",
+    "ignore:invalid value encountered in matmul:RuntimeWarning:sklearn.cluster._kmeans",
+    "ignore:Number of distinct clusters.*found smaller than n_clusters:sklearn.exceptions.ConvergenceWarning",
+]

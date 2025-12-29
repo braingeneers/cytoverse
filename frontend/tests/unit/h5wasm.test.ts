@@ -22,7 +22,7 @@ describe('h5wasm H5AD File Loading', () => {
   })
 
   it('should open file directly from disk using NODEFS (if available)', async () => {
-    const h5FilePath = resolve(__dirname, '../fixtures/GSE136831_subsample_10.h5ad')
+    const h5FilePath = resolve(__dirname, '../../../fixtures/GSE136831_subsample_10.h5ad')
     const h5Dir = dirname(h5FilePath)
     const h5FileName = 'GSE136831_subsample_10.h5ad'
     
@@ -96,7 +96,7 @@ describe('h5wasm H5AD File Loading', () => {
   })
 
   it('should read dimensions from sparse H5AD file', async () => {
-    const h5FilePath = resolve(__dirname, '../fixtures/GSE136831_subsample_10.h5ad')
+    const h5FilePath = resolve(__dirname, '../../../fixtures/GSE136831_subsample_10.h5ad')
     const h5Dir = dirname(h5FilePath)
     const h5FileName = 'GSE136831_subsample_10.h5ad'
     
@@ -157,7 +157,7 @@ describe('h5wasm H5AD File Loading', () => {
   })
 
   it('should detect sparse vs dense matrix format', async () => {
-    const h5FilePath = resolve(__dirname, '../fixtures/GSE136831_subsample_10.h5ad')
+    const h5FilePath = resolve(__dirname, '../../../fixtures/GSE136831_subsample_10.h5ad')
     const h5Dir = dirname(h5FilePath)
     const h5FileName = 'GSE136831_subsample_10.h5ad'
     

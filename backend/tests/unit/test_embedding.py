@@ -20,7 +20,7 @@ from ivfpq import IVFPQ
 @pytest.fixture
 def adata():
     """Fixture that loads an h5ad file."""
-    data_path = Path("tests/fixtures/GSE136831_subsample_10.h5ad")
+    data_path = Path("fixtures/GSE136831_subsample_10.h5ad")
     return anndata.read_h5ad(data_path)
 
 
@@ -124,7 +124,7 @@ class TestEmbeddingData:
     ):
         """Test computing embeddings and finding nearest neighbors using IVFPQ search."""
         # Load 10 cells from GSE154109.h5ad - was part of the training and reference?
-        gse154109_path = Path("tests/fixtures/GSE154109_10.h5ad")
+        gse154109_path = Path("fixtures/GSE154109_10.h5ad")
         adata_query = anndata.read_h5ad(gse154109_path)
         adata_query = adata_query[:10].copy()  # Take first 10 cells
 
@@ -193,9 +193,7 @@ class TestEmbeddingData:
         ), "Distance should be a float"
 
         # See if the metadata on this cell matches that in the h5ad
-        neighbor_metadata = metadata_db.query().df[
-            nearest_vector_id:nearest_vector_id
-        ]
+        neighbor_metadata = metadata_db.query().df[nearest_vector_id:nearest_vector_id]
         print("Neighbor metadata")
         print(neighbor_metadata.iloc[0])
 

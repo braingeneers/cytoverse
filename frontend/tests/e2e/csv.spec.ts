@@ -9,7 +9,7 @@ test('Navigate to root, run analysis, download and validate CSV', async ({ page 
 
   // NOTE: Playwright reads the entire file so in practice only use MB size files...
   const fileInputElement = page.locator('[type="file"]');
-  await fileInputElement.setInputFiles('tests/fixtures/GSE136831_subsample_100.h5ad');
+  await fileInputElement.setInputFiles('fixtures/GSE136831_subsample_100.h5ad');
 
   await page.getByTestId('run-stop-button').click();
   await expect(page.getByTestId('status')).toHaveText(/Finished/, {
@@ -45,7 +45,7 @@ test('Navigate to root, run analysis, download and validate CSV', async ({ page 
 
   // Load reference CSV file
   const referenceContent = readFileSync(
-    'tests/fixtures/GSE136831_subsample_100.labels.csv',
+    'fixtures/GSE136831_subsample_100.labels.csv',
     'utf-8'
   );
   const referenceRecords: Array<{ cell_id: string; category_label: string }> = parse(

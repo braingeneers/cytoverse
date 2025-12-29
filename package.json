@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "type-check": "vue-tsc --noEmit",
-    "build": "vue-tsc && vite build",
-    "preview": "vite preview"
+    "dev": "vite --config frontend/vite.config.ts",
+    "type-check": "vue-tsc --project frontend/tsconfig.json --noEmit",
+    "build": "vue-tsc --project frontend/tsconfig.json && vite build --config frontend/vite.config.ts",
+    "preview": "vite preview --config frontend/vite.config.ts"
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",
