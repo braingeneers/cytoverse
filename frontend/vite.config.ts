@@ -43,11 +43,11 @@ export default defineConfig({
           dest: 'assets',
         },
         {
-          src: 'public/*',
+          src: '../public/*',
           dest: './',
         },
         {
-          src: 'public/models/*',
+          src: '../public/models/*',
           dest: './models',
         },
       ],
@@ -59,7 +59,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: '../dist',
     emptyOutDir: true,
     sourcemap: true,
     minify: 'terser',

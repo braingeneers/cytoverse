@@ -4,7 +4,7 @@ import pluginVue from 'eslint-plugin-vue';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', '.venv'] },
+  { ignores: ['../dist', 'node_modules', '../.venv'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,js}'],

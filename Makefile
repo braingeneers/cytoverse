@@ -2,13 +2,13 @@
 export model_id=scimilarity
 
 test:
-	npx vitest run tests/unit
-	python -m pytest tests/unit
-	python -m pytest tests/e2e
-	npx playwright test tests/e2e/run.spec.ts
+	cd frontend && npx vitest run tests/unit
+	cd backend && python -m pytest tests/unit
+	cd backend && python -m pytest tests/e2e
+	cd frontend && npx playwright test tests/e2e/run.spec.ts
 
 build:
-	npm run build
+	cd frontend && npm run build
 	echo "Removing dev from models list"
 	sed -i '' '/^dev$$/d' ./dist/models/models.txt
 	rm -rf dist/models/dev
@@ -19,16 +19,16 @@ deploy:
 		rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/
 
 benchmark:
-	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
+	cd backend && python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
 
 test-no-capture:
-	python -m pytest ivfpq/python/tests --capture=no --log-cli-level=DEBUG
+	cd backend && python -m pytest tests --capture=no --log-cli-level=DEBUG
 
-# Populate model artifacts for the selected model to web/public/models/<model_id>
+# Populate model artifacts for the selected model to public/models/<model_id>
 notice:
 	@echo "⚙️ Populating $(model_id)"
 	@echo "- Embeddings & metadata to data/references/$(model_id)"
-	@echo "- Web Artificats to web/public/models/$(model_id)"
+	@echo "- Web Artificats to public/models/$(model_id)"
 
 update-models-list:
 	ls -d public/models/*/ | while read -r dir; do basename "$$dir"; done > public/models/models.txt
@@ -45,30 +45,30 @@ sspsygene: notice scimilarity-model \
 
 # Embedding Model (only one for now)
 scimilarity-model:
-	python scripts/scimilarity_export_model.py \
-	data/models/scimilarity/model_v1.1 \
-	public/models/$(model_id)/embedding
+	cd backend && python scripts/scimilarity_export_model.py \
+	../data/models/scimilarity/model_v1.1 \
+	../public/models/$(model_id)/embedding
 
 # Embeddings (Must be first as model uses these to validate the export)
 scimilarity-embeddings:
-	python scripts/scimilarity_to_embeddings.py  embeddings \
-	data/models/scimilarity/model_v1.1/cellsearch \
-	data/references/$(model_id)/ \
+	cd backend && python scripts/scimilarity_to_embeddings.py embeddings \
+	../data/models/scimilarity/model_v1.1/cellsearch \
+	../data/references/$(model_id)/ \
 	--labels prediction \
 	--labels tissue \
 	--labels study \
 	--validate
 
 scimilarity-aligned-embeddings:
-	python scripts/scimilarity_to_embeddings.py annotation-aligned \
-	data/models/scimilarity/model_v1.1 \
-	data/references/$(model_id)
+	cd backend && python scripts/scimilarity_to_embeddings.py annotation-aligned \
+	../data/models/scimilarity/model_v1.1 \
+	../data/references/$(model_id)
 
 sspsygene-embeddings:
-	python scripts/h5ad_to_embeddings.py \
+	cd backend && python scripts/h5ad_to_embeddings.py \
 	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
-	data/models/scimilarity/model_v1.1 \
-	data/references/sspsygene \
+	../data/models/scimilarity/model_v1.1 \
+	../data/references/sspsygene \
 	--labels Dataset \
 	--labels Gestational_week \
 	--labels Class \
@@ -77,9 +77,9 @@ sspsygene-embeddings:
 
 # IVF
 ivfpq-train:
-	python scripts/ivfpq_train.py train \
-	data/references/$(model_id)/embeddings.npy \
-	public/models/$(model_id)/ivfpq \
+	cd backend && python scripts/ivfpq_train.py train \
+	../data/references/$(model_id)/embeddings.npy \
+	../public/models/$(model_id)/ivfpq \
 	--max-vectors-for-training 2_400_000 \
 	--pq-m 32 \
 	--pq-k 256 \
@@ -88,33 +88,33 @@ ivfpq-train:
 
 # PUMAP
 pumap-train:
-	python scripts/pumap_train.py train \
-	data/references/$(model_id)/embeddings.npy \
-	data/references/$(model_id)/labels.parquet \
-	public/models/$(model_id)/pumap \
+	cd backend && python scripts/pumap_train.py train \
+	../data/references/$(model_id)/embeddings.npy \
+	../data/references/$(model_id)/labels.parquet \
+	../public/models/$(model_id)/pumap \
 	--stratify-label $(stratify_label) \
 	--num-vectors 250000
 
 pumap-map:
-	python scripts/pumap_train.py map \
-	public/models/$(model_id)/pumap/model.onnx \
-	data/references/$(model_id)/embeddings.npy \
-	data/references/$(model_id)/ \
+	cd backend && python scripts/pumap_train.py map \
+	../public/models/$(model_id)/pumap/model.onnx \
+	../data/references/$(model_id)/embeddings.npy \
+	../data/references/$(model_id)/ \
 	--export-png \
 	--num-vectors 1_000_000
 
 pumap-export:
-	python scripts/pumap_train.py export \
-	data/references/$(model_id)/ \
-	public/models/$(model_id)/pumap/
+	cd backend && python scripts/pumap_train.py export \
+	../data/references/$(model_id)/ \
+	../public/models/$(model_id)/pumap/
 
 pumap: pumap-train pumap-map pumap-export
 
 # Testing
 update-validations:
-	python scripts/label.py \
-	      ivfpq/python/tests/fixtures/GSE136831_subsample_100.h5ad \
-	      tests/e2e/GSE136831_subsample_100.labels.csv
-	python scripts/label.py \
-	      public/sample.h5ad \
-	      tests/e2e/sample.labels.csv
+	cd backend && python scripts/label.py \
+	      ../frontend/tests/fixtures/GSE136831_subsample_100.h5ad \
+	      ../frontend/tests/fixtures/GSE136831_subsample_100.labels.csv
+	cd backend && python scripts/label.py \
+	      ../public/sample.h5ad \
+	      ../frontend/tests/fixtures/sample.labels.csv
