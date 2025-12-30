@@ -136,11 +136,12 @@ def test_onnx_vs_pytorch_baseline(
     # Take first 10 cells for quick testing
     adata = adata[:10, :].copy()
 
-    # PYTORCH PATH
+    # PYTORCH PATH (following scimilarity_export_model.py validation pattern)
     print("\n=== PyTorch Pipeline ===")
+    # PyTorch: align + lognorm + get_embeddings
     aligned_adata = align_dataset(adata, ce.gene_order)
 
-    # Find raw counts
+    # Ensure we have raw counts in layers['counts']
     if "counts" in adata.layers:
         aligned_adata.layers["counts"] = aligned_adata.layers["counts"]
     elif "raw_counts" in adata.layers:
@@ -148,22 +149,37 @@ def test_onnx_vs_pytorch_baseline(
     elif "raw" in adata.layers:
         aligned_adata.layers["counts"] = aligned_adata.layers["raw"]
     else:
+        # Assume .X contains raw counts
         aligned_adata.layers["counts"] = aligned_adata.X
 
     lognorm_adata = lognorm_counts(aligned_adata)
-    pytorch_embeddings = ce.get_embeddings(lognorm_adata.X)
+
+    # Extract preprocessed data for PyTorch
+    scimilarity_preprocessed = (
+        lognorm_adata.X.toarray().astype(np.float32)
+        if hasattr(lognorm_adata.X, "toarray")
+        else lognorm_adata.X.astype(np.float32)
+    )
+    pytorch_embeddings = ce.get_embeddings(scimilarity_preprocessed)
 
     print(f"PyTorch embeddings shape: {pytorch_embeddings.shape}")
 
-    # ONNX PATH
+    # ONNX PATH (following scimilarity_export_model.py validation pattern)
     print("\n=== ONNX Pipeline ===")
+    # ONNX: raw aligned counts (model does preprocessing internally)
     onnx_session = ort.InferenceSession(str(onnx_model_path))
-    model_genes = _load_model_genes(genes_path)
-    inflation_indices = _create_inflation_indices(adata.var_names.tolist(), model_genes)
 
-    onnx_embeddings = _compute_embeddings_onnx(
-        adata, onnx_session, inflation_indices, len(model_genes), batch_size=10
+    # Get raw aligned counts (from layers['counts'], NOT .X which might be normalized)
+    raw_aligned_counts = (
+        aligned_adata.layers["counts"].toarray().astype(np.float32)
+        if hasattr(aligned_adata.layers["counts"], "toarray")
+        else aligned_adata.layers["counts"].astype(np.float32)
     )
+
+    # Run through ONNX (which does preprocessing internally)
+    onnx_embeddings = onnx_session.run(
+        ["output"], {"input": raw_aligned_counts}
+    )[0]
 
     print(f"ONNX embeddings shape: {onnx_embeddings.shape}")
 
