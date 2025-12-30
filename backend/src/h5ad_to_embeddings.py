@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 import os
 import typer
 from pathlib import Path
@@ -9,6 +10,14 @@ import scanpy as sc
 
 import onnxruntime as ort
 from tqdm import tqdm
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
 def _load_model_genes(genes_path: Path) -> list[str]:
@@ -24,7 +33,7 @@ def _load_model_genes(genes_path: Path) -> list[str]:
     with open(genes_path, "r") as f:
         genes = [line.strip() for line in f if line.strip()]
 
-    print(f"Loaded {len(genes)} genes from {genes_path}")
+    logger.info("Loaded %d genes from %s", len(genes), genes_path)
     return genes
 
 
@@ -55,11 +64,12 @@ def _create_inflation_indices(
     n_missing = np.sum(inflation_indices == -1)
     n_present = len(inflation_indices) - n_missing
 
-    print(f"Gene mapping: {n_present}/{len(sample_genes)} genes present in model")
-    print(f"  Missing genes: {n_missing}")
+    logger.info(
+        "Gene mapping: %d/%d genes present in model", n_present, len(sample_genes)
+    )
+    logger.info("  Missing genes: %d", n_missing)
 
-    if n_present == 0:
-        raise ValueError("No genes from sample found in model vocabulary!")
+    assert n_present > 0, "No genes from sample found in model vocabulary!"
 
     return inflation_indices
 
@@ -143,7 +153,9 @@ def _compute_embeddings_onnx(
     n_cells = adata.n_obs
     embeddings_list = []
 
-    print(f"Computing embeddings for {n_cells} cells in batches of {batch_size}...")
+    logger.info(
+        "Computing embeddings for %d cells in batches of %d", n_cells, batch_size
+    )
 
     # Get input/output names from ONNX model
     input_name = onnx_session.get_inputs()[0].name
@@ -160,16 +172,16 @@ def _compute_embeddings_onnx(
 
         # Run ONNX inference
         # Note: model.onnx does preprocessing internally (normalize + log1p)
-        batch_embeddings = onnx_session.run([output_name], {input_name: batch_inflated})[
-            0
-        ]
+        batch_embeddings = onnx_session.run(
+            [output_name], {input_name: batch_inflated}
+        )[0]
 
         embeddings_list.append(batch_embeddings)
 
     # Concatenate all batches
     embeddings = np.concatenate(embeddings_list, axis=0)
 
-    print(f"Generated embeddings: {embeddings.shape}")
+    logger.info("Generated embeddings: %s", embeddings.shape)
     return embeddings.astype(np.float32)
 
 
@@ -197,32 +209,30 @@ def _validate_outputs(
     3. Verifies embeddings match when regenerated through ONNX model
     """
 
-    print(f"Validating output files against h5ad: {h5ad_path}")
+    logger.info("Validating output files against h5ad: %s", h5ad_path)
 
     # Load the h5ad file
-    print("\nLoading h5ad file...")
+    logger.info("Loading h5ad file...")
     adata = sc.read_h5ad(h5ad_path)
-    print(f"  Shape: {adata.shape}")
+    logger.info("  Shape: %s", adata.shape)
 
     # Load output files
     embeddings_path = output_dir / "embeddings.npy"
     labels_path = output_dir / "labels.parquet"
 
-    if not embeddings_path.exists():
-        print(f"❌ Error: {embeddings_path} not found")
-        raise typer.Exit(1)
+    assert embeddings_path.exists(), f"Embeddings file not found: {embeddings_path}"
 
-    print(f"\nLoading embeddings from: {embeddings_path}")
+    logger.info("Loading embeddings from: %s", embeddings_path)
     embeddings_array = np.load(embeddings_path)
-    print(f"  Embeddings shape: {embeddings_array.shape}")
+    logger.info("  Embeddings shape: %s", embeddings_array.shape)
 
     # Check if labels file exists
     has_labels = labels_path.exists()
     if has_labels:
-        print(f"\nLoading labels from: {labels_path}")
+        logger.info("Loading labels from: %s", labels_path)
         labels_df = pd.read_parquet(labels_path)
-        print(f"  Labels shape: {labels_df.shape}")
-        print(f"  Label columns: {list(labels_df.columns)}")
+        logger.info("  Labels shape: %s", labels_df.shape)
+        logger.info("  Label columns: %s", list(labels_df.columns))
 
     # Select random indices to validate
     n_cells = min(adata.n_obs, embeddings_array.shape[0])
@@ -230,15 +240,15 @@ def _validate_outputs(
     random_indices = np.random.choice(n_cells, size=n_samples, replace=False)
     random_indices.sort()
 
-    print(f"\nValidating {n_samples} random samples: {random_indices}")
+    logger.info("Validating %d random samples: %s", n_samples, random_indices)
 
     # Validate labels (if present)
     if has_labels:
-        print("\n=== Validating Labels ===")
+        logger.info("=== Validating Labels ===")
         all_labels_match = True
 
         for idx in random_indices:
-            print(f"\nRow {idx}:")
+            logger.info("Row %d:", idx)
 
             # Check each label column
             for col in labels_df.columns:
@@ -248,30 +258,34 @@ def _validate_outputs(
 
                     match = str(h5ad_value) == str(parquet_value)
                     status = "✅" if match else "❌"
-                    print(
-                        f"  {col}: {status} h5ad='{h5ad_value}' parquet='{parquet_value}'"
+                    logger.info(
+                        "  %s: %s h5ad='%s' parquet='%s'",
+                        col,
+                        status,
+                        h5ad_value,
+                        parquet_value,
                     )
 
                     if not match:
                         all_labels_match = False
 
         if all_labels_match:
-            print("\n✅ All labels match!")
+            logger.info("✅ All labels match!")
         else:
-            print("\n❌ Some labels do not match!")
+            logger.info("❌ Some labels do not match!")
 
     # Validate embeddings
-    print("\n=== Validating Embeddings ===")
+    logger.info("=== Validating Embeddings ===")
 
     # Load ONNX model
-    print(f"\nLoading ONNX model from: {onnx_model_path}")
+    logger.info("Loading ONNX model from: %s", onnx_model_path)
     onnx_session = ort.InferenceSession(str(onnx_model_path))
 
-    print(f"Loading model genes from: {genes_path}")
+    logger.info("Loading model genes from: %s", genes_path)
     model_genes = _load_model_genes(genes_path)
 
     # Process subset through ONNX
-    print("\nProcessing subset through ONNX model...")
+    logger.info("Processing subset through ONNX model...")
     subset_adata = adata[random_indices, :].copy()
 
     # Create gene inflation mapping
@@ -297,29 +311,33 @@ def _validate_outputs(
         match = max_diff < tolerance
 
         status = "✅" if match else "❌"
-        print(f"\nRow {idx}: {status} max_diff={max_diff:.2e}")
+        logger.info("Row %d: %s max_diff=%.2e", idx, status, max_diff)
 
         if not match:
             all_embeddings_match = False
             # Show first few values for debugging
-            print(f"  Regenerated[:5]: {regenerated[:5]}")
-            print(f"  Stored[:5]: {stored[:5]}")
+            logger.info("  Regenerated[:5]: %s", regenerated[:5])
+            logger.info("  Stored[:5]: %s", stored[:5])
 
     if all_embeddings_match:
-        print(f"\n✅ All embeddings match within tolerance ({tolerance})!")
+        logger.info("✅ All embeddings match within tolerance (%s)!", tolerance)
     else:
-        print(f"\n❌ Some embeddings do not match within tolerance ({tolerance})!")
+        logger.info("❌ Some embeddings do not match within tolerance (%s)!", tolerance)
 
     # Summary
-    print("\n=== Validation Summary ===")
+    logger.info("=== Validation Summary ===")
     if has_labels:
-        print(f"Labels: {'✅ PASS' if all_labels_match else '❌ FAIL'}")
-    print(f"Embeddings: {'✅ PASS' if all_embeddings_match else '❌ FAIL'}")
+        logger.info(
+            "Labels: %s", "✅ PASS" if all_labels_match else "❌ FAIL"
+        )
+    logger.info(
+        "Embeddings: %s", "✅ PASS" if all_embeddings_match else "❌ FAIL"
+    )
 
     if (not has_labels or all_labels_match) and all_embeddings_match:
-        print("\n✅ Validation PASSED!")
+        logger.info("✅ Validation PASSED!")
     else:
-        print("\n❌ Validation FAILED!")
+        logger.info("❌ Validation FAILED!")
         raise typer.Exit(1)
 
 
@@ -329,31 +347,27 @@ def ingest(
         exists=True,
         file_okay=True,
         dir_okay=False,
-        default="fixtures/allen-celltypes+human-cortex+various-cortical-areas-1000.h5ad",
         help="Path to h5ad file to process",
     ),
     onnx_model_path: Path = typer.Argument(
         exists=True,
         file_okay=True,
         dir_okay=False,
-        default="public/models/scimilarity/embedding/model.onnx",
         help="Path to ONNX embedding model file (model.onnx)",
     ),
     genes_path: Path = typer.Argument(
         exists=True,
         file_okay=True,
         dir_okay=False,
-        default="public/models/scimilarity/embedding/genes.txt",
         help="Path to model genes vocabulary file (genes.txt)",
     ),
     output_path: Path = typer.Argument(
         file_okay=False,
         dir_okay=True,
-        default="data/references/dev",
         help="Output directory path",
     ),
     labels: list[str] = typer.Option(
-        ["cortical_layer_label", "CellType"],
+        [],
         help="Label columns from adata.obs to extract (e.g., --labels cell_type --labels tissue)",
     ),
     max_cells: int = typer.Option(
@@ -383,57 +397,59 @@ def ingest(
     4. Saves embeddings to embeddings.parquet and labels to labels.parquet
     """
 
-    print(f"Loading h5ad file: {h5ad_path}")
+    logger.info("Loading h5ad file: %s", h5ad_path)
     adata = sc.read_h5ad(h5ad_path)
-    print(f"  Loaded data shape: {adata.shape}")
-    print(f"  Available obs columns: {list(adata.obs.columns)}")
+    logger.info("  Loaded data shape: %s", adata.shape)
+    logger.info("  Available obs columns: %s", list(adata.obs.columns))
 
     # Subset cells if max_cells is specified
     if max_cells is not None and adata.n_obs > max_cells:
-        print(f"\nSubsetting to first {max_cells} cells (from {adata.n_obs} total)")
+        logger.info("Subsetting to first %d cells (from %d total)", max_cells, adata.n_obs)
         adata = adata[:max_cells, :]
-        print(f"  Subset data shape: {adata.shape}")
+        logger.info("  Subset data shape: %s", adata.shape)
 
     # Validate label columns
     if labels:
-        print(f"\nValidating label columns: {labels}")
+        logger.info("Validating label columns: %s", labels)
         valid_labels = []
         for label in labels:
             if label not in adata.obs.columns:
-                print(f"  ❌ Warning: Column '{label}' not found in adata.obs")
+                logger.warning("Column '%s' not found in adata.obs", label)
                 continue
 
             unique_count = adata.obs[label].nunique()
-            print(f"  Column '{label}': {unique_count} unique values")
+            logger.info("  Column '%s': %d unique values", label, unique_count)
 
             if unique_count > 1000:
-                print(
-                    f"  ❌ Warning: Column '{label}' has {unique_count} unique values, exceeding limit of 1000. Skipping."
+                logger.warning(
+                    "Column '%s' has %d unique values, exceeding limit of 1000. Skipping.",
+                    label,
+                    unique_count,
                 )
                 continue
 
             valid_labels.append(label)
 
         labels = valid_labels
-        print(f"  ✅ Valid label columns: {labels}")
+        logger.info("  ✅ Valid label columns: %s", labels)
 
     if not labels:
-        print(
-            "  ⚠️ No valid label columns specified or found. Only embeddings will be exported."
+        logger.warning(
+            "No valid label columns specified or found. Only embeddings will be exported."
         )
 
     # Load ONNX model and genes
-    print(f"\nLoading ONNX model from: {onnx_model_path}")
+    logger.info("Loading ONNX model from: %s", onnx_model_path)
     onnx_session = ort.InferenceSession(str(onnx_model_path))
 
-    print(f"Loading model genes from: {genes_path}")
+    logger.info("Loading model genes from: %s", genes_path)
     model_genes = _load_model_genes(genes_path)
 
     # Process through ONNX embedding pipeline
-    print("\nProcessing data through ONNX embedding model...")
+    logger.info("Processing data through ONNX embedding model...")
 
     # Step 1: Create gene inflation mapping
-    print("  1. Creating gene inflation mapping...")
+    logger.info("  1. Creating gene inflation mapping...")
     inflation_indices = _create_inflation_indices(
         adata.var_names.tolist(), model_genes
     )
@@ -445,19 +461,19 @@ def ingest(
     )
 
     # Create output directory
-    print(f"\nCreating output directory: {output_path}")
+    logger.info("Creating output directory: %s", output_path)
     os.makedirs(output_path, exist_ok=True)
 
     # Save embeddings to embeddings.npy
     embeddings_path = output_path / "embeddings.npy"
-    print(f"Saving embeddings to: {embeddings_path}")
+    logger.info("Saving embeddings to: %s", embeddings_path)
 
     # Save embeddings as numpy array
     np.save(embeddings_path, embeddings.astype(np.float32))
 
     # Extract and save labels if specified
     if labels:
-        print(f"Extracting labels: {labels}")
+        logger.info("Extracting labels: %s", labels)
 
         # Create labels dataframe
         labels_df = pd.DataFrame()
@@ -467,30 +483,30 @@ def ingest(
             labels_df[label] = adata.obs[label].values
             # Convert to categorical for efficient storage
             labels_df[label] = labels_df[label].astype("category")
-            print(f"  Added '{label}': {labels_df[label].nunique()} unique values")
+            logger.info("  Added '%s': %d unique values", label, labels_df[label].nunique())
 
         # Save labels to parquet without index
         labels_path = output_path / "labels.parquet"
-        print(f"Saving labels to: {labels_path}")
+        logger.info("Saving labels to: %s", labels_path)
         labels_df.to_parquet(
             labels_path,
             compression="snappy",
             index=None,
         )
 
-        print(f"Labels saved with shape: {labels_df.shape}")
+        logger.info("Labels saved with shape: %s", labels_df.shape)
 
-    print("\n✅ Processing complete!")
-    print(f"   Embeddings: {embeddings_path} (shape: {embeddings.shape})")
+    logger.info("✅ Processing complete!")
+    logger.info("   Embeddings: %s (shape: %s)", embeddings_path, embeddings.shape)
     if labels:
-        print(f"   Labels: {labels_path} (shape: {labels_df.shape})")
-    print(f"   Output directory: {output_path}")
+        logger.info("   Labels: %s (shape: %s)", labels_path, labels_df.shape)
+    logger.info("   Output directory: %s", output_path)
 
     # Run validation if requested
     if validate:
-        print("\n" + "=" * 60)
-        print("Running validation...")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("Running validation...")
+        logger.info("=" * 60)
         try:
             _validate_outputs(
                 h5ad_path=h5ad_path,
@@ -501,7 +517,7 @@ def ingest(
                 batch_size=batch_size,
             )
         except Exception as e:
-            print(f"\n❌ Validation failed: {e}")
+            logger.error("Validation failed: %s", e)
             raise typer.Exit(1)
 
 
