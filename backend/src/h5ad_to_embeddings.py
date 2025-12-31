@@ -7,9 +7,11 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import scanpy as sc
+from typing import Union
 
 import onnxruntime as ort
 from tqdm import tqdm
+import s3fs
 
 # Configure logging
 logging.basicConfig(
@@ -18,6 +20,98 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+def _load_h5ad_from_path_or_s3(path: Union[str, Path]) -> sc.AnnData:
+    """
+    Load h5ad file from local path or S3 URI.
+
+    Args:
+        path: Local file path or S3 URI (s3://bucket/key)
+
+    Returns:
+        Loaded AnnData object
+    """
+    path_str = str(path)
+
+    if path_str.startswith("s3://"):
+        logger.info("Loading from S3: %s", path_str)
+        fs = s3fs.S3FileSystem(anon=False)
+        with fs.open(path_str, "rb") as f:
+            adata = sc.read_h5ad(f)
+        logger.info("  S3 file loaded successfully")
+    else:
+        logger.info("Loading from local path: %s", path_str)
+        adata = sc.read_h5ad(path_str)
+
+    return adata
+
+
+def _validate_and_convert_to_csr(adata: sc.AnnData) -> sc.AnnData:
+    """
+    Validate that .X is in CSR format for efficient cell-by-cell access.
+
+    CSR (Compressed Sparse Row) format enables efficient row slicing,
+    which is critical for processing cells in batches during embedding.
+
+    Args:
+        adata: AnnData object to validate
+
+    Returns:
+        AnnData with .X in CSR format (converts if necessary)
+    """
+    from scipy.sparse import issparse, isspmatrix_csr, csr_matrix
+
+    if not issparse(adata.X):
+        logger.warning("  .X is dense array, converting to CSR for efficiency")
+        adata.X = csr_matrix(adata.X)
+    elif not isspmatrix_csr(adata.X):
+        current_format = type(adata.X).__name__
+        logger.warning(
+            "  .X is in %s format, converting to CSR for efficient row access",
+            current_format,
+        )
+        adata.X = adata.X.tocsr()
+    else:
+        logger.info("  ✅ .X is already in CSR format")
+
+    return adata
+
+
+def _random_sample_cells(
+    adata: sc.AnnData, max_cells: int, seed: int
+) -> sc.AnnData:
+    """
+    Randomly sample cells from AnnData object.
+
+    Uses stratified sampling when possible to preserve label distributions.
+
+    Args:
+        adata: AnnData object to sample from
+        max_cells: Maximum number of cells to keep
+        seed: Random seed for reproducibility
+
+    Returns:
+        Sampled AnnData object
+    """
+    n_cells = adata.n_obs
+
+    assert max_cells > 0, f"max_cells must be positive, got {max_cells}"
+    assert max_cells <= n_cells, f"max_cells ({max_cells}) exceeds dataset size ({n_cells})"
+
+    logger.info("Randomly sampling %d cells from %d total", max_cells, n_cells)
+
+    # Set random seed for reproducibility
+    np.random.seed(seed)
+
+    # Random sample without replacement
+    indices = np.random.choice(n_cells, size=max_cells, replace=False)
+    indices.sort()  # Sort for consistent ordering
+
+    sampled = adata[indices, :].copy()
+    logger.info("  Sample indices: min=%d, max=%d", indices.min(), indices.max())
+
+    return sampled
 
 
 def _load_model_genes(genes_path: Path) -> list[str]:
@@ -193,7 +287,7 @@ app = typer.Typer(
 
 
 def _validate_outputs(
-    h5ad_path: Path,
+    h5ad_path: Union[str, Path],
     output_dir: Path,
     onnx_model_path: Path,
     genes_path: Path,
@@ -204,16 +298,16 @@ def _validate_outputs(
     Validate that output files maintain correct row ordering and embeddings match.
 
     This function:
-    1. Loads random rows from the original h5ad
+    1. Loads random rows from the original h5ad (supports S3)
     2. Verifies labels match at those indices in labels.parquet
     3. Verifies embeddings match when regenerated through ONNX model
     """
 
     logger.info("Validating output files against h5ad: %s", h5ad_path)
 
-    # Load the h5ad file
+    # Load the h5ad file (supports S3)
     logger.info("Loading h5ad file...")
-    adata = sc.read_h5ad(h5ad_path)
+    adata = _load_h5ad_from_path_or_s3(h5ad_path)
     logger.info("  Shape: %s", adata.shape)
 
     # Load output files
@@ -343,11 +437,8 @@ def _validate_outputs(
 
 @app.command()
 def ingest(
-    h5ad_path: Path = typer.Argument(
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        help="Path to h5ad file to process",
+    h5ad_path: str = typer.Argument(
+        help="Path or S3 URI to h5ad file (s3://bucket/key or local path)",
     ),
     onnx_model_path: Path = typer.Argument(
         exists=True,
@@ -388,25 +479,32 @@ def ingest(
     ),
 ) -> None:
     """
-    Process h5ad file through SCimilarity to generate embeddings and extract labels.
+    Process h5ad file through ONNX embedding model to generate embeddings and extract labels.
+
+    Supports both local files and S3 URIs (s3://bucket/key).
 
     This script:
-    1. Loads the h5ad file
-    2. Processes raw counts through SCimilarity (align_dataset, lognorm_counts, get_embeddings)
-    3. Extracts specified label columns from adata.obs
-    4. Saves embeddings to embeddings.parquet and labels to labels.parquet
+    1. Loads the h5ad file (from local path or S3)
+    2. Validates/converts to CSR format for efficient processing
+    3. Optionally samples random cells with seed
+    4. Processes raw counts through ONNX embedding model
+    5. Extracts specified label columns from adata.obs
+    6. Saves embeddings to embeddings.npy and labels to labels.parquet
     """
 
-    logger.info("Loading h5ad file: %s", h5ad_path)
-    adata = sc.read_h5ad(h5ad_path)
+    # Load h5ad file (supports S3)
+    adata = _load_h5ad_from_path_or_s3(h5ad_path)
     logger.info("  Loaded data shape: %s", adata.shape)
     logger.info("  Available obs columns: %s", list(adata.obs.columns))
 
-    # Subset cells if max_cells is specified
+    # Validate and convert to CSR format for efficient row access
+    logger.info("Validating matrix format...")
+    adata = _validate_and_convert_to_csr(adata)
+
+    # Randomly sample cells if max_cells is specified
     if max_cells is not None and adata.n_obs > max_cells:
-        logger.info("Subsetting to first %d cells (from %d total)", max_cells, adata.n_obs)
-        adata = adata[:max_cells, :]
-        logger.info("  Subset data shape: %s", adata.shape)
+        adata = _random_sample_cells(adata, max_cells, seed)
+        logger.info("  Sampled data shape: %s", adata.shape)
 
     # Validate label columns
     if labels:
