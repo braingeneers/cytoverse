@@ -179,7 +179,7 @@ def _compute_embeddings_onnx(
         embeddings_list.append(batch_embeddings)
 
     # Concatenate all batches
-    embeddings = np.concatenate(embeddings_list, axis=0)
+    embeddings: np.ndarray = np.concatenate([np.asarray(e) for e in embeddings_list], axis=0)
 
     logger.info("Generated embeddings: %s", embeddings.shape)
     return embeddings.astype(np.float32)

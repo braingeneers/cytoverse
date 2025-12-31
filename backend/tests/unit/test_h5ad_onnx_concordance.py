@@ -23,7 +23,6 @@ from h5ad_to_embeddings import (
     _load_model_genes,
     _create_inflation_indices,
     _inflate_batch_to_model_space,
-    _compute_embeddings_onnx,
 )
 
 
@@ -36,29 +35,23 @@ def test_h5ad():
 @pytest.fixture
 def pytorch_model_path():
     """Path to PyTorch SCimilarity model."""
-    return Path("/Users/rcurrie/data/cytoverse/models/scimilarity/model_v1.1")
+    return Path("data/models/scimilarity/model_v1.1")
 
 
 @pytest.fixture
-def onnx_model_path(tmp_path):
-    """
-    Path to ONNX model. For now, we'll export it in the test setup.
-    Later this can be a pre-exported model.
-    """
-    # This will be set after exporting the model
-    onnx_dir = tmp_path / "onnx_model"
-    onnx_dir.mkdir()
-    return onnx_dir / "model.onnx"
+def onnx_model_path():
+    """Path to ONNX model."""
+    return Path("public/models/scimilarity/embedding/model.onnx")
 
 
 @pytest.fixture
-def genes_path(tmp_path):
+def genes_path():
     """Path to genes.txt file."""
-    return tmp_path / "genes.txt"
+    return Path("public/models/scimilarity/embedding/genes.txt")
 
 
 def test_onnx_vs_pytorch_baseline(
-    test_h5ad, pytorch_model_path, tmp_path, pytestconfig
+    test_h5ad, pytorch_model_path, onnx_model_path, genes_path
 ):
     """
     Test that ONNX embeddings match PyTorch embeddings within tolerance.
@@ -73,60 +66,10 @@ def test_onnx_vs_pytorch_baseline(
     if not test_h5ad.exists():
         pytest.skip(f"Test fixture not found at {test_h5ad}")
 
-    # Export ONNX model first
-    print("\n=== Exporting ONNX Model ===")
+    print("\n=== Loading ONNX Model ===")
     ce = scimilarity.CellEmbedding(str(pytorch_model_path))
 
-    onnx_model_path = tmp_path / "model.onnx"
-    genes_path = tmp_path / "genes.txt"
-
-    # Export genes
-    with open(genes_path, "w") as f:
-        f.write("\n".join(map(str, ce.gene_order)))
-
-    # Export ONNX model
-    import torch
-
-    class NormalizationWrapper(torch.nn.Module):
-        """Combined wrapper that applies preprocessing and embedding."""
-
-        def __init__(self, original_module, target_sum=1e4):
-            super(NormalizationWrapper, self).__init__()
-            self.target_sum = torch.tensor(float(target_sum), dtype=torch.float32)
-            self.original_module = original_module
-
-        def forward(self, x):
-            # Preprocessing
-            x = x.to(torch.float32)
-            x = torch.nan_to_num(x, nan=0.0)
-            row_sums = torch.sum(x, dim=1, keepdim=True)
-            row_sums = torch.where(
-                row_sums == 0, torch.tensor(1.0, dtype=torch.float32), row_sums
-            )
-            scaling_factors = self.target_sum / row_sums
-            normalized = x * scaling_factors
-            transformed = torch.log1p(normalized)
-
-            # Embedding
-            return self.original_module(transformed)
-
-    combined_model = NormalizationWrapper(ce.model, target_sum=1e4)
-    combined_model.eval()
-
-    torch.onnx.export(
-        combined_model,
-        torch.zeros(1, ce.n_genes),
-        onnx_model_path,
-        export_params=True,
-        opset_version=14,
-        do_constant_folding=True,
-        input_names=["input"],
-        output_names=["output"],
-        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
-        verbose=False,
-    )
-
-    print(f"ONNX model exported to {onnx_model_path}")
+    assert ce.gene_order == _load_model_genes(genes_path), "Gene order mismatch"
 
     # Load test data
     print("\n=== Loading Test Data ===")
@@ -177,9 +120,7 @@ def test_onnx_vs_pytorch_baseline(
     )
 
     # Run through ONNX (which does preprocessing internally)
-    onnx_embeddings = onnx_session.run(
-        ["output"], {"input": raw_aligned_counts}
-    )[0]
+    onnx_embeddings = onnx_session.run(["output"], {"input": raw_aligned_counts})[0]
 
     print(f"ONNX embeddings shape: {onnx_embeddings.shape}")
 
