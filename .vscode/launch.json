@@ -16,6 +16,38 @@
       ]
     },
     {
+      "name": "download marson2025",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/src/download_h5ad_subset.py",
+      "console": "integratedTerminal",
+      "args": [
+        "~/data/h5ad/marson2025/urls.txt",
+        "~/data/h5ad/marson2025/"
+      ]
+    },
+    {
+      "name": "h5ad to embeddings",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/src/h5ad_to_embeddings.py",
+      "console": "integratedTerminal",
+      "args": [
+        "fixtures/allen-celltypes+human-cortex+various-cortical-areas-1000.h5ad",
+        "public/models/scimilarity/embedding/model.onnx",
+        "public/models/scimilarity/embedding/genes.txt",
+        "data/references/dev",
+        "--labels",
+        "CellType",
+        "--labels",
+        "cortical_layer_label",
+        "--max-cells",
+        "4",
+        "--batch-size",
+        "2"
+      ]
+    },
+    {
       "name": "export scimilarity embedding dev",
       "type": "debugpy",
       "request": "launch",

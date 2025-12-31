@@ -215,8 +215,9 @@ make deploy
 
 ```bash
 # Python
-black backend/src/          # Format Python code
-flake8 backend/src/         # Lint Python code
+black backend/src/                              # Format Python code
+uv run ruff check --fix --unsafe-fixes          # Lint and fix Python code
+uv run mypy backend/src/                        # Type check Python code
 
 # TypeScript/Vue
 npx prettier --write .  # Format code (88 char width)
@@ -255,9 +256,82 @@ All PyTorch models are exported to ONNX for browser compatibility:
 
 ### Code Style
 
-- Python: Black formatting (88 char line width), Flake8 linting
+- Python: Black formatting (88 char line width), Ruff linting (strict), Mypy type checking (strict)
 - TypeScript: Prettier formatting (88 char width), ESLint
 - Vue: Single File Components with TypeScript in `<script setup lang="ts">`
+
+### Python Coding Standards
+
+**File System Operations**:
+- Use `pathlib` over `os.path` for all file system operations
+- Example: `Path("data/file.txt")` instead of `os.path.join("data", "file.txt")`
+
+**Logging**:
+- Use per-file logger instead of print statements: `logger = logging.getLogger(__name__)`
+- No f-strings in logging calls (use lazy formatting)
+- Standard logging format: `format="%(asctime)s %(levelname)s %(message)s"`
+- Standard date format: `datefmt="%Y-%m-%d %H:%M:%S"`
+- Use `logging.exception` in exception handlers instead of `logging.error`
+
+```python
+# Good
+logger = logging.getLogger(__name__)
+logger.info("Processing %d files", len(files))
+
+try:
+    process_data()
+except Exception:
+    logger.exception("Failed to process data")
+
+# Bad
+print(f"Processing {len(files)} files")
+logger.info(f"Processing {len(files)} files")
+logger.error(f"Failed to process: {e}")
+```
+
+**Documentation**:
+- Use imperative style for docstrings
+- Example: "Download file from S3" not "Downloads file from S3"
+
+**Error Handling**:
+- Assertions are encouraged for cleaner data wrangling code
+- Make assumptions vs. writing if statements handling error conditions
+- Use assertions to validate preconditions and data integrity
+
+```python
+# Good
+assert adata.n_obs > 0, "AnnData must contain cells"
+assert "cell_type" in adata.obs.columns, "Missing cell_type column"
+
+# Less preferred
+if adata.n_obs == 0:
+    raise ValueError("AnnData must contain cells")
+```
+
+**Data Processing**:
+- Use Polars for data processing (not pandas)
+- Prefer Polars for tabular data manipulation, CSV processing, etc.
+
+**Configuration**:
+- Load secrets from `.env` via dotenv
+- Never hardcode credentials or API keys
+
+```python
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+api_key = os.getenv("API_KEY")
+```
+
+**Command Line Interfaces**:
+- Always use typer for command line interfaces in Python
+
+**Linting and Type Checking**:
+- Use Ruff for linting (strict mode, except for exclusions in pyproject.toml)
+- Check and fix linting issues: `uv run ruff check --fix --unsafe-fixes`
+- Use strict Mypy typing for all functions, variables, and definitions
+- Use Pydantic for data validation
 
 ### Jupyter Notebooks
 
@@ -280,7 +354,7 @@ These are configured in the Vite server and must be present on production server
 
 ### Data Directory Structure
 
-- `data/` is a symlink to `/Users/rcurrie/data/cytoverse` (local dev only)
+- `data/` is a symlink to `~/data/cytoverse` (local dev only)
 - Contains large model files (~30GB) and datasets
 - Git-ignored to avoid repository bloat
 - `public/models/` contains web-ready model artifacts (~1.2GB)
