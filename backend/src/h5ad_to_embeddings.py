@@ -435,10 +435,178 @@ def _validate_outputs(
         raise typer.Exit(1)
 
 
+def _compute_label_intersection(
+    h5ad_paths: list[Union[str, Path]], requested_labels: list[str]
+) -> list[str]:
+    """
+    Compute intersection of label columns across multiple h5ad files.
+
+    Args:
+        h5ad_paths: List of paths to h5ad files
+        requested_labels: User-requested label columns
+
+    Returns:
+        List of label columns present in ALL files
+    """
+    if not h5ad_paths:
+        return []
+
+    logger.info("Computing label intersection across %d files...", len(h5ad_paths))
+
+    # Load obs columns from each file
+    all_obs_columns = []
+    for h5ad_path in h5ad_paths:
+        adata = _load_h5ad_from_path_or_s3(h5ad_path)
+        obs_columns = set(adata.obs.columns)
+        all_obs_columns.append(obs_columns)
+        logger.info("  %s: %d obs columns", Path(str(h5ad_path)).name, len(obs_columns))
+
+    # Find intersection
+    common_columns = set.intersection(*all_obs_columns)
+    logger.info("  Common columns across all files: %d", len(common_columns))
+
+    # Intersect with requested labels
+    valid_labels = [label for label in requested_labels if label in common_columns]
+
+    # Warn about missing labels
+    for label in requested_labels:
+        if label not in common_columns:
+            logger.warning(
+                "Label '%s' not found in all files, will be excluded", label
+            )
+
+    logger.info("  ✅ Valid labels across all files: %s", valid_labels)
+    return valid_labels
+
+
+def _process_single_h5ad_file(
+    h5ad_path: Union[str, Path],
+    onnx_session: ort.InferenceSession,
+    model_genes: list[str],
+    labels: list[str],
+    max_cells: int | None,
+    seed: int,
+    batch_size: int,
+) -> tuple[np.ndarray, pd.DataFrame | None]:
+    """
+    Process a single h5ad file to generate embeddings and extract labels.
+
+    Args:
+        h5ad_path: Path or S3 URI to h5ad file
+        onnx_session: ONNX Runtime inference session
+        model_genes: List of model gene names
+        labels: Label columns to extract
+        max_cells: Maximum cells to sample (None for all)
+        seed: Random seed for sampling
+        batch_size: Batch size for embedding inference
+
+    Returns:
+        Tuple of (embeddings array, labels dataframe or None)
+    """
+    # Load h5ad file
+    adata = _load_h5ad_from_path_or_s3(h5ad_path)
+    logger.info("  Loaded data shape: %s", adata.shape)
+
+    # Validate and convert to CSR
+    adata = _validate_and_convert_to_csr(adata)
+
+    # Sample cells if needed
+    if max_cells is not None and adata.n_obs > max_cells:
+        adata = _random_sample_cells(adata, max_cells, seed)
+        logger.info("  Sampled data shape: %s", adata.shape)
+
+    # Create gene inflation mapping
+    inflation_indices = _create_inflation_indices(
+        adata.var_names.tolist(), model_genes
+    )
+
+    # Compute embeddings
+    embeddings = _compute_embeddings_onnx(
+        adata, onnx_session, inflation_indices, len(model_genes), batch_size
+    )
+
+    # Extract labels if specified
+    labels_df = None
+    if labels:
+        labels_df = pd.DataFrame()
+        for label in labels:
+            if label in adata.obs.columns:
+                labels_df[label] = adata.obs[label].values
+                labels_df[label] = labels_df[label].astype("category")
+
+    return embeddings, labels_df
+
+
+def _process_multiple_h5ad_files(
+    h5ad_paths: list[Union[str, Path]],
+    onnx_session: ort.InferenceSession,
+    model_genes: list[str],
+    requested_labels: list[str],
+    max_cells: int | None,
+    seed: int,
+    batch_size: int,
+) -> tuple[np.ndarray, pd.DataFrame | None]:
+    """
+    Process multiple h5ad files with label intersection.
+
+    Args:
+        h5ad_paths: List of paths or S3 URIs to h5ad files
+        onnx_session: ONNX Runtime inference session
+        model_genes: List of model gene names
+        requested_labels: User-requested label columns
+        max_cells: Maximum cells per file (None for all)
+        seed: Base random seed
+        batch_size: Batch size for embedding inference
+
+    Returns:
+        Tuple of (concatenated embeddings, concatenated labels or None)
+    """
+    # Compute label intersection
+    valid_labels = _compute_label_intersection(h5ad_paths, requested_labels)
+
+    # Process each file
+    all_embeddings: list[np.ndarray] = []
+    all_labels: list[pd.DataFrame] | None = [] if valid_labels else None
+
+    for i, h5ad_path in enumerate(h5ad_paths):
+        logger.info("Processing file %d/%d: %s", i + 1, len(h5ad_paths), h5ad_path)
+
+        # Use per-file seed for reproducibility
+        file_seed = seed + i
+
+        embeddings, labels_df = _process_single_h5ad_file(
+            h5ad_path=h5ad_path,
+            onnx_session=onnx_session,
+            model_genes=model_genes,
+            labels=valid_labels,
+            max_cells=max_cells,
+            seed=file_seed,
+            batch_size=batch_size,
+        )
+
+        all_embeddings.append(embeddings)
+        if all_labels is not None and labels_df is not None:
+            all_labels.append(labels_df)
+
+        logger.info("  ✅ File %d complete: %d cells processed", i + 1, len(embeddings))
+
+    # Concatenate results
+    logger.info("Concatenating results from %d files...", len(h5ad_paths))
+    final_embeddings = np.concatenate(all_embeddings, axis=0)
+
+    final_labels = None
+    if all_labels:
+        final_labels = pd.concat(all_labels, axis=0, ignore_index=True)
+
+    logger.info("  Total cells: %d", len(final_embeddings))
+
+    return final_embeddings, final_labels
+
+
 @app.command()
 def ingest(
-    h5ad_path: str = typer.Argument(
-        help="Path or S3 URI to h5ad file (s3://bucket/key or local path)",
+    h5ad_paths: list[str] = typer.Argument(
+        help="Path(s) or S3 URI(s) to h5ad file(s). Multiple files will be processed and concatenated.",
     ),
     onnx_model_path: Path = typer.Argument(
         exists=True,
@@ -463,7 +631,7 @@ def ingest(
     ),
     max_cells: int = typer.Option(
         None,
-        help="Maximum number of cells to export (default: export all cells)",
+        help="Maximum number of cells per file to sample (default: use all cells)",
     ),
     validate: bool = typer.Option(
         True,
@@ -479,135 +647,82 @@ def ingest(
     ),
 ) -> None:
     """
-    Process h5ad file through ONNX embedding model to generate embeddings and extract labels.
+    Process h5ad file(s) through ONNX embedding model to generate embeddings and extract labels.
 
-    Supports both local files and S3 URIs (s3://bucket/key).
+    Supports both local files and S3 URIs (s3://bucket/key). Multiple files will be processed
+    with label intersection (only labels present in ALL files are extracted).
 
     This script:
-    1. Loads the h5ad file (from local path or S3)
-    2. Validates/converts to CSR format for efficient processing
-    3. Optionally samples random cells with seed
-    4. Processes raw counts through ONNX embedding model
-    5. Extracts specified label columns from adata.obs
-    6. Saves embeddings to embeddings.npy and labels to labels.parquet
+    1. Loads h5ad file(s) (from local path or S3)
+    2. Computes label intersection for multi-file processing
+    3. Validates/converts to CSR format for efficient processing
+    4. Optionally samples random cells with seed
+    5. Processes raw counts through ONNX embedding model
+    6. Extracts specified label columns from adata.obs
+    7. Saves embeddings to embeddings.npy and labels to labels.parquet
     """
-
-    # Load h5ad file (supports S3)
-    adata = _load_h5ad_from_path_or_s3(h5ad_path)
-    logger.info("  Loaded data shape: %s", adata.shape)
-    logger.info("  Available obs columns: %s", list(adata.obs.columns))
-
-    # Validate and convert to CSR format for efficient row access
-    logger.info("Validating matrix format...")
-    adata = _validate_and_convert_to_csr(adata)
-
-    # Randomly sample cells if max_cells is specified
-    if max_cells is not None and adata.n_obs > max_cells:
-        adata = _random_sample_cells(adata, max_cells, seed)
-        logger.info("  Sampled data shape: %s", adata.shape)
-
-    # Validate label columns
-    if labels:
-        logger.info("Validating label columns: %s", labels)
-        valid_labels = []
-        for label in labels:
-            if label not in adata.obs.columns:
-                logger.warning("Column '%s' not found in adata.obs", label)
-                continue
-
-            unique_count = adata.obs[label].nunique()
-            logger.info("  Column '%s': %d unique values", label, unique_count)
-
-            if unique_count > 1000:
-                logger.warning(
-                    "Column '%s' has %d unique values, exceeding limit of 1000. Skipping.",
-                    label,
-                    unique_count,
-                )
-                continue
-
-            valid_labels.append(label)
-
-        labels = valid_labels
-        logger.info("  ✅ Valid label columns: %s", labels)
-
-    if not labels:
-        logger.warning(
-            "No valid label columns specified or found. Only embeddings will be exported."
-        )
-
-    # Load ONNX model and genes
+    # Load ONNX model and genes (needed for both single and multi-file)
     logger.info("Loading ONNX model from: %s", onnx_model_path)
     onnx_session = ort.InferenceSession(str(onnx_model_path))
 
     logger.info("Loading model genes from: %s", genes_path)
     model_genes = _load_model_genes(genes_path)
 
-    # Process through ONNX embedding pipeline
-    logger.info("Processing data through ONNX embedding model...")
-
-    # Step 1: Create gene inflation mapping
-    logger.info("  1. Creating gene inflation mapping...")
-    inflation_indices = _create_inflation_indices(
-        adata.var_names.tolist(), model_genes
-    )
-
-    # Step 2: Generate embeddings via ONNX
-    # Note: ONNX model handles preprocessing internally (normalize + log1p)
-    embeddings = _compute_embeddings_onnx(
-        adata, onnx_session, inflation_indices, len(model_genes), batch_size
-    )
+    # Dispatch to single or multi-file processing
+    if len(h5ad_paths) == 1:
+        logger.info("Processing single h5ad file: %s", h5ad_paths[0])
+        embeddings, labels_df = _process_single_h5ad_file(
+            h5ad_path=h5ad_paths[0],
+            onnx_session=onnx_session,
+            model_genes=model_genes,
+            labels=labels,
+            max_cells=max_cells,
+            seed=seed,
+            batch_size=batch_size,
+        )
+    else:
+        logger.info("Processing %d h5ad files...", len(h5ad_paths))
+        embeddings, labels_df = _process_multiple_h5ad_files(
+            h5ad_paths=h5ad_paths,
+            onnx_session=onnx_session,
+            model_genes=model_genes,
+            requested_labels=labels,
+            max_cells=max_cells,
+            seed=seed,
+            batch_size=batch_size,
+        )
 
     # Create output directory
     logger.info("Creating output directory: %s", output_path)
     os.makedirs(output_path, exist_ok=True)
 
-    # Save embeddings to embeddings.npy
+    # Save embeddings
     embeddings_path = output_path / "embeddings.npy"
     logger.info("Saving embeddings to: %s", embeddings_path)
-
-    # Save embeddings as numpy array
     np.save(embeddings_path, embeddings.astype(np.float32))
 
-    # Extract and save labels if specified
-    if labels:
-        logger.info("Extracting labels: %s", labels)
-
-        # Create labels dataframe
-        labels_df = pd.DataFrame()
-
-        # Add each label column
-        for label in labels:
-            labels_df[label] = adata.obs[label].values
-            # Convert to categorical for efficient storage
-            labels_df[label] = labels_df[label].astype("category")
-            logger.info("  Added '%s': %d unique values", label, labels_df[label].nunique())
-
-        # Save labels to parquet without index
+    # Save labels if available
+    labels_path = None
+    if labels_df is not None:
         labels_path = output_path / "labels.parquet"
         logger.info("Saving labels to: %s", labels_path)
-        labels_df.to_parquet(
-            labels_path,
-            compression="snappy",
-            index=None,
-        )
-
+        labels_df.to_parquet(labels_path, compression="snappy", index=None)
         logger.info("Labels saved with shape: %s", labels_df.shape)
 
     logger.info("✅ Processing complete!")
     logger.info("   Embeddings: %s (shape: %s)", embeddings_path, embeddings.shape)
-    if labels:
+    if labels_path:
         logger.info("   Labels: %s (shape: %s)", labels_path, labels_df.shape)
     logger.info("   Output directory: %s", output_path)
 
-    # Run validation if requested
-    if validate:
+    # Run validation if requested (only for single file)
+    if validate and len(h5ad_paths) == 1:
         logger.info("=" * 60)
         logger.info("Running validation...")
         logger.info("=" * 60)
         try:
             _validate_outputs(
-                h5ad_path=h5ad_path,
+                h5ad_path=h5ad_paths[0],
                 output_dir=output_path,
                 onnx_model_path=onnx_model_path,
                 genes_path=genes_path,
@@ -617,6 +732,8 @@ def ingest(
         except Exception as e:
             logger.error("Validation failed: %s", e)
             raise typer.Exit(1)
+    elif validate and len(h5ad_paths) > 1:
+        logger.info("Validation skipped for multi-file processing")
 
 
 if __name__ == "__main__":
