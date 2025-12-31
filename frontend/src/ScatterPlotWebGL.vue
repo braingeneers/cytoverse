@@ -383,12 +383,19 @@ watch(
   }
 );
 
-// Expose control functions
+// Expose control functions and test helpers
+const selectPoint = (pointIndex: number) => {
+  if (scatterplotRef) {
+    scatterplotRef.select([pointIndex]);
+  }
+};
+
 defineExpose({
   startTimerUpdates,
   stopTimerUpdates,
   forceUpdate,
   closePopup,
+  selectPoint,
 });
 
 onMounted(() => {

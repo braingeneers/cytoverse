@@ -295,6 +295,7 @@
               baseRef.labels.value.length > 0
             "
             ref="scatterPlotRef"
+            data-testid="scatterplot"
             :base-ref-x="baseRef.x.value"
             :base-ref-y="baseRef.y.value"
             :base-ref-label-indices="baseRef.labelIndicesSubset.value"

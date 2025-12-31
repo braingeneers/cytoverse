@@ -36,6 +36,7 @@ build/
 *.local
 
 # Playwright
+.playwright-mcp/
 test-results/
 playwright-report/
 blob-report/
