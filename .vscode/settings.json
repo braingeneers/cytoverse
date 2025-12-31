@@ -1,12 +1,12 @@
 {
   "python.testing.pytestArgs": [
-    "tests",
+    "backend/tests",
     "-v"
   ],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
   "jupyter.notebookFileRoot": "${workspaceFolder}",
   "python.analysis.extraPaths": [
-    "./scripts"
+    "./backend/src"
   ],
 }

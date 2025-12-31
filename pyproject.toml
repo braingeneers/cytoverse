@@ -25,6 +25,8 @@ dependencies = [
     "onnx>=1.18.0",
     "onnxruntime>=1.22.1",
     "onnxscript>=0.3.2",
+    "boto3>=1.42.18",
+    "s3fs>=0.4.2",
 ]
 
 [dependency-groups]
@@ -36,12 +38,15 @@ dev = [
     "ipython>=8.37.0",
     "jupyter>=1.1.1",
     "jupyter-console>=6.6.3",
+    "mypy>=1.19.1",
     "netron>=8.3.9",
     "pandas-stubs>=2.3.3.251219",
     "pytest>=8.0.0",
+    "ruff>=0.14.10",
+    "types-tqdm>=4.67.0.20250809",
 ]
 [[tool.mypy.overrides]]
-module = ["scanpy", "scimilarity.*"]
+module = ["scanpy", "scimilarity.*", "onnxruntime.*"]
 follow_untyped_imports = true
 ignore_missing_imports = true
 
@@ -69,4 +74,6 @@ filterwarnings = [
     "ignore:overflow encountered in matmul:RuntimeWarning:sklearn.cluster._kmeans",
     "ignore:invalid value encountered in matmul:RuntimeWarning:sklearn.cluster._kmeans",
     "ignore:Number of distinct clusters.*found smaller than n_clusters:sklearn.exceptions.ConvergenceWarning",
+    "ignore:torch.tensor results are registered as constants in the trace:torch.jit.TracerWarning",
+    "ignore:Avoid using this function and create a Cast node instead:DeprecationWarning:torch.onnx.symbolic_opset9",
 ]

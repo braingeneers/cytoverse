@@ -24,6 +24,12 @@ benchmark:
 test-no-capture:
 	cd backend && python -m pytest tests --capture=no --log-cli-level=DEBUG
 
+download-marson2025:
+	cd backend && python src/download_h5ad_subset.py \
+	s3://genome-scale-tcell-perturb-seq/marson2025_data/D1_Rest.assigned_guide.h5ad \
+	~/data/h5ad/marson2025 \
+	--subsample 100
+
 # Populate model artifacts for the selected model to public/models/<model_id>
 notice:
 	@echo "⚙️ Populating $(model_id)"
