@@ -101,7 +101,12 @@ describe('ONNX Model Validation', () => {
     it('should have valid config.json', () => {
       if (name === 'placeholder') return;
 
-      expect(config).toBeDefined();
+      // Config is optional for some models
+      if (!config) {
+        console.log(`  Skipping config validation for ${name} (no config.json)`);
+        return;
+      }
+
       expect(config).toHaveProperty('model_type');
 
       // Check for model-specific configs
@@ -139,26 +144,12 @@ describe('ONNX Model Validation', () => {
     it('should run inference with random input', async () => {
       if (name === 'placeholder') return;
 
-      // Determine input size based on model type
-      let inputSize: number;
-
-      if (config && config.model_type === 'geneformer') {
-        // Geneformer uses number of genes from token dictionary
-        const genesPath = configPath.replace('config.json', 'genes.txt');
-        if (existsSync(genesPath)) {
-          const genesList = readFileSync(genesPath, 'utf-8')
-            .split('\n')
-            .filter((line) => line.trim());
-          inputSize = genesList.length;
-        } else {
-          // Default fallback for Geneformer (typical vocab size)
-          inputSize = 25424;
-        }
-      } else {
-        // SCimilarity or other models - determine from model metadata
-        // For now, use a common gene count
-        inputSize = 20000;
-      }
+      // Determine input size from genes.txt
+      const genesPath = configPath.replace('config.json', 'genes.txt');
+      const genesList = readFileSync(genesPath, 'utf-8')
+        .split('\n')
+        .filter((line) => line.trim());
+      const inputSize = genesList.length;
 
       // Create random input tensor (simulating raw gene counts)
       const batchSize = 2;
@@ -200,22 +191,12 @@ describe('ONNX Model Validation', () => {
     it('should produce consistent output for same input', async () => {
       if (name === 'placeholder') return;
 
-      // Determine input size (same logic as above)
-      let inputSize: number;
-
-      if (config && config.model_type === 'geneformer') {
-        const genesPath = configPath.replace('config.json', 'genes.txt');
-        if (existsSync(genesPath)) {
-          const genesList = readFileSync(genesPath, 'utf-8')
-            .split('\n')
-            .filter((line) => line.trim());
-          inputSize = genesList.length;
-        } else {
-          inputSize = 25424;
-        }
-      } else {
-        inputSize = 20000;
-      }
+      // Determine input size from genes.txt
+      const genesPath = configPath.replace('config.json', 'genes.txt');
+      const genesList = readFileSync(genesPath, 'utf-8')
+        .split('\n')
+        .filter((line) => line.trim());
+      const inputSize = genesList.length;
 
       // Create fixed input
       const batchSize = 1;
@@ -245,22 +226,12 @@ describe('ONNX Model Validation', () => {
     it('should handle batch inference correctly', async () => {
       if (name === 'placeholder') return;
 
-      // Determine input size
-      let inputSize: number;
-
-      if (config && config.model_type === 'geneformer') {
-        const genesPath = configPath.replace('config.json', 'genes.txt');
-        if (existsSync(genesPath)) {
-          const genesList = readFileSync(genesPath, 'utf-8')
-            .split('\n')
-            .filter((line) => line.trim());
-          inputSize = genesList.length;
-        } else {
-          inputSize = 25424;
-        }
-      } else {
-        inputSize = 20000;
-      }
+      // Determine input size from genes.txt
+      const genesPath = configPath.replace('config.json', 'genes.txt');
+      const genesList = readFileSync(genesPath, 'utf-8')
+        .split('\n')
+        .filter((line) => line.trim());
+      const inputSize = genesList.length;
 
       // Test with batch size of 2 (quick test)
       const batchSize = 2;
