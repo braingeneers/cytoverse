@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import * as ort from 'onnxruntime-web';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { mod } from '@tensorflow/tfjs';
 
 // Configure ONNX Runtime to use CPU (WebGPU not available in Node test environment)
 ort.env.wasm.numThreads = 1;
@@ -24,33 +25,17 @@ interface ModelInfo {
  * Discover all available models in public/models directory.
  */
 function discoverModels(): ModelInfo[] {
-  // Try multiple possible paths for the models directory
-  const possiblePaths = [
-    join(__dirname, '../../public/models'),
-    join(process.cwd(), 'public/models'),
-    join(process.cwd(), 'frontend/public/models'),
-  ];
-
-  let modelsDir: string | null = null;
-
-  for (const path of possiblePaths) {
-    if (existsSync(path)) {
-      modelsDir = path;
-      break;
-    }
-  }
-
-  if (!modelsDir) {
-    console.warn('Models directory not found. Tried:', possiblePaths);
+  const modelsDir = join(process.cwd(), 'public/models');
+  if (!existsSync(modelsDir)) {
+    console.warn('Models directory not found. Tried:', modelsDir);
     return [];
   }
-
   console.log('Found models directory:', modelsDir);
 
   const models: ModelInfo[] = [];
   const modelDirs = readdirSync(modelsDir, { withFileTypes: true })
-    .filter(dirent => dirent.isDirectory())
-    .map(dirent => dirent.name);
+    .filter((dirent) => dirent.isDirectory())
+    .map((dirent) => dirent.name);
 
   for (const modelName of modelDirs) {
     const modelPath = join(modelsDir, modelName, 'embedding', 'model.onnx');
@@ -107,13 +92,10 @@ describe('ONNX Model Validation', () => {
 
       // Load ONNX model
       const modelBuffer = readFileSync(path);
-      session = await ort.InferenceSession.create(
-        modelBuffer,
-        {
-          executionProviders: ['cpu'],
-          graphOptimizationLevel: 'all',
-        }
-      );
+      session = await ort.InferenceSession.create(modelBuffer, {
+        executionProviders: ['cpu'],
+        graphOptimizationLevel: 'all',
+      });
     });
 
     it('should have valid config.json', () => {
@@ -166,7 +148,7 @@ describe('ONNX Model Validation', () => {
         if (existsSync(genesPath)) {
           const genesList = readFileSync(genesPath, 'utf-8')
             .split('\n')
-            .filter(line => line.trim());
+            .filter((line) => line.trim());
           inputSize = genesList.length;
         } else {
           // Default fallback for Geneformer (typical vocab size)
@@ -226,7 +208,7 @@ describe('ONNX Model Validation', () => {
         if (existsSync(genesPath)) {
           const genesList = readFileSync(genesPath, 'utf-8')
             .split('\n')
-            .filter(line => line.trim());
+            .filter((line) => line.trim());
           inputSize = genesList.length;
         } else {
           inputSize = 25424;
@@ -271,7 +253,7 @@ describe('ONNX Model Validation', () => {
         if (existsSync(genesPath)) {
           const genesList = readFileSync(genesPath, 'utf-8')
             .split('\n')
-            .filter(line => line.trim());
+            .filter((line) => line.trim());
           inputSize = genesList.length;
         } else {
           inputSize = 25424;

@@ -16,6 +16,38 @@
       ]
     },
     {
+      "name": "geneformer export v1-10m model",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/src/geneformer_export_model.py",
+      "console": "integratedTerminal",
+      "args": [
+        "data/models/Geneformer/Geneformer-V1-10M",
+        "${workspaceFolder}/public/models/geneformer-v1-10m/embedding"
+      ]
+    },
+    {
+      "name": "h5ad to geneformer v1-10m embeddings path",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/src/h5ad_to_embeddings.py",
+      "console": "integratedTerminal",
+      "args": [
+        "fixtures/allen-celltypes+human-cortex+various-cortical-areas-1000.h5ad",
+        "public/models/geneformer-v1-10m/embedding/model.onnx",
+        "public/models/geneformer-v1-10m/embedding/genes.txt",
+        "data/references/dev",
+        "--labels",
+        "CellType",
+        "--labels",
+        "cortical_layer_label",
+        "--max-cells",
+        "4",
+        "--batch-size",
+        "2"
+      ]
+    },
+    {
       "name": "download marson2025",
       "type": "debugpy",
       "request": "launch",
