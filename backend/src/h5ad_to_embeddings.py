@@ -78,9 +78,7 @@ def _validate_and_convert_to_csr(adata: sc.AnnData) -> sc.AnnData:
     return adata
 
 
-def _random_sample_cells(
-    adata: sc.AnnData, max_cells: int, seed: int
-) -> sc.AnnData:
+def _random_sample_cells(adata: sc.AnnData, max_cells: int, seed: int) -> sc.AnnData:
     """
     Randomly sample cells from AnnData object.
 
@@ -97,7 +95,9 @@ def _random_sample_cells(
     n_cells = adata.n_obs
 
     assert max_cells > 0, f"max_cells must be positive, got {max_cells}"
-    assert max_cells <= n_cells, f"max_cells ({max_cells}) exceeds dataset size ({n_cells})"
+    assert (
+        max_cells <= n_cells
+    ), f"max_cells ({max_cells}) exceeds dataset size ({n_cells})"
 
     logger.info("Randomly sampling %d cells from %d total", max_cells, n_cells)
 
@@ -273,7 +273,9 @@ def _compute_embeddings_onnx(
         embeddings_list.append(batch_embeddings)
 
     # Concatenate all batches
-    embeddings: np.ndarray = np.concatenate([np.asarray(e) for e in embeddings_list], axis=0)
+    embeddings: np.ndarray = np.concatenate(
+        [np.asarray(e) for e in embeddings_list], axis=0
+    )
 
     logger.info("Generated embeddings: %s", embeddings.shape)
     return embeddings.astype(np.float32)
@@ -293,14 +295,26 @@ def _validate_outputs(
     genes_path: Path,
     n_samples: int,
     batch_size: int,
+    max_cells: int | None = None,
+    seed: int = 42,
 ) -> None:
     """
     Validate that output files maintain correct row ordering and embeddings match.
 
     This function:
-    1. Loads random rows from the original h5ad (supports S3)
-    2. Verifies labels match at those indices in labels.parquet
+    1. Loads h5ad file and applies same sampling as during export (if any)
+    2. Verifies labels match in labels.parquet
     3. Verifies embeddings match when regenerated through ONNX model
+
+    Args:
+        h5ad_path: Path to h5ad file
+        output_dir: Directory containing embeddings.npy and labels.parquet
+        onnx_model_path: Path to ONNX model
+        genes_path: Path to genes.txt
+        n_samples: Number of random samples to validate
+        batch_size: Batch size for ONNX inference
+        max_cells: If specified, must match the sampling used during export
+        seed: Random seed (must match the seed used during export)
     """
 
     logger.info("Validating output files against h5ad: %s", h5ad_path)
@@ -308,7 +322,16 @@ def _validate_outputs(
     # Load the h5ad file (supports S3)
     logger.info("Loading h5ad file...")
     adata = _load_h5ad_from_path_or_s3(h5ad_path)
-    logger.info("  Shape: %s", adata.shape)
+    logger.info("  Original shape: %s", adata.shape)
+
+    # Validate and convert to CSR (same as during export)
+    adata = _validate_and_convert_to_csr(adata)
+
+    # Apply the SAME sampling as was used during export
+    if max_cells is not None and adata.n_obs > max_cells:
+        logger.info("Applying same sampling as export (max_cells=%d, seed=%d)", max_cells, seed)
+        adata = _random_sample_cells(adata, max_cells, seed)
+        logger.info("  Sampled shape: %s", adata.shape)
 
     # Load output files
     embeddings_path = output_dir / "embeddings.npy"
@@ -421,12 +444,8 @@ def _validate_outputs(
     # Summary
     logger.info("=== Validation Summary ===")
     if has_labels:
-        logger.info(
-            "Labels: %s", "✅ PASS" if all_labels_match else "❌ FAIL"
-        )
-    logger.info(
-        "Embeddings: %s", "✅ PASS" if all_embeddings_match else "❌ FAIL"
-    )
+        logger.info("Labels: %s", "✅ PASS" if all_labels_match else "❌ FAIL")
+    logger.info("Embeddings: %s", "✅ PASS" if all_embeddings_match else "❌ FAIL")
 
     if (not has_labels or all_labels_match) and all_embeddings_match:
         logger.info("✅ Validation PASSED!")
@@ -471,9 +490,7 @@ def _compute_label_intersection(
     # Warn about missing labels
     for label in requested_labels:
         if label not in common_columns:
-            logger.warning(
-                "Label '%s' not found in all files, will be excluded", label
-            )
+            logger.warning("Label '%s' not found in all files, will be excluded", label)
 
     logger.info("  ✅ Valid labels across all files: %s", valid_labels)
     return valid_labels
@@ -516,9 +533,7 @@ def _process_single_h5ad_file(
         logger.info("  Sampled data shape: %s", adata.shape)
 
     # Create gene inflation mapping
-    inflation_indices = _create_inflation_indices(
-        adata.var_names.tolist(), model_genes
-    )
+    inflation_indices = _create_inflation_indices(adata.var_names.tolist(), model_genes)
 
     # Compute embeddings
     embeddings = _compute_embeddings_onnx(
@@ -728,6 +743,8 @@ def ingest(
                 genes_path=genes_path,
                 n_samples=10,
                 batch_size=batch_size,
+                max_cells=max_cells,
+                seed=seed,
             )
         except Exception as e:
             logger.error("Validation failed: %s", e)
