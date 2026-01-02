@@ -27,6 +27,7 @@ dependencies = [
     "onnxscript>=0.3.2",
     "boto3>=1.42.18",
     "s3fs>=0.4.2",
+    "transformers>=4.48.0",
 ]
 
 [dependency-groups]
