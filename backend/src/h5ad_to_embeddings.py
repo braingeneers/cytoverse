@@ -179,7 +179,9 @@ def _compute_embeddings_onnx(
         embeddings_list.append(batch_embeddings)
 
     # Concatenate all batches
-    embeddings: np.ndarray = np.concatenate([np.asarray(e) for e in embeddings_list], axis=0)
+    embeddings: np.ndarray = np.concatenate(
+        [np.asarray(e) for e in embeddings_list], axis=0
+    )
 
     logger.info("Generated embeddings: %s", embeddings.shape)
     return embeddings.astype(np.float32)
@@ -327,12 +329,8 @@ def _validate_outputs(
     # Summary
     logger.info("=== Validation Summary ===")
     if has_labels:
-        logger.info(
-            "Labels: %s", "✅ PASS" if all_labels_match else "❌ FAIL"
-        )
-    logger.info(
-        "Embeddings: %s", "✅ PASS" if all_embeddings_match else "❌ FAIL"
-    )
+        logger.info("Labels: %s", "✅ PASS" if all_labels_match else "❌ FAIL")
+    logger.info("Embeddings: %s", "✅ PASS" if all_embeddings_match else "❌ FAIL")
 
     if (not has_labels or all_labels_match) and all_embeddings_match:
         logger.info("✅ Validation PASSED!")
@@ -383,7 +381,7 @@ def ingest(
         help="Random seed for reproducibility",
     ),
     batch_size: int = typer.Option(
-        1000,
+        128,
         help="Batch size for embedding inference",
     ),
 ) -> None:
@@ -404,7 +402,9 @@ def ingest(
 
     # Subset cells if max_cells is specified
     if max_cells is not None and adata.n_obs > max_cells:
-        logger.info("Subsetting to first %d cells (from %d total)", max_cells, adata.n_obs)
+        logger.info(
+            "Subsetting to first %d cells (from %d total)", max_cells, adata.n_obs
+        )
         adata = adata[:max_cells, :]
         logger.info("  Subset data shape: %s", adata.shape)
 
@@ -450,9 +450,7 @@ def ingest(
 
     # Step 1: Create gene inflation mapping
     logger.info("  1. Creating gene inflation mapping...")
-    inflation_indices = _create_inflation_indices(
-        adata.var_names.tolist(), model_genes
-    )
+    inflation_indices = _create_inflation_indices(adata.var_names.tolist(), model_genes)
 
     # Step 2: Generate embeddings via ONNX
     # Note: ONNX model handles preprocessing internally (normalize + log1p)
@@ -483,7 +481,9 @@ def ingest(
             labels_df[label] = adata.obs[label].values
             # Convert to categorical for efficient storage
             labels_df[label] = labels_df[label].astype("category")
-            logger.info("  Added '%s': %d unique values", label, labels_df[label].nunique())
+            logger.info(
+                "  Added '%s': %d unique values", label, labels_df[label].nunique()
+            )
 
         # Save labels to parquet without index
         labels_path = output_path / "labels.parquet"

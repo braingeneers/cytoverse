@@ -1,5 +1,5 @@
 # Default ivfpq parameters
-export model_id=scimilarity
+model_id ?= scimilarity
 
 test:
 	python -m pytest backend/tests/unit
@@ -81,12 +81,33 @@ sspsygene-embeddings:
 	--labels Type.v1 \
 	--labels Subtype.v1
 
+
+# Geneformer
+geneformer-model:
+	python backend/src/geneformer_export_model.py \
+	data/models/Geneformer/Geneformer-V1-10M \
+	public/models/geneformer-v1-10m/embedding
+
+geneformer-sspsygene-embeddings:
+	python backend/src/h5ad_to_embeddings.py \
+	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
+	public/models/geneformer-v1-10m/embedding/model.onnx \
+	public/models/geneformer-v1-10m/embedding/genes.txt \
+	data/references/geneformer-sspsygene \
+	--max-cells 10_000 \
+	--batch-size 16 \
+	--labels Dataset \
+	--labels Gestational_week \
+	--labels Class \
+	--labels Type.v1 \
+	--labels Subtype.v1
+
 # IVF
 ivfpq-train:
-	cd backend && python src/ivfpq_train.py train \
-	../data/references/$(model_id)/embeddings.npy \
-	../public/models/$(model_id)/ivfpq \
-	--max-vectors-for-training 2_400_000 \
+	python backend/src/ivfpq_train.py train \
+	data/references/$(model_id)/embeddings.npy \
+	public/models/$(model_id)/ivfpq \
+	--max-vectors-for-training 100_000 \
 	--pq-m 32 \
 	--pq-k 256 \
 	--sample-training-vectors \
@@ -94,25 +115,25 @@ ivfpq-train:
 
 # PUMAP
 pumap-train:
-	cd backend && python src/pumap_train.py train \
-	../data/references/$(model_id)/embeddings.npy \
-	../data/references/$(model_id)/labels.parquet \
-	../public/models/$(model_id)/pumap \
+	python backend/src/pumap_train.py train \
+	data/references/$(model_id)/embeddings.npy \
+	data/references/$(model_id)/labels.parquet \
+	public/models/$(model_id)/pumap \
 	--stratify-label $(stratify_label) \
-	--num-vectors 250000
+	--num-vectors 250_000
 
 pumap-map:
-	cd backend && python src/pumap_train.py map \
-	../public/models/$(model_id)/pumap/model.onnx \
-	../data/references/$(model_id)/embeddings.npy \
-	../data/references/$(model_id)/ \
+	python backend/src/pumap_train.py map \
+	public/models/$(model_id)/pumap/model.onnx \
+	data/references/$(model_id)/embeddings.npy \
+	data/references/$(model_id)/ \
 	--export-png \
 	--num-vectors 1_000_000
 
 pumap-export:
-	cd backend && python src/pumap_train.py export \
-	../data/references/$(model_id)/ \
-	../public/models/$(model_id)/pumap/
+	python backend/src/pumap_train.py export \
+	data/references/$(model_id)/ \
+	public/models/$(model_id)/pumap/
 
 pumap: pumap-train pumap-map pumap-export
 
