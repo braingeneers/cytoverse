@@ -185,11 +185,44 @@ def _read_h5ad_subset(h5_file, indices: np.ndarray) -> sc.AnnData:
     # Determine index key name (could be 'index' or '_index')
     var_index_key = '_index' if '_index' in var_group else 'index'
 
-    var_index = var_group[var_index_key][:]
-    if hasattr(var_index[0], 'decode'):
-        var_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in var_index]
+    var_index_raw = var_group[var_index_key][:]
+    logger.info(f"  var index dtype: {var_index_raw.dtype}, first 5: {var_index_raw[:5]}")
+
+    # Convert to strings, handling bytes
+    if len(var_index_raw) > 0 and hasattr(var_index_raw[0], 'decode'):
+        var_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in var_index_raw]
     else:
-        var_index = [str(x) for x in var_index]
+        var_index = [str(x) for x in var_index_raw]
+
+    logger.info(f"  Converted var index first 5: {var_index[:5]}")
+
+    # Check if index contains only numeric strings (invalid gene names)
+    is_all_numeric = all(name.isdigit() for name in var_index[:min(100, len(var_index))])
+
+    if is_all_numeric:
+        logger.warning("  ⚠️  var index contains only numeric strings, looking for gene symbols...")
+        # Check common gene name columns
+        gene_col_found = False
+        for potential_gene_col in ['gene_symbols', 'gene_names', 'genes', 'var_names', 'feature_name']:
+            if potential_gene_col in var_group:
+                logger.info(f"  Found {potential_gene_col} column, using as index")
+                gene_names_raw = var_group[potential_gene_col][:]
+                if hasattr(gene_names_raw[0], 'decode'):
+                    var_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in gene_names_raw]
+                else:
+                    var_index = [str(x) for x in gene_names_raw]
+                logger.info(f"  Updated var index first 5: {var_index[:5]}")
+                gene_col_found = True
+                break
+
+        if not gene_col_found:
+            raise ValueError(
+                f"h5ad file has numeric gene indices instead of gene symbols. "
+                f"var_names contains: {var_index[:10]} "
+                f"Available var columns: {list(var_group.keys())} "
+                f"This file appears to be improperly created - gene symbols are missing. "
+                f"Please regenerate the h5ad file with proper gene names in var_names."
+            )
 
     var_df = pd.DataFrame(index=var_index)
     for key in var_group.keys():
@@ -245,6 +278,14 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
     """
     from scipy.sparse import csr_matrix
 
+    # Debug: log CSR group structure
+    logger.info(f"  CSR group keys: {list(csr_group.keys())}")
+    logger.info(f"  CSR group attrs: {dict(csr_group.attrs)}")
+    for key in ['data', 'indices', 'indptr']:
+        if key in csr_group:
+            ds = csr_group[key]
+            logger.info(f"  {key}: shape={ds.shape}, dtype={ds.dtype}, attrs={dict(ds.attrs)}")
+
     indptr_full = csr_group['indptr'][:]
 
     # Build new CSR matrix with only selected rows
@@ -266,12 +307,47 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
 
     # Concatenate all rows
     data = np.concatenate(data_list) if data_list else np.array([], dtype=np.float32)
-    indices = np.concatenate(indices_list) if indices_list else np.array([], dtype=np.int32)
+    indices_concat = np.concatenate(indices_list) if indices_list else np.array([], dtype=np.int32)
     indptr = np.array(indptr_new, dtype=np.int32)
 
-    n_cols = csr_group['indices'].attrs.get('shape', [0, 0])[-1]
+    # Determine number of columns
+    # Try multiple approaches to get n_cols from HDF5 storage
+    n_cols = None
 
-    return csr_matrix((data, indices, indptr), shape=(len(row_indices), n_cols))
+    # Approach 1: Check 'shape' attribute on various datasets
+    for key in ['indices', 'data', 'indptr']:
+        if 'shape' in csr_group[key].attrs:
+            shape = csr_group[key].attrs['shape']
+            if len(shape) >= 2:
+                n_cols = shape[1]
+                break
+
+    # Approach 2: Check parent group attributes
+    if n_cols is None and 'shape' in csr_group.attrs:
+        shape = csr_group.attrs['shape']
+        if len(shape) >= 2:
+            n_cols = shape[1]
+
+    # Approach 3: Infer from max column index
+    if n_cols is None:
+        if len(indices_concat) > 0:
+            n_cols = int(indices_concat.max()) + 1
+        else:
+            # No data - check full indices dataset
+            full_indices = csr_group['indices'][:]
+            n_cols = int(full_indices.max()) + 1 if len(full_indices) > 0 else 0
+
+    if n_cols is None or n_cols == 0:
+        raise ValueError(
+            f"Could not determine number of columns for CSR matrix. "
+            f"Checked attributes: {dict(csr_group.attrs)}, "
+            f"indices range: {indices_concat.min() if len(indices_concat) > 0 else 'empty'} to "
+            f"{indices_concat.max() if len(indices_concat) > 0 else 'empty'}"
+        )
+
+    logger.info(f"  CSR matrix shape: ({len(row_indices)}, {n_cols})")
+
+    return csr_matrix((data, indices_concat, indptr), shape=(len(row_indices), n_cols))
 
 
 def _validate_and_convert_to_csr(adata: sc.AnnData) -> sc.AnnData:
