@@ -11,7 +11,7 @@ from typing import Union
 
 import onnxruntime as ort
 from tqdm import tqdm
-import s3fs
+from s3fs import S3FileSystem
 
 # Configure logging
 logging.basicConfig(
@@ -22,60 +22,326 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _load_h5ad_from_path_or_s3(path: Union[str, Path]) -> sc.AnnData:
+def _load_h5ad_from_path_or_s3(
+    path: Union[str, Path],
+    max_cells: int | None = None,
+    seed: int = 42
+) -> sc.AnnData:
     """
     Load h5ad file from local path or S3 URI.
 
+    For local files, uses backed mode for memory efficiency.
+    For S3 files, can sample rows BEFORE loading to avoid reading entire matrix.
+
     Args:
         path: Local file path or S3 URI (s3://bucket/key)
+        max_cells: If specified, randomly sample this many cells before loading
+        seed: Random seed for sampling
 
     Returns:
         Loaded AnnData object
     """
+    import anndata as ad
+    import h5py
+
     path_str = str(path)
 
     if path_str.startswith("s3://"):
         logger.info("Loading from S3: %s", path_str)
-        fs = s3fs.S3FileSystem(anon=False)
-        with fs.open(path_str, "rb") as f:
-            adata = sc.read_h5ad(f)
-        logger.info("  S3 file loaded successfully")
+
+        # Build S3FileSystem configuration
+        endpoint_url = os.getenv("AWS_ENDPOINT_URL", None)
+        s3_config = {
+            "anon": False,
+            "skip_instance_cache": True,
+            "use_listings_cache": False,
+        }
+        if endpoint_url:
+            logger.info("  Using custom S3 endpoint: %s", endpoint_url)
+            s3_config["client_kwargs"] = {"endpoint_url": endpoint_url}
+
+        # Create S3 filesystem
+        logger.info("  Opening S3 file via S3FileSystem...")
+        fs = S3FileSystem(**s3_config)
+
+        # Extract bucket and key from s3://bucket/key
+        s3_path = path_str.replace("s3://", "")
+
+        try:
+            # Open file with S3FileSystem - this creates a file-like object
+            # that h5py can read from with random access
+            s3_file = fs.open(s3_path, "rb")
+
+            # Open the S3 file handle with h5py
+            h5_file = h5py.File(s3_file, 'r')
+            logger.info("  Successfully opened S3 file")
+        except Exception as e:
+            logger.error("  Failed to open S3 file: %s", e)
+            raise
+
+        # Check total number of cells
+        # h5_file['obs'] is a Group, not a Dataset, so we need to access index
+        obs_index_key = '_index' if '_index' in h5_file['obs'] else 'index'
+        n_cells = h5_file['obs'][obs_index_key].shape[0]
+        logger.info("  Total cells in file: %d", n_cells)
+
+        # If sampling, determine which rows to read
+        if max_cells is not None and n_cells > max_cells:
+            logger.info("  Sampling %d cells before loading", max_cells)
+            np.random.seed(seed)
+            indices = np.random.choice(n_cells, size=max_cells, replace=False)
+            indices.sort()
+            logger.info("  Sample indices: min=%d, max=%d", indices.min(), indices.max())
+
+            # Read only sampled rows from h5ad
+            # This is memory-efficient - only reads what we need!
+            adata = _read_h5ad_subset(h5_file, indices)
+            logger.info("  Loaded %d sampled cells from S3", len(adata))
+        else:
+            # Load entire file using same parsing logic as subset
+            logger.info("  Loading entire file from S3")
+            indices = np.arange(n_cells)
+            adata = _read_h5ad_subset(h5_file, indices)
+            logger.info("  Loaded %d cells from S3", len(adata))
+
+        # Store file references so they don't get closed prematurely
+        adata._h5_file = h5_file
+        adata._s3_file = s3_file
+
     else:
         logger.info("Loading from local path: %s", path_str)
-        adata = sc.read_h5ad(path_str)
+        # For local files, use backed mode for memory efficiency
+        adata = ad.read_h5ad(path_str, backed='r')
 
     return adata
+
+
+def _read_h5ad_subset(h5_file, indices: np.ndarray) -> sc.AnnData:
+    """
+    Read a subset of cells from an h5ad file.
+
+    Only reads the specified row indices, avoiding loading the entire matrix.
+
+    Args:
+        h5_file: Open h5py File object
+        indices: Row indices to read
+
+    Returns:
+        AnnData object with only the specified cells
+    """
+    import anndata as ad
+    import pandas as pd
+    import h5py
+
+    # Read obs (cell metadata) for selected indices
+    obs_group = h5_file['obs']
+
+    # h5py doesn't support fancy indexing with numpy arrays directly
+    # We need to read elements individually or use a list
+    indices_list = indices.tolist()
+
+    # Determine index key name (could be 'index' or '_index')
+    index_key = '_index' if '_index' in obs_group else 'index'
+
+    # Read index column to get cell names
+    obs_index = obs_group[index_key][indices_list]
+    if hasattr(obs_index[0], 'decode'):
+        obs_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in obs_index]
+    else:
+        obs_index = [str(x) for x in obs_index]
+
+    obs_df = pd.DataFrame(index=obs_index)
+
+    # Read other obs columns
+    for key in obs_group.keys():
+        if key not in (index_key, '_index', 'index'):
+            item = obs_group[key]
+
+            # Check if it's a Dataset or a Group (categorical)
+            if isinstance(item, h5py.Dataset):
+                # Regular column - read directly
+                values = item[indices_list]
+                # Decode bytes if necessary
+                if len(values) > 0 and hasattr(values[0], 'decode'):
+                    values = [x.decode('utf-8') if isinstance(x, bytes) else x for x in values]
+                obs_df[key] = values
+            else:
+                # Categorical column stored as Group with codes/categories
+                if 'codes' in item and 'categories' in item:
+                    # Read codes for selected indices
+                    codes = item['codes'][indices_list]
+                    # Read categories
+                    categories = item['categories'][:]
+                    # Decode categories if bytes
+                    if len(categories) > 0 and hasattr(categories[0], 'decode'):
+                        categories = [x.decode('utf-8') if isinstance(x, bytes) else x for x in categories]
+                    # Map codes to category values
+                    values = [categories[c] if c >= 0 else None for c in codes]
+                    obs_df[key] = values
+
+    # Read var (gene metadata) - all genes
+    var_group = h5_file['var']
+
+    # Determine index key name (could be 'index' or '_index')
+    var_index_key = '_index' if '_index' in var_group else 'index'
+
+    var_index = var_group[var_index_key][:]
+    if hasattr(var_index[0], 'decode'):
+        var_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in var_index]
+    else:
+        var_index = [str(x) for x in var_index]
+
+    var_df = pd.DataFrame(index=var_index)
+    for key in var_group.keys():
+        if key not in (var_index_key, '_index', 'index'):
+            item = var_group[key]
+
+            # Check if it's a Dataset or a Group (categorical)
+            if isinstance(item, h5py.Dataset):
+                values = item[:]
+                if len(values) > 0 and hasattr(values[0], 'decode'):
+                    values = [x.decode('utf-8') if isinstance(x, bytes) else x for x in values]
+                var_df[key] = values
+            else:
+                # Categorical column
+                if 'codes' in item and 'categories' in item:
+                    codes = item['codes'][:]
+                    categories = item['categories'][:]
+                    if len(categories) > 0 and hasattr(categories[0], 'decode'):
+                        categories = [x.decode('utf-8') if isinstance(x, bytes) else x for x in categories]
+                    values = [categories[c] if c >= 0 else None for c in codes]
+                    var_df[key] = values
+
+    # Read .X matrix for selected rows only
+    x_group = h5_file['X']
+
+    # Check if it's CSR sparse matrix (stored as Group with data/indices/indptr)
+    if isinstance(x_group, h5py.Group) and 'data' in x_group and 'indices' in x_group and 'indptr' in x_group:
+        # CSR format - read selected rows efficiently
+        logger.info("  Reading CSR sparse matrix (selected rows only)")
+        X = _read_csr_subset(x_group, indices)
+    else:
+        # Dense or other format - read selected rows
+        logger.info("  Reading dense matrix (selected rows only)")
+        # For dense matrices, we need to read row by row or use list indexing
+        X = x_group[indices_list, :]
+
+    # Create AnnData object
+    adata = ad.AnnData(X=X, obs=obs_df, var=var_df)
+
+    return adata
+
+
+def _read_csr_subset(csr_group, row_indices: np.ndarray):
+    """
+    Read a subset of rows from a CSR sparse matrix stored in HDF5.
+
+    Args:
+        csr_group: HDF5 group containing 'data', 'indices', 'indptr'
+        row_indices: Rows to extract
+
+    Returns:
+        CSR matrix with only the specified rows
+    """
+    from scipy.sparse import csr_matrix
+
+    indptr_full = csr_group['indptr'][:]
+
+    # Build new CSR matrix with only selected rows
+    data_list = []
+    indices_list = []
+    indptr_new = [0]
+
+    for row_idx in row_indices:
+        start = indptr_full[row_idx]
+        end = indptr_full[row_idx + 1]
+
+        # Read data and indices for this row
+        row_data = csr_group['data'][start:end]
+        row_indices_csr = csr_group['indices'][start:end]
+
+        data_list.append(row_data)
+        indices_list.append(row_indices_csr)
+        indptr_new.append(indptr_new[-1] + len(row_data))
+
+    # Concatenate all rows
+    data = np.concatenate(data_list) if data_list else np.array([], dtype=np.float32)
+    indices = np.concatenate(indices_list) if indices_list else np.array([], dtype=np.int32)
+    indptr = np.array(indptr_new, dtype=np.int32)
+
+    n_cols = csr_group['indices'].attrs.get('shape', [0, 0])[-1]
+
+    return csr_matrix((data, indices, indptr), shape=(len(row_indices), n_cols))
 
 
 def _validate_and_convert_to_csr(adata: sc.AnnData) -> sc.AnnData:
     """
     Validate that .X is in CSR format for efficient cell-by-cell access.
 
-    CSR (Compressed Sparse Row) format enables efficient row slicing,
-    which is critical for processing cells in batches during embedding.
+    For backed mode (S3 files), verifies the storage format supports efficient
+    row-wise random access without loading the entire matrix into memory.
+    CSR format is required for efficient cell-by-cell streaming.
 
     Args:
-        adata: AnnData object to validate
+        adata: AnnData object to validate (may be in backed mode)
 
     Returns:
-        AnnData with .X in CSR format (converts if necessary)
+        AnnData with .X in CSR format
+
+    Raises:
+        AssertionError: If backed mode file is not in CSR or chunked dense format
     """
     from scipy.sparse import issparse, isspmatrix_csr, csr_matrix
+    import h5py
 
-    if not issparse(adata.X):
-        logger.warning("  .X is dense array, converting to CSR for efficiency")
-        adata.X = csr_matrix(adata.X)
-    elif not isspmatrix_csr(adata.X):
-        current_format = type(adata.X).__name__
-        logger.warning(
-            "  .X is in %s format, converting to CSR for efficient row access",
-            current_format,
-        )
-        adata.X = adata.X.tocsr()
+    # Check if in backed mode (file-backed, not loaded into memory)
+    is_backed = hasattr(adata, 'isbacked') and adata.isbacked
+
+    if is_backed:
+        logger.info("  File is in backed mode (streaming from disk/S3)")
+
+        # For backed mode, check the underlying HDF5 storage format
+        # We can't convert formats in backed mode without loading into memory
+        h5_group = adata.file['X']
+
+        # Check if it's stored as CSR sparse matrix
+        if 'data' in h5_group and 'indices' in h5_group and 'indptr' in h5_group:
+            logger.info("  ✅ .X is stored as CSR sparse matrix in HDF5")
+        # Check if it's dense array with chunking (acceptable for streaming)
+        elif isinstance(h5_group, h5py.Dataset):
+            chunks = h5_group.chunks
+            if chunks is not None:
+                logger.info("  ✅ .X is stored as chunked dense array (chunk size: %s)", chunks)
+            else:
+                # Dense array without chunking - will load entire matrix on first access!
+                assert False, (
+                    "Backed mode requires .X to be stored as CSR sparse matrix or "
+                    "chunked dense array for efficient random access. "
+                    "Current file has unchunked dense storage which would load "
+                    "the entire matrix into memory. "
+                    "Please convert the h5ad file to CSR format before uploading to S3."
+                )
+        else:
+            assert False, f"Unknown .X storage format in backed mode: {type(h5_group)}"
+
+        # Cannot convert format in backed mode
+        return adata
     else:
-        logger.info("  ✅ .X is already in CSR format")
+        # In-memory mode: can convert formats as needed
+        if not issparse(adata.X):
+            logger.warning("  .X is dense array, converting to CSR for efficiency")
+            adata.X = csr_matrix(adata.X)
+        elif not isspmatrix_csr(adata.X):
+            current_format = type(adata.X).__name__
+            logger.warning(
+                "  .X is in %s format, converting to CSR for efficient row access",
+                current_format,
+            )
+            adata.X = adata.X.tocsr()
+        else:
+            logger.info("  ✅ .X is already in CSR format")
 
-    return adata
+        return adata
 
 
 def _random_sample_cells(adata: sc.AnnData, max_cells: int, seed: int) -> sc.AnnData:
@@ -319,19 +585,14 @@ def _validate_outputs(
 
     logger.info("Validating output files against h5ad: %s", h5ad_path)
 
-    # Load the h5ad file (supports S3)
-    logger.info("Loading h5ad file...")
-    adata = _load_h5ad_from_path_or_s3(h5ad_path)
-    logger.info("  Original shape: %s", adata.shape)
+    # Load the h5ad file with SAME sampling as export (supports S3)
+    # This uses incremental access - samples BEFORE loading if max_cells specified
+    logger.info("Loading h5ad file with same sampling as export...")
+    adata = _load_h5ad_from_path_or_s3(h5ad_path, max_cells=max_cells, seed=seed)
+    logger.info("  Loaded shape: %s", adata.shape)
 
     # Validate and convert to CSR (same as during export)
     adata = _validate_and_convert_to_csr(adata)
-
-    # Apply the SAME sampling as was used during export
-    if max_cells is not None and adata.n_obs > max_cells:
-        logger.info("Applying same sampling as export (max_cells=%d, seed=%d)", max_cells, seed)
-        adata = _random_sample_cells(adata, max_cells, seed)
-        logger.info("  Sampled shape: %s", adata.shape)
 
     # Load output files
     embeddings_path = output_dir / "embeddings.npy"
@@ -521,14 +782,18 @@ def _process_single_h5ad_file(
         Tuple of (embeddings array, labels dataframe or None)
     """
     # Load h5ad file
-    adata = _load_h5ad_from_path_or_s3(h5ad_path)
+    # For S3 files, sampling happens during load for efficiency
+    # For local files, sampling happens after load
+    adata = _load_h5ad_from_path_or_s3(h5ad_path, max_cells=max_cells, seed=seed)
     logger.info("  Loaded data shape: %s", adata.shape)
 
     # Validate and convert to CSR
     adata = _validate_and_convert_to_csr(adata)
 
-    # Sample cells if needed
+    # For local files in backed mode, we still need to sample after loading
+    # For S3 files, sampling already happened during load
     if max_cells is not None and adata.n_obs > max_cells:
+        logger.info("  Sampling after load (backed mode)")
         adata = _random_sample_cells(adata, max_cells, seed)
         logger.info("  Sampled data shape: %s", adata.shape)
 
