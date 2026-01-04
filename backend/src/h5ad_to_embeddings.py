@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import scanpy as sc
-from typing import Union
+from typing import Union, Any
 
 import onnxruntime as ort
 from tqdm import tqdm
@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 def _load_h5ad_from_path_or_s3(
     path: Union[str, Path],
     max_cells: int | None = None,
-    seed: int = 42
+    seed: int = 42,
+    s3_profile: str | None = None,
+    s3_anon: bool = False,
 ) -> sc.AnnData:
     """
     Load h5ad file from local path or S3 URI.
@@ -37,6 +39,8 @@ def _load_h5ad_from_path_or_s3(
         path: Local file path or S3 URI (s3://bucket/key)
         max_cells: If specified, randomly sample this many cells before loading
         seed: Random seed for sampling
+        s3_profile: AWS profile name for S3 access (optional)
+        s3_anon: Use anonymous access for public S3 buckets
 
     Returns:
         Loaded AnnData object
@@ -50,15 +54,25 @@ def _load_h5ad_from_path_or_s3(
         logger.info("Loading from S3: %s", path_str)
 
         # Build S3FileSystem configuration
-        endpoint_url = os.getenv("AWS_ENDPOINT_URL", None)
-        s3_config = {
-            "anon": False,
+        s3_config: dict[str, Any] = {
+            "anon": s3_anon,
             "skip_instance_cache": True,
             "use_listings_cache": False,
         }
+
+        # Add profile if specified
+        if s3_profile is not None:
+            logger.info("  Using AWS profile: %s", s3_profile)
+            s3_config["profile"] = s3_profile
+
+        # Add custom endpoint if specified
+        endpoint_url = os.getenv("AWS_ENDPOINT_URL", None)
         if endpoint_url:
             logger.info("  Using custom S3 endpoint: %s", endpoint_url)
             s3_config["client_kwargs"] = {"endpoint_url": endpoint_url}
+
+        if s3_anon:
+            logger.info("  Using anonymous S3 access")
 
         # Create S3 filesystem
         logger.info("  Opening S3 file via S3FileSystem...")
@@ -639,6 +653,8 @@ def _validate_outputs(
     batch_size: int,
     max_cells: int | None = None,
     seed: int = 42,
+    s3_profile: str | None = None,
+    s3_anon: bool = False,
 ) -> None:
     """
     Validate that output files maintain correct row ordering and embeddings match.
@@ -664,7 +680,9 @@ def _validate_outputs(
     # Load the h5ad file with SAME sampling as export (supports S3)
     # This uses incremental access - samples BEFORE loading if max_cells specified
     logger.info("Loading h5ad file with same sampling as export...")
-    adata = _load_h5ad_from_path_or_s3(h5ad_path, max_cells=max_cells, seed=seed)
+    adata = _load_h5ad_from_path_or_s3(
+        h5ad_path, max_cells=max_cells, seed=seed, s3_profile=s3_profile, s3_anon=s3_anon
+    )
     logger.info("  Loaded shape: %s", adata.shape)
 
     # Validate and convert to CSR (same as during export)
@@ -792,7 +810,10 @@ def _validate_outputs(
 
 
 def _compute_label_intersection(
-    h5ad_paths: list[Union[str, Path]], requested_labels: list[str]
+    h5ad_paths: list[Union[str, Path]],
+    requested_labels: list[str],
+    s3_profile: str | None = None,
+    s3_anon: bool = False,
 ) -> list[str]:
     """
     Compute intersection of label columns across multiple h5ad files.
@@ -800,6 +821,8 @@ def _compute_label_intersection(
     Args:
         h5ad_paths: List of paths to h5ad files
         requested_labels: User-requested label columns
+        s3_profile: AWS profile name for S3 access (optional)
+        s3_anon: Use anonymous access for public S3 buckets
 
     Returns:
         List of label columns present in ALL files
@@ -812,7 +835,7 @@ def _compute_label_intersection(
     # Load obs columns from each file
     all_obs_columns = []
     for h5ad_path in h5ad_paths:
-        adata = _load_h5ad_from_path_or_s3(h5ad_path)
+        adata = _load_h5ad_from_path_or_s3(h5ad_path, s3_profile=s3_profile, s3_anon=s3_anon)
         obs_columns = set(adata.obs.columns)
         all_obs_columns.append(obs_columns)
         logger.info("  %s: %d obs columns", Path(str(h5ad_path)).name, len(obs_columns))
@@ -841,6 +864,8 @@ def _process_single_h5ad_file(
     max_cells: int | None,
     seed: int,
     batch_size: int,
+    s3_profile: str | None = None,
+    s3_anon: bool = False,
 ) -> tuple[np.ndarray, pd.DataFrame | None]:
     """
     Process a single h5ad file to generate embeddings and extract labels.
@@ -860,7 +885,9 @@ def _process_single_h5ad_file(
     # Load h5ad file
     # For S3 files, sampling happens during load for efficiency
     # For local files, sampling happens after load
-    adata = _load_h5ad_from_path_or_s3(h5ad_path, max_cells=max_cells, seed=seed)
+    adata = _load_h5ad_from_path_or_s3(
+        h5ad_path, max_cells=max_cells, seed=seed, s3_profile=s3_profile, s3_anon=s3_anon
+    )
     logger.info("  Loaded data shape: %s", adata.shape)
 
     # Validate and convert to CSR
@@ -901,6 +928,8 @@ def _process_multiple_h5ad_files(
     max_cells: int | None,
     seed: int,
     batch_size: int,
+    s3_profile: str | None = None,
+    s3_anon: bool = False,
 ) -> tuple[np.ndarray, pd.DataFrame | None]:
     """
     Process multiple h5ad files with label intersection.
@@ -918,7 +947,9 @@ def _process_multiple_h5ad_files(
         Tuple of (concatenated embeddings, concatenated labels or None)
     """
     # Compute label intersection
-    valid_labels = _compute_label_intersection(h5ad_paths, requested_labels)
+    valid_labels = _compute_label_intersection(
+        h5ad_paths, requested_labels, s3_profile=s3_profile, s3_anon=s3_anon
+    )
 
     # Process each file
     all_embeddings: list[np.ndarray] = []
@@ -938,6 +969,8 @@ def _process_multiple_h5ad_files(
             max_cells=max_cells,
             seed=file_seed,
             batch_size=batch_size,
+            s3_profile=s3_profile,
+            s3_anon=s3_anon,
         )
 
         all_embeddings.append(embeddings)
@@ -1001,6 +1034,14 @@ def ingest(
         1000,
         help="Batch size for embedding inference",
     ),
+    s3_profile: str = typer.Option(
+        None,
+        help="AWS profile name to use for S3 access (default: use default profile or environment credentials)",
+    ),
+    s3_anon: bool = typer.Option(
+        False,
+        help="Access S3 bucket anonymously without credentials (for public buckets)",
+    ),
 ) -> None:
     """
     Process h5ad file(s) through ONNX embedding model to generate embeddings and extract labels.
@@ -1035,6 +1076,8 @@ def ingest(
             max_cells=max_cells,
             seed=seed,
             batch_size=batch_size,
+            s3_profile=s3_profile,
+            s3_anon=s3_anon,
         )
     else:
         logger.info("Processing %d h5ad files...", len(h5ad_paths))
@@ -1046,6 +1089,8 @@ def ingest(
             max_cells=max_cells,
             seed=seed,
             batch_size=batch_size,
+            s3_profile=s3_profile,
+            s3_anon=s3_anon,
         )
 
     # Create output directory
@@ -1086,6 +1131,8 @@ def ingest(
                 batch_size=batch_size,
                 max_cells=max_cells,
                 seed=seed,
+                s3_profile=s3_profile,
+                s3_anon=s3_anon,
             )
         except Exception as e:
             logger.error("Validation failed: %s", e)
