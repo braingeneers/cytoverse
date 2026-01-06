@@ -1,5 +1,5 @@
 # Default ivfpq parameters
-model_id ?= scimilarity
+model_id ?=scimilarity
 
 test:
 	python -m pytest backend/tests/unit
@@ -23,12 +23,6 @@ benchmark:
 
 test-no-capture:
 	cd backend && python -m pytest tests --capture=no --log-cli-level=DEBUG
-
-download-marson2025:
-	cd backend && python src/download_h5ad_subset.py \
-	s3://genome-scale-tcell-perturb-seq/marson2025_data/D1_Rest.assigned_guide.h5ad \
-	~/data/h5ad/marson2025 \
-	--subsample 100
 
 # Populate model artifacts for the selected model to public/models/<model_id>
 notice:
@@ -82,20 +76,20 @@ sspsygene-embeddings:
 	--labels Subtype.v1
 
 
-# Geneformer
-geneformer-model:
+# sspsygene embeddings from geneformer model
+sspsygene-geneformer-model:
 	python backend/src/geneformer_export_model.py \
 	data/models/Geneformer/Geneformer-V1-10M \
-	public/models/geneformer-v1-10m/embedding
+	public/models/sspsygene-geneformer/embedding
 
-geneformer-sspsygene-embeddings:
+sspsygene-geneformer-embeddings:
 	python backend/src/h5ad_to_embeddings.py \
 	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
-	public/models/geneformer-v1-10m/embedding/model.onnx \
-	public/models/geneformer-v1-10m/embedding/genes.txt \
-	data/references/geneformer-sspsygene \
+	public/models/sspsygene-geneformer/embedding/model.onnx \
+	public/models/sspsygene-geneformer/embedding/genes.txt \
+	data/references/sspsygene-geneformer \
 	--max-cells 10_000 \
-	--batch-size 16 \
+	--batch-size 32 \
 	--labels Dataset \
 	--labels Gestational_week \
 	--labels Class \

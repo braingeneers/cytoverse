@@ -19,7 +19,7 @@ env.debug = true;
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50;
 const NUM_PARTITIONS_TO_SEARCH = 4;
-const BATCH_SIZE = 32;
+const BATCH_SIZE = 4;
 
 // TypeScript interfaces
 interface ModelInfo {
@@ -159,9 +159,7 @@ let cancelFeatureImportance = false;
 // Handle messages from main thread
 self.addEventListener(
   'message',
-  async function (
-    event: MessageEvent<StartMessage | FeatureImportanceRequestMessage>
-  ) {
+  async function (event: MessageEvent<StartMessage | FeatureImportanceRequestMessage>) {
     console.log('Worker received message:', event.data.type);
 
     if (event.data.type === 'start') {
@@ -201,7 +199,9 @@ self.addEventListener(
         console.error('Unhandled error in calculateFeatureImportance:', error);
         self.postMessage({
           type: 'error',
-          error: `Feature importance failed: ${error instanceof Error ? error.message : String(error)}`,
+          error: `Feature importance failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         } as ErrorMessage);
       });
     }
@@ -273,8 +273,12 @@ async function instantiateModel(
     type: 'status',
     message: 'Instantiating model...',
   } as StatusMessage);
-  env.wasm.numThreads = Math.max(1, navigator.hardwareConcurrency - 4);
-  env.wasm.proxy = true;
+  // Disable threading and SIMD for compatibility with onnxruntime-web 1.23
+  env.wasm.numThreads = 1; // Single-threaded to avoid threading issues
+  env.wasm.simd = false; // Disable SIMD optimizations
+  // env.wasm.proxy = true;
+  env.wasm.proxy = false;
+  env.wasm.initTimeout = 30000; // 30 seconds for large model initialization
 
   // Create inference sessions
   let sessionOptions = {};
@@ -300,8 +304,10 @@ async function instantiateModel(
     console.log('Configuring embedding session to use WebAssembly...');
     sessionOptions = {
       executionProviders: ['wasm'],
-      executionMode: 'parallel',
+      executionMode: 'sequential', // Use sequential to reduce memory pressure
       graphOptimizationLevel: 'all',
+      enableCpuMemArena: false, // Disable memory arena to reduce peak memory usage
+      enableMemPattern: false, // Disable memory pattern optimization
     };
   }
 
@@ -791,7 +797,9 @@ async function start(
   featureImportanceOnly: boolean = false
 ): Promise<void> {
   console.log(
-    `Starting unified worker for model ${modelID} with file ${h5File.name}${featureImportanceOnly ? ' (feature importance only)' : ''}`
+    `Starting unified worker for model ${modelID} with file ${h5File.name}${
+      featureImportanceOnly ? ' (feature importance only)' : ''
+    }`
   );
 
   self.postMessage({
@@ -1051,10 +1059,14 @@ async function calculateFeatureImportance(
     console.log('Current raw data initialized:', !!currentRawData);
 
     if (!model || !currentRawData) {
-      throw new Error(`Model or data not initialized (model: ${!!model}, data: ${!!currentRawData})`);
+      throw new Error(
+        `Model or data not initialized (model: ${!!model}, data: ${!!currentRawData})`
+      );
     }
 
-    console.log(`Calculating feature importance for cell ${cellId} (index ${cellIndex})`);
+    console.log(
+      `Calculating feature importance for cell ${cellId} (index ${cellIndex})`
+    );
 
     // Extract cell expression data
     const cellExpression = new Float32Array(model.genes.length);
@@ -1098,7 +1110,10 @@ async function calculateFeatureImportance(
     }
 
     // Get baseline embedding
-    const baselineTensor = new Tensor('float32', cellExpression, [1, model.genes.length]);
+    const baselineTensor = new Tensor('float32', cellExpression, [
+      1,
+      model.genes.length,
+    ]);
     const baselineResults = await model.embeddingSession.run({ input: baselineTensor });
     const baselineEmbedding = new Float32Array(
       baselineResults.output.data as Float32Array
@@ -1130,7 +1145,10 @@ async function calculateFeatureImportance(
         return;
       }
 
-      const batchGenes = expressedGenes.slice(i, Math.min(i + batchSize, expressedGenes.length));
+      const batchGenes = expressedGenes.slice(
+        i,
+        Math.min(i + batchSize, expressedGenes.length)
+      );
 
       for (const geneIdx of batchGenes) {
         // Check cancellation frequently
@@ -1146,7 +1164,10 @@ async function calculateFeatureImportance(
         perturbed[geneIdx] = 0.0;
 
         // Get embedding for perturbed input
-        const perturbedTensor = new Tensor('float32', perturbed, [1, model.genes.length]);
+        const perturbedTensor = new Tensor('float32', perturbed, [
+          1,
+          model.genes.length,
+        ]);
         const perturbedResults = await model.embeddingSession.run({
           input: perturbedTensor,
         });

@@ -12,6 +12,9 @@ dist/
 node_modules/
 .tsbuildinfo.*
 
+# PyTorch
+lightning_logs/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -9,7 +9,6 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import * as ort from 'onnxruntime-web';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import { mod } from '@tensorflow/tfjs';
 
 // Configure ONNX Runtime to use CPU (WebGPU not available in Node test environment)
 ort.env.wasm.numThreads = 1;

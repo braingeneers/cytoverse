@@ -228,15 +228,15 @@
       "name": "Attach to Playwright Chrome",
       "port": 9222,
       "url": "http://localhost:5173/*",
-      "webRoot": "${workspaceFolder}",
+      "webRoot": "${workspaceFolder}/frontend",
       "timeout": 30000,
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js",
       ],
       "sourceMapPathOverrides": {
-        "webpack:///./src/*": "${workspaceFolder}/src/*",
-        "webpack:///./*": "${workspaceFolder}/*",
-        "webpack:///src/*": "${workspaceFolder}/src/*",
+        "webpack:///./src/*": "${workspaceFolder}/frontend/src/*",
+        "webpack:///./*": "${workspaceFolder}/frontend/*",
+        "webpack:///src/*": "${workspaceFolder}/frontend/src/*",
       },
       "sourceMaps": true
     }

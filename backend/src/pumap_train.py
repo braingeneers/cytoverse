@@ -108,13 +108,17 @@ def train(
                 )
 
                 # Use train_test_split for stratified sampling on valid indices
-                selected_valid_indices, _ = train_test_split(
-                    valid_indices,
-                    test_size=1.0 - (adjusted_num_vectors / len(valid_indices)),
-                    stratify=valid_stratify_values,
-                    random_state=42,
-                )
-                selected_indices = selected_valid_indices
+                # If adjusted_num_vectors >= all valid vectors, use all of them
+                if adjusted_num_vectors >= len(valid_indices):
+                    selected_indices = valid_indices
+                else:
+                    selected_valid_indices, _ = train_test_split(
+                        valid_indices,
+                        test_size=1.0 - (adjusted_num_vectors / len(valid_indices)),
+                        stratify=valid_stratify_values,
+                        random_state=42,
+                    )
+                    selected_indices = selected_valid_indices
             else:
                 print(
                     f"Selecting {num_vectors} stratified vectors from {vectors.shape[0]} total vectors based on '{stratify_label}' column"
@@ -124,12 +128,16 @@ def train(
                 indices = np.arange(vectors.shape[0])
 
                 # Use train_test_split for stratified sampling
-                selected_indices, _ = train_test_split(
-                    indices,
-                    test_size=1.0 - (num_vectors / vectors.shape[0]),
-                    stratify=stratify_values,
-                    random_state=42,
-                )
+                # If num_vectors >= all vectors, use all of them
+                if num_vectors >= vectors.shape[0]:
+                    selected_indices = indices
+                else:
+                    selected_indices, _ = train_test_split(
+                        indices,
+                        test_size=1.0 - (num_vectors / vectors.shape[0]),
+                        stratify=stratify_values,
+                        random_state=42,
+                    )
 
             training_vector_ids = selected_indices
             vectors = vectors[selected_indices]

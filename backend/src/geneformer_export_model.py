@@ -358,6 +358,7 @@ def model(
         output_names=["token_ids"],
         dynamic_axes={"input": {0: "batch_size"}, "token_ids": {0: "batch_size"}},
         verbose=False,
+        dynamo=False,  # Use legacy TorchScript exporter (PyTorch 2.9+)
     )
     logger.info("  Preprocessing ONNX saved to %s", preprocessing_path)
 
@@ -381,6 +382,7 @@ def model(
         output_names=["embedding"],
         dynamic_axes={"token_ids": {0: "batch_size"}, "embedding": {0: "batch_size"}},
         verbose=False,
+        dynamo=False,  # Use legacy TorchScript exporter (PyTorch 2.9+)
     )
     logger.info("  Embedding ONNX saved to %s", embedding_path)
 
@@ -390,17 +392,19 @@ def model(
     combined_model.eval()
     combined_path = output_path / "model.onnx"
 
+    # Use opset 17 for maximum compatibility with onnxruntime-web
     torch.onnx.export(
         combined_model,
         torch.zeros(1, len(ensembl_ids)),
         combined_path,
         export_params=True,
-        opset_version=17,
+        opset_version=17,  # Use opset 17 for compatibility with onnxruntime-web 1.23
         do_constant_folding=True,
         input_names=["input"],
         output_names=["output"],
         dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
         verbose=False,
+        dynamo=False,  # Use legacy TorchScript exporter (PyTorch 2.9+)
     )
     logger.info("  Combined ONNX saved to %s", combined_path)
 
