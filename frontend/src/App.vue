@@ -490,6 +490,20 @@ const availableModels = ref<
     baseModelId?: string;
     cellCount?: number;
     category?: string;
+    modelConfig?: {
+      id: string;
+      title: string;
+      paper_url: string;
+      repo_url: string;
+      params: { batch_size: number };
+    };
+    referenceConfig?: {
+      id: string;
+      title: string;
+      paper_url: string;
+      repo_url: string;
+      params: { num_cells: number };
+    };
   }[]
 >([]);
 const isRunning = ref(false);
@@ -811,16 +825,17 @@ const createWorker = () => {
 
 const loadAvailableModels = async () => {
   try {
-    // Load reference models
-    const response = await fetch('models/models.txt');
-    const text = await response.text();
-    const modelNames = text.split('\n').filter((name) => name.trim());
+    // Load reference models from models.json
+    const response = await fetch('models/models.json');
+    const modelsConfig = await response.json();
 
-    const referenceModels = modelNames.map((name) => ({
-      title: name,
-      value: name,
+    const referenceModels = modelsConfig.map((config: any) => ({
+      title: `${config.model.title} - ${config.reference.title}`,
+      value: config.id,
       isUserIndex: false,
-      baseModelId: name,
+      baseModelId: config.id,
+      modelConfig: config.model,
+      referenceConfig: config.reference,
     }));
 
     // Load user indexes from IndexedDB
@@ -842,10 +857,13 @@ const loadAvailableModels = async () => {
       !selectedModel.value ||
       !availableModels.value.find((m) => m.value === selectedModel.value)
     ) {
-      if (modelNames.includes('scimilarity')) {
+      const scimilarityModel = availableModels.value.find(
+        (m) => m.value === 'scimilarity'
+      );
+      if (scimilarityModel) {
         selectedModel.value = 'scimilarity';
-      } else if (modelNames.length > 0) {
-        selectedModel.value = modelNames[0];
+      } else if (referenceModels.length > 0) {
+        selectedModel.value = referenceModels[0].value;
       }
     }
   } catch (error) {
@@ -1134,6 +1152,12 @@ const start = async () => {
       useWebGPU: useWebGPU.value,
       maxTextureSize: maxTextureSize.value,
       labelIndices: baseRef.labelIndices.value,
+      modelParams: selectedModelInfo?.modelConfig?.params
+        ? JSON.parse(JSON.stringify(selectedModelInfo.modelConfig.params))
+        : undefined,
+      referenceParams: selectedModelInfo?.referenceConfig?.params
+        ? JSON.parse(JSON.stringify(selectedModelInfo.referenceConfig.params))
+        : undefined,
     });
   }
 };
@@ -1240,6 +1264,9 @@ const handleQueryCellClicked = (cellId: string, cellIndex: number) => {
     // At that point, the message handler will send the pending request
     if (selectedFile.value) {
       console.log('Starting worker with file for feature importance');
+      const selectedModelInfo = availableModels.value.find(
+        (m) => m.value === selectedModel.value
+      );
       worker!.postMessage({
         type: 'start',
         modelID: selectedModel.value,
@@ -1250,6 +1277,12 @@ const handleQueryCellClicked = (cellId: string, cellIndex: number) => {
         labelIndices: baseRef.labelIndices.value,
         useUserIndex: false,
         featureImportanceOnly: true, // Skip IVFPQ loading and cell processing
+        modelParams: selectedModelInfo?.modelConfig?.params
+          ? JSON.parse(JSON.stringify(selectedModelInfo.modelConfig.params))
+          : undefined,
+        referenceParams: selectedModelInfo?.referenceConfig?.params
+          ? JSON.parse(JSON.stringify(selectedModelInfo.referenceConfig.params))
+          : undefined,
       });
     }
   } else if (worker) {
