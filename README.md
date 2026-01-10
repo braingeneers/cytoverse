@@ -4,7 +4,7 @@ Label, share and display cells using foundation models client side within the br
 
 [https://cells-test.gi.ucsc.edu/cytoverse](https://cells-test.gi.ucsc.edu/cytoverse)
 
-![Alt text](screenshot.png?raw=true 'CytoVerse Screenshot')
+![Alt text](screenshot.png?raw=true "CytoVerse Screenshot")
 
 ## Overview
 
@@ -21,7 +21,7 @@ This architecture ensures privacy, scalability, and collaborative potential with
 
 ## Data and Compute Flow
 
-![Alt text](notebooks/figures/architecture.svg?raw=true 'CytoVerse Data Flow')
+![Alt text](notebooks/figures/architecture.svg?raw=true "CytoVerse Data Flow")
 
 ## Install
 
@@ -37,6 +37,74 @@ uv sync
 npm install
 npx playwright install
 ```
+
+### Geneformer Setup (Optional)
+
+To use Geneformer models, you need to install both the Python package and download the model data with Git LFS:
+
+1. **Install Geneformer Python package** (already included in pyproject.toml):
+
+   ```bash
+   uv sync  # This installs the geneformer package from HuggingFace
+   ```
+
+2. **Download Geneformer data with Git LFS**:
+
+   ```bash
+   # Install git-lfs if not already installed
+   # macOS: brew install git-lfs
+   # Ubuntu: apt-get install git-lfs
+
+   # Clone Geneformer data repository with LFS files
+   mkdir -p data/models
+   cd data/models
+   git lfs clone https://huggingface.co/ctheodoris/Geneformer geneformer
+   cd ../..
+   ```
+
+3. **Download pretrained model checkpoints**:
+
+   ```bash
+   # V1 models (30M training set)
+   cd data/models
+   git lfs clone https://huggingface.co/ctheodoris/Geneformer-V1-10M
+   git lfs clone https://huggingface.co/ctheodoris/Geneformer-V1-30M
+   git lfs clone https://huggingface.co/ctheodoris/Geneformer-V1-95M
+
+   # V2 models (104M training set) - optional
+   git lfs clone https://huggingface.co/ctheodoris/Geneformer-V2-12L-95M
+   git lfs clone https://huggingface.co/ctheodoris/Geneformer-V2-30L-95M
+   cd ../..
+   ```
+
+   NOTE: Currently only the Geneformer-V1-10M model is exported
+
+4. **Export Geneformer model to ONNX**:
+   ```bash
+   # Export V1 10M parameter model
+   uv run python backend/src/geneformer_export_model.py model \
+       data/models/Geneformer-V1-10M \
+       public/models/geneformer-v1-10m/embedding \
+       --geneformer-data-path data/models/geneformer \
+       --model-version v1
+   ```
+
+**Directory Structure**:
+
+```
+data/models/
+├── geneformer/                    # Gene dictionaries and data files (with LFS)
+│   └── geneformer/
+│       ├── gene_dictionaries_30m/ # V1 gene dictionaries
+│       ├── gene_median_dictionary_gc104M.pkl  # V2 gene medians
+│       ├── token_dictionary_gc104M.pkl        # V2 token dict
+│       └── gene_name_id_dict_gc104M.pkl       # V2 gene names
+├── Geneformer-V1-10M/             # V1 10M parameter model checkpoint
+├── Geneformer-V1-30M/             # V1 30M parameter model checkpoint
+└── Geneformer-V1-95M/             # V1 95M parameter model checkpoint
+```
+
+**Note**: The Geneformer Python package (installed via `uv sync`) contains only the code. The actual model checkpoints and gene dictionary data files (stored with Git LFS) must be downloaded separately.
 
 Export SCimilarity embeddings and labels, train a parametric umap model on a stratified subset of cells, train IVFPQ, populate partitions and export models to ONNX:
 

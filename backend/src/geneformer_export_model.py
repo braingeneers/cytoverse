@@ -9,7 +9,6 @@ from typing import Dict
 import torch
 import onnx
 from transformers import BertForMaskedLM
-from joblib import Memory
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -188,12 +187,12 @@ class GeneformerCombinedWrapper(torch.nn.Module):
         return embeddings
 
 
-def load_gene_medians(geneformer_path: Path, model_version: str) -> Dict[str, float]:
+def load_gene_medians(geneformer_data_path: Path, model_version: str) -> Dict[str, float]:
     """
-    Load gene median dictionary from Geneformer package.
+    Load gene median dictionary from Geneformer data directory.
 
     Args:
-        geneformer_path: Path to geneformer package directory
+        geneformer_data_path: Path to Geneformer data directory (with git lfs files)
         model_version: "v1" or "v2"
 
     Returns:
@@ -201,14 +200,26 @@ def load_gene_medians(geneformer_path: Path, model_version: str) -> Dict[str, fl
     """
     if model_version == "v1":
         median_file = (
-            geneformer_path
+            geneformer_data_path
             / "geneformer"
             / "gene_dictionaries_30m"
             / "gene_median_dictionary_gc30M.pkl"
         )
     else:
         median_file = (
-            geneformer_path / "geneformer" / "gene_median_dictionary_gc104M.pkl"
+            geneformer_data_path / "geneformer" / "gene_median_dictionary_gc104M.pkl"
+        )
+
+    if not median_file.exists():
+        raise FileNotFoundError(
+            f"Gene medians file not found: {median_file}\n"
+            f"Clone Geneformer data with: git lfs clone https://huggingface.co/ctheodoris/Geneformer"
+        )
+
+    if median_file.stat().st_size < 1000:
+        raise FileNotFoundError(
+            f"Gene medians file appears to be a Git LFS placeholder: {median_file}\n"
+            f"Pull LFS files with: cd {geneformer_data_path} && git lfs pull"
         )
 
     logger.info("Loading gene medians from %s", median_file)
@@ -219,12 +230,14 @@ def load_gene_medians(geneformer_path: Path, model_version: str) -> Dict[str, fl
     return gene_medians
 
 
-def load_token_dictionary(geneformer_path: Path, model_version: str) -> Dict[str, int]:
+def load_token_dictionary(
+    geneformer_data_path: Path, model_version: str
+) -> Dict[str, int]:
     """
-    Load token dictionary from Geneformer package.
+    Load token dictionary from Geneformer data directory.
 
     Args:
-        geneformer_path: Path to geneformer package directory
+        geneformer_data_path: Path to Geneformer data directory (with git lfs files)
         model_version: "v1" or "v2"
 
     Returns:
@@ -232,13 +245,27 @@ def load_token_dictionary(geneformer_path: Path, model_version: str) -> Dict[str
     """
     if model_version == "v1":
         token_file = (
-            geneformer_path
+            geneformer_data_path
             / "geneformer"
             / "gene_dictionaries_30m"
             / "token_dictionary_gc30M.pkl"
         )
     else:
-        token_file = geneformer_path / "geneformer" / "token_dictionary_gc104M.pkl"
+        token_file = (
+            geneformer_data_path / "geneformer" / "token_dictionary_gc104M.pkl"
+        )
+
+    if not token_file.exists():
+        raise FileNotFoundError(
+            f"Token dictionary file not found: {token_file}\n"
+            f"Clone Geneformer data with: git lfs clone https://huggingface.co/ctheodoris/Geneformer"
+        )
+
+    if token_file.stat().st_size < 1000:
+        raise FileNotFoundError(
+            f"Token dictionary file appears to be a Git LFS placeholder: {token_file}\n"
+            f"Pull LFS files with: cd {geneformer_data_path} && git lfs pull"
+        )
 
     logger.info("Loading token dictionary from %s", token_file)
 
@@ -249,46 +276,49 @@ def load_token_dictionary(geneformer_path: Path, model_version: str) -> Dict[str
     return token_dict
 
 
-def query_biomart_batch(batch: tuple[str, ...]) -> dict[str, str]:
+def load_gene_name_dict(
+    geneformer_data_path: Path, model_version: str
+) -> Dict[str, str]:
     """
-    Query biomart for Ensembl ID to gene symbol mapping.
+    Load gene name dictionary (Ensembl ID to symbol mapping) from Geneformer data directory.
 
     Args:
-        batch: Tuple of Ensembl IDs to query (tuple for hashability)
+        geneformer_data_path: Path to Geneformer data directory (with git lfs files)
+        model_version: "v1" or "v2"
 
     Returns:
         Dictionary mapping Ensembl IDs to gene symbols
     """
-    import requests
+    if model_version == "v1":
+        gene_name_file = (
+            geneformer_data_path
+            / "geneformer"
+            / "gene_dictionaries_30m"
+            / "gene_name_id_dict_gc30M.pkl"
+        )
+    else:
+        gene_name_file = (
+            geneformer_data_path / "geneformer" / "gene_name_id_dict_gc104M.pkl"
+        )
 
-    query = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE Query>
-<Query  virtualSchemaName = "default" formatter = "TSV" header = "0" uniqueRows = "0" count = "" datasetConfigVersion = "0.6" >
-    <Dataset name = "hsapiens_gene_ensembl" interface = "default" >
-        <Filter name = "ensembl_gene_id" value = "{','.join(batch)}"/>
-        <Attribute name = "ensembl_id" />
-        <Attribute name = "external_gene_name" />
-    </Dataset>
-</Query>"""
+    if not gene_name_file.exists():
+        raise FileNotFoundError(
+            f"Gene name dictionary file not found: {gene_name_file}\n"
+            f"Clone Geneformer data with: git lfs clone https://huggingface.co/ctheodoris/Geneformer"
+        )
 
-    ensembl_to_symbol: dict[str, str] = {}
+    if gene_name_file.stat().st_size < 1000:
+        raise FileNotFoundError(
+            f"Gene name dictionary file appears to be a Git LFS placeholder: {gene_name_file}\n"
+            f"Pull LFS files with: cd {geneformer_data_path} && git lfs pull"
+        )
 
-    response = requests.post(
-        "http://www.ensembl.org/biomart/martservice",
-        data={"query": query},
-        timeout=60,
-    )
+    logger.info("Loading gene name dictionary from %s", gene_name_file)
+    with open(gene_name_file, "rb") as f:
+        gene_name_dict = pickle.load(f)
 
-    if response.status_code == 200:
-        for line in response.text.strip().split("\n"):
-            if line:
-                parts = line.split("\t")
-                if len(parts) == 2:
-                    ensembl_id, symbol = parts
-                    if symbol:
-                        ensembl_to_symbol[ensembl_id] = symbol
-
-    return ensembl_to_symbol
+    logger.info("Loaded %d gene names", len(gene_name_dict))
+    return gene_name_dict
 
 
 @app.command()
@@ -300,9 +330,9 @@ def model(
     output_path: Path = typer.Argument(
         help="Path to save ONNX models (e.g., public/models/geneformer-v1-10m/embedding/)",
     ),
-    geneformer_pkg_path: Path = typer.Option(
+    geneformer_data_path: Path = typer.Option(
         "data/models/geneformer",
-        help="Path to geneformer package directory",
+        help="Path to Geneformer data directory with gene dictionaries (cloned with git lfs)",
     ),
     model_version: str = typer.Option(
         "v1",
@@ -311,10 +341,6 @@ def model(
     validation_h5ad: Path = typer.Option(
         "fixtures/GSE136831_subsample_100.h5ad",
         help="Path to h5ad file for validation",
-    ),
-    cache_dir: Path = typer.Option(
-        "data/geneformer-cache",
-        help="Directory for caching biomart queries",
     ),
 ) -> None:
     """
@@ -347,8 +373,8 @@ def model(
     logger.info("  Embedding dimension: %d", embedding_dim)
 
     # Load gene medians and token dictionary
-    gene_medians = load_gene_medians(geneformer_pkg_path, model_version)
-    token_dict = load_token_dictionary(geneformer_pkg_path, model_version)
+    gene_medians = load_gene_medians(geneformer_data_path, model_version)
+    token_dict = load_token_dictionary(geneformer_data_path, model_version)
 
     # Create gene ordering based on token dictionary
     # Sort by token ID to get consistent gene ordering
@@ -462,35 +488,23 @@ def model(
         onnx.checker.check_model(onnx_model)
         logger.info("  ✅ %s ONNX model validation passed", name)
 
-    # Query biomart for Ensembl ID to gene symbol mapping (with disk caching)
-    logger.info("\n5. Querying biomart for gene symbols...")
+    # Load gene name dictionary for Ensembl ID to gene symbol mapping
+    logger.info("\n5. Loading gene symbols from Geneformer data...")
     import json
 
-    # Set up disk cache
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    memory = Memory(cache_dir, verbose=0)
-    cached_query_biomart = memory.cache(query_biomart_batch)
+    gene_name_dict = load_gene_name_dict(geneformer_data_path, model_version)
 
+    # Map Ensembl IDs to gene symbols
     ensembl_to_symbol: dict[str, str] = {}
-    batch_size = 500
+    for eid in ensembl_ids:
+        if eid in gene_name_dict:
+            ensembl_to_symbol[eid] = gene_name_dict[eid]
 
-    for i in range(0, len(ensembl_ids), batch_size):
-        batch = ensembl_ids[i : i + batch_size]
-
-        try:
-            # Use cached query (automatically caches based on batch tuple)
-            result = cached_query_biomart(tuple(batch))
-            ensembl_to_symbol.update(result)
-
-            logger.info(
-                "  Processed %d/%d Ensembl IDs",
-                min(i + batch_size, len(ensembl_ids)),
-                len(ensembl_ids),
-            )
-        except Exception:
-            logger.exception("  Failed to query biomart batch")
-
-    logger.info("  Mapped %d/%d Ensembl IDs to gene symbols", len(ensembl_to_symbol), len(ensembl_ids))
+    logger.info(
+        "  Mapped %d/%d Ensembl IDs to gene symbols",
+        len(ensembl_to_symbol),
+        len(ensembl_ids),
+    )
 
     # Export genes.txt (simple list of gene symbols, one per line)
     # Use gene symbol if available, otherwise fall back to Ensembl ID

@@ -15,6 +15,7 @@ dependencies = [
     "anndata>=0.12.1",
     "scimilarity",
     "umap-pytorch",
+    "geneformer",
     "pyarrow>=21.0.0",
     "scanpy>=1.11.4",
     "numpy>=1.24,<2.3",
@@ -27,7 +28,6 @@ dependencies = [
     "boto3>=1.42.18",
     "s3fs>=0.4.2",
     "transformers>=4.48.0",
-    "joblib>=1.4.2",
 ]
 
 [dependency-groups]
@@ -47,13 +47,14 @@ dev = [
     "types-tqdm>=4.67.0.20250809",
 ]
 [[tool.mypy.overrides]]
-module = ["scanpy", "scimilarity.*", "onnxruntime.*"]
+module = ["scanpy", "scimilarity.*", "onnxruntime.*", "geneformer.*"]
 follow_untyped_imports = true
 ignore_missing_imports = true
 
 [tool.uv.sources]
-scimilarity = { git = "https://github.com/Genentech/scimilarity.git" }
 umap-pytorch = { git = "https://github.com/rcurrie/umap_pytorch.git" }
+scimilarity = { git = "https://github.com/Genentech/scimilarity.git" }
+geneformer = { git = "https://huggingface.co/ctheodoris/Geneformer" }
 
 [tool.uv]
 override-dependencies = ["umap-learn>=0.5.0", "numba>=0.60.0"]
