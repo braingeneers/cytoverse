@@ -439,6 +439,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anndata" },
     { name = "boto3" },
+    { name = "joblib" },
     { name = "numpy" },
     { name = "onnx" },
     { name = "onnxruntime" },
@@ -476,6 +477,7 @@ dev = [
 requires-dist = [
     { name = "anndata", specifier = ">=0.12.1" },
     { name = "boto3", specifier = ">=1.42.18" },
+    { name = "joblib", specifier = ">=1.4.2" },
     { name = "numpy", specifier = ">=1.24,<2.3" },
     { name = "onnx", specifier = ">=1.18.0" },
     { name = "onnxruntime", specifier = ">=1.22.1" },

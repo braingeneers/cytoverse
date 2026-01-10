@@ -4,15 +4,12 @@ import logging
 import pickle
 import typer
 from pathlib import Path
-import numpy as np
 from typing import Dict
 
-import anndata
-import scanpy as sc
 import torch
 import onnx
-import onnxruntime as ort
 from transformers import BertForMaskedLM
+from joblib import Memory
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -252,6 +249,48 @@ def load_token_dictionary(geneformer_path: Path, model_version: str) -> Dict[str
     return token_dict
 
 
+def query_biomart_batch(batch: tuple[str, ...]) -> dict[str, str]:
+    """
+    Query biomart for Ensembl ID to gene symbol mapping.
+
+    Args:
+        batch: Tuple of Ensembl IDs to query (tuple for hashability)
+
+    Returns:
+        Dictionary mapping Ensembl IDs to gene symbols
+    """
+    import requests
+
+    query = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Query>
+<Query  virtualSchemaName = "default" formatter = "TSV" header = "0" uniqueRows = "0" count = "" datasetConfigVersion = "0.6" >
+    <Dataset name = "hsapiens_gene_ensembl" interface = "default" >
+        <Filter name = "ensembl_gene_id" value = "{','.join(batch)}"/>
+        <Attribute name = "ensembl_id" />
+        <Attribute name = "external_gene_name" />
+    </Dataset>
+</Query>"""
+
+    ensembl_to_symbol: dict[str, str] = {}
+
+    response = requests.post(
+        "http://www.ensembl.org/biomart/martservice",
+        data={"query": query},
+        timeout=60,
+    )
+
+    if response.status_code == 200:
+        for line in response.text.strip().split("\n"):
+            if line:
+                parts = line.split("\t")
+                if len(parts) == 2:
+                    ensembl_id, symbol = parts
+                    if symbol:
+                        ensembl_to_symbol[ensembl_id] = symbol
+
+    return ensembl_to_symbol
+
+
 @app.command()
 def model(
     model_path: Path = typer.Argument(
@@ -272,6 +311,10 @@ def model(
     validation_h5ad: Path = typer.Option(
         "fixtures/GSE136831_subsample_100.h5ad",
         help="Path to h5ad file for validation",
+    ),
+    cache_dir: Path = typer.Option(
+        "data/geneformer-cache",
+        help="Directory for caching biomart queries",
     ),
 ) -> None:
     """
@@ -419,49 +462,33 @@ def model(
         onnx.checker.check_model(onnx_model)
         logger.info("  ✅ %s ONNX model validation passed", name)
 
-    # Query biomart for Ensembl ID to gene symbol mapping
+    # Query biomart for Ensembl ID to gene symbol mapping (with disk caching)
     logger.info("\n5. Querying biomart for gene symbols...")
-    import requests
     import json
+
+    # Set up disk cache
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    memory = Memory(cache_dir, verbose=0)
+    cached_query_biomart = memory.cache(query_biomart_batch)
 
     ensembl_to_symbol: dict[str, str] = {}
     batch_size = 500
 
     for i in range(0, len(ensembl_ids), batch_size):
         batch = ensembl_ids[i : i + batch_size]
-        query = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE Query>
-<Query  virtualSchemaName = "default" formatter = "TSV" header = "0" uniqueRows = "0" count = "" datasetConfigVersion = "0.6" >
-    <Dataset name = "hsapiens_gene_ensembl" interface = "default" >
-        <Filter name = "ensembl_gene_id" value = "{','.join(batch)}"/>
-        <Attribute name = "ensembl_gene_id" />
-        <Attribute name = "external_gene_name" />
-    </Dataset>
-</Query>"""
 
         try:
-            response = requests.post(
-                "http://www.ensembl.org/biomart/martservice",
-                data={"query": query},
-                timeout=60,
-            )
-
-            if response.status_code == 200:
-                for line in response.text.strip().split("\n"):
-                    if line:
-                        parts = line.split("\t")
-                        if len(parts) == 2:
-                            ensembl_id, symbol = parts
-                            if symbol:
-                                ensembl_to_symbol[ensembl_id] = symbol
+            # Use cached query (automatically caches based on batch tuple)
+            result = cached_query_biomart(tuple(batch))
+            ensembl_to_symbol.update(result)
 
             logger.info(
                 "  Processed %d/%d Ensembl IDs",
                 min(i + batch_size, len(ensembl_ids)),
                 len(ensembl_ids),
             )
-        except Exception as e:
-            logger.warning("  Failed to query biomart batch: %s", e)
+        except Exception:
+            logger.exception("  Failed to query biomart batch")
 
     logger.info("  Mapped %d/%d Ensembl IDs to gene symbols", len(ensembl_to_symbol), len(ensembl_ids))
 
