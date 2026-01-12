@@ -7,7 +7,8 @@
       "paper_url": "https://doi.org/10.1038/s41586-024-08411-y",
       "repo_url": "https://github.com/Genentech/scimilarity",
       "params": {
-        "batch_size": 32
+        "batch_size": 32,
+        "default_category": "prediction"
       }
     },
     "reference": {
@@ -28,7 +29,8 @@
       "paper_url": "https://doi.org/10.1038/s41586-024-08411-y",
       "repo_url": "https://github.com/Genentech/scimilarity",
       "params": {
-        "batch_size": 16
+        "batch_size": 16,
+        "default_category": "Type.v1"
       }
     },
     "reference": {

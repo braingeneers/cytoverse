@@ -118,6 +118,98 @@
             </div>
           </div>
 
+          <!-- Reference Statistics -->
+          <v-card class="stats-card" variant="outlined">
+            <v-card-text>
+              <template
+                v-if="baseRef.x && baseRef.y && baseRef.labels && baseRef.labelIndices"
+              >
+                <!-- Model Section -->
+                <div v-if="selectedModelInfo" class="stats-section">
+                  <div class="stat-item">
+                    <strong>Model:</strong>
+                    <span>{{ selectedModelInfo.modelConfig?.title || 'Unknown' }}</span>
+                    <div class="link-icons">
+                      <v-btn
+                        v-if="selectedModelInfo.modelConfig?.paper_url"
+                        icon
+                        size="x-small"
+                        variant="text"
+                        :href="selectedModelInfo.modelConfig.paper_url"
+                        target="_blank"
+                        title="View paper"
+                      >
+                        <v-icon size="small">mdi-file-document</v-icon>
+                      </v-btn>
+                      <v-btn
+                        v-if="selectedModelInfo.modelConfig?.repo_url"
+                        icon
+                        size="x-small"
+                        variant="text"
+                        :href="selectedModelInfo.modelConfig.repo_url"
+                        target="_blank"
+                        title="View repository"
+                      >
+                        <v-icon size="small">mdi-github</v-icon>
+                      </v-btn>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Reference Section -->
+                <div v-if="selectedModelInfo" class="stats-section">
+                  <div class="stat-item">
+                    <strong>Ref:</strong>
+                    <span>{{
+                      selectedModelInfo.referenceConfig?.title || 'Unknown'
+                    }}</span>
+                    <div class="link-icons">
+                      <v-btn
+                        v-if="selectedModelInfo.referenceConfig?.paper_url"
+                        icon
+                        size="x-small"
+                        variant="text"
+                        :href="selectedModelInfo.referenceConfig.paper_url"
+                        target="_blank"
+                        title="View paper"
+                      >
+                        <v-icon size="small">mdi-file-document</v-icon>
+                      </v-btn>
+                      <v-btn
+                        v-if="selectedModelInfo.referenceConfig?.repo_url"
+                        icon
+                        size="x-small"
+                        variant="text"
+                        :href="selectedModelInfo.referenceConfig.repo_url"
+                        target="_blank"
+                        title="View repository"
+                      >
+                        <v-icon size="small">mdi-github</v-icon>
+                      </v-btn>
+                    </div>
+                  </div>
+                  <div class="stat-item">
+                    <strong>Cells:</strong>
+                    {{ baseRef.labelIndices.value.length.toLocaleString() }}
+                  </div>
+                  <div class="stat-item">
+                    <strong>Plotted:</strong>
+                    {{ baseRef.x.value.length.toLocaleString() }}
+                  </div>
+                  <div class="stat-item">
+                    <strong>Labels:</strong> {{ baseRef.labels.value.length }}
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="isLoadingData">
+                <div class="loading-text">Loading statistics...</div>
+              </template>
+              <template v-else>
+                <div class="loading-text">No data loaded</div>
+              </template>
+            </v-card-text>
+          </v-card>
+
           <!-- Category Selection -->
           <div class="form-section">
             <v-select
@@ -130,33 +222,6 @@
               density="comfortable"
             />
           </div>
-
-          <!-- Dataset Statistics -->
-          <v-card class="stats-card" variant="outlined">
-            <v-card-text>
-              <template
-                v-if="baseRef.x && baseRef.y && baseRef.labels && baseRef.labelIndices"
-              >
-                <div class="stat-item">
-                  <strong>Reference Cells:</strong>
-                  {{ baseRef.labelIndices.value.length.toLocaleString() }}
-                </div>
-                <div class="stat-item">
-                  <strong>Plotted Cells:</strong>
-                  {{ baseRef.x.value.length.toLocaleString() }}
-                </div>
-                <div class="stat-item">
-                  <strong>Labels:</strong> {{ baseRef.labels.value.length }}
-                </div>
-              </template>
-              <template v-else-if="isLoadingData">
-                <div class="loading-text">Loading statistics...</div>
-              </template>
-              <template v-else>
-                <div class="loading-text">No data loaded</div>
-              </template>
-            </v-card-text>
-          </v-card>
 
           <!-- WebGPU Selection -->
           <div class="form-section">
@@ -952,10 +1017,9 @@ const loadCategoriesFromMetadata = async () => {
 
         // Set default category
         if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
-          if (baseModelId === 'scimilarity' && categories.includes('prediction')) {
-            selectedCategory.value = 'prediction';
-          } else if (baseModelId === 'brain' && categories.includes('CellType')) {
-            selectedCategory.value = 'CellType';
+          const defaultCategory = selectedModelInfo.modelConfig?.params?.default_category;
+          if (defaultCategory && categories.includes(defaultCategory)) {
+            selectedCategory.value = defaultCategory;
           } else if (categories.length > 0) {
             selectedCategory.value = categories[0];
           }
@@ -1617,20 +1681,48 @@ onUnmounted(() => {
 }
 
 .form-section {
-  margin-bottom: 2px;
+  margin-bottom: 0px;
 }
 
 .stats-card {
+  margin-bottom: 12px;
+  border-color: rgba(255, 255, 255, 0.23) !important;
+}
+
+.stats-section {
+  margin-bottom: 4px;
+}
+
+.stats-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-header {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #9e9e9e;
   margin-bottom: 6px;
+  letter-spacing: 0.5px;
 }
 
 .stat-item {
   margin-bottom: 4px;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .stat-item:last-child {
   margin-bottom: 0;
+}
+
+.link-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .loading-text {
