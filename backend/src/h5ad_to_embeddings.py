@@ -17,9 +17,110 @@ from s3fs import S3FileSystem
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
+    level=logging.DEBUG,
 )
 logger = logging.getLogger(__name__)
+
+
+def _validate_s3_incremental_access(h5_file: Any) -> None:  # type: ignore[misc]
+    """
+    Validate that h5ad file supports efficient incremental access over S3.
+
+    Checks that the X matrix and obs metadata are stored in formats that support
+    efficient random access without requiring full file downloads.
+
+    Args:
+        h5_file: Open h5py File object
+
+    Raises:
+        ValueError: If file format doesn't support efficient incremental access
+    """
+    import h5py
+
+    logger.info("  Validating file format for S3 incremental access...")
+
+    # Check X matrix format
+    x_group = h5_file["X"]
+
+    # Check if it's CSR sparse matrix (efficient for row access)
+    is_csr = (
+        isinstance(x_group, h5py.Group)
+        and "data" in x_group
+        and "indices" in x_group
+        and "indptr" in x_group
+    )
+
+    # Check if it's dense array
+    is_dense = isinstance(x_group, h5py.Dataset)
+    is_chunked_dense = is_dense and x_group.chunks is not None
+
+    if is_csr:
+        logger.info("  ✅ X matrix is stored as CSR sparse matrix (efficient)")
+    elif is_dense:
+        # Dense arrays can be contiguous (row-major) or chunked
+        # Both support incremental access over S3
+        if is_chunked_dense:
+            chunks = x_group.chunks
+            logger.info(
+                "  ✅ X matrix is chunked dense array (chunk size: %s)", chunks
+            )
+            # Warn if chunks are column-oriented (bad for row access)
+            chunk_rows, chunk_cols = chunks
+            if chunk_rows == x_group.shape[0] and chunk_cols < x_group.shape[1]:
+                logger.warning(
+                    "  ⚠️  Column-oriented chunking detected - inefficient for cell access"
+                )
+            elif chunk_rows > 100:
+                logger.warning(
+                    "  ⚠️  Large row chunk size (%d) may cause inefficient S3 access",
+                    chunk_rows,
+                )
+        else:
+            # Unchunked dense - stored contiguously in row-major order
+            # This DOES support efficient incremental access!
+            plist = x_group.id.get_create_plist()
+            layout = plist.get_layout()
+            if layout == 1:  # H5D_CONTIGUOUS
+                logger.info("  ✅ X matrix is contiguous dense array (row-major order)")
+                logger.info("     Supports efficient incremental cell access over S3")
+            else:
+                logger.warning(
+                    "  ⚠️  Unexpected HDF5 layout (code: %d)", layout
+                )
+    else:
+        raise ValueError(
+            f"Unknown X matrix storage format: {type(x_group)}\n"
+            f"Expected CSR sparse matrix or dense array."
+        )
+
+    # Check obs metadata (should be reasonably small, but warn if huge)
+    obs_group = h5_file["obs"]
+    obs_index_key = "_index" if "_index" in obs_group else "index"
+    n_cells = obs_group[obs_index_key].shape[0]
+
+    # Estimate obs memory footprint
+    obs_size_bytes = 0
+    for key in obs_group.keys():
+        item = obs_group[key]
+        if isinstance(item, h5py.Dataset):
+            obs_size_bytes += item.size * item.dtype.itemsize
+        elif isinstance(item, h5py.Group) and "codes" in item:
+            # Categorical: codes + categories
+            obs_size_bytes += item["codes"].size * item["codes"].dtype.itemsize
+            obs_size_bytes += (
+                item["categories"].size * item["categories"].dtype.itemsize
+            )
+
+    obs_size_mb = obs_size_bytes / (1024**2)
+    logger.info("  obs metadata: %d cells, ~%.2f MB", n_cells, obs_size_mb)
+
+    if obs_size_mb > 100:
+        logger.warning(
+            "  ⚠️  Large obs metadata (%.2f MB) may cause slow incremental access",
+            obs_size_mb,
+        )
+
+    logger.info("  ✅ File format validated for S3 incremental access")
 
 
 def _load_h5ad_from_path_or_s3(
@@ -87,16 +188,19 @@ def _load_h5ad_from_path_or_s3(
             s3_file = fs.open(s3_path, "rb")
 
             # Open the S3 file handle with h5py
-            h5_file = h5py.File(s3_file, 'r')
+            h5_file = h5py.File(s3_file, "r")
             logger.info("  Successfully opened S3 file")
         except Exception as e:
             logger.error("  Failed to open S3 file: %s", e)
             raise
 
+        # Validate file format for efficient S3 access BEFORE reading data
+        _validate_s3_incremental_access(h5_file)
+
         # Check total number of cells
         # h5_file['obs'] is a Group, not a Dataset, so we need to access index
-        obs_index_key = '_index' if '_index' in h5_file['obs'] else 'index'
-        n_cells = h5_file['obs'][obs_index_key].shape[0]
+        obs_index_key = "_index" if "_index" in h5_file["obs"] else "index"
+        n_cells = h5_file["obs"][obs_index_key].shape[0]
         logger.info("  Total cells in file: %d", n_cells)
 
         # If sampling, determine which rows to read
@@ -105,7 +209,9 @@ def _load_h5ad_from_path_or_s3(
             np.random.seed(seed)
             indices = np.random.choice(n_cells, size=max_cells, replace=False)
             indices.sort()
-            logger.info("  Sample indices: min=%d, max=%d", indices.min(), indices.max())
+            logger.info(
+                "  Sample indices: min=%d, max=%d", indices.min(), indices.max()
+            )
 
             # Read only sampled rows from h5ad
             # This is memory-efficient - only reads what we need!
@@ -125,7 +231,7 @@ def _load_h5ad_from_path_or_s3(
     else:
         logger.info("Loading from local path: %s", path_str)
         # For local files, use backed mode for memory efficiency
-        adata = ad.read_h5ad(path_str, backed='r')
+        adata = ad.read_h5ad(path_str, backed="r")
 
     return adata
 
@@ -148,19 +254,21 @@ def _read_h5ad_subset(h5_file, indices: np.ndarray) -> sc.AnnData:
     import h5py
 
     # Read obs (cell metadata) for selected indices
-    obs_group = h5_file['obs']
+    obs_group = h5_file["obs"]
 
     # h5py doesn't support fancy indexing with numpy arrays directly
     # We need to read elements individually or use a list
     indices_list = indices.tolist()
 
     # Determine index key name (could be 'index' or '_index')
-    index_key = '_index' if '_index' in obs_group else 'index'
+    index_key = "_index" if "_index" in obs_group else "index"
 
     # Read index column to get cell names
     obs_index = obs_group[index_key][indices_list]
-    if hasattr(obs_index[0], 'decode'):
-        obs_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in obs_index]
+    if hasattr(obs_index[0], "decode"):
+        obs_index = [
+            x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in obs_index
+        ]
     else:
         obs_index = [str(x) for x in obs_index]
 
@@ -168,7 +276,7 @@ def _read_h5ad_subset(h5_file, indices: np.ndarray) -> sc.AnnData:
 
     # Read other obs columns
     for key in obs_group.keys():
-        if key not in (index_key, '_index', 'index'):
+        if key not in (index_key, "_index", "index"):
             item = obs_group[key]
 
             # Check if it's a Dataset or a Group (categorical)
@@ -176,53 +284,84 @@ def _read_h5ad_subset(h5_file, indices: np.ndarray) -> sc.AnnData:
                 # Regular column - read directly
                 values = item[indices_list]
                 # Decode bytes if necessary
-                if len(values) > 0 and hasattr(values[0], 'decode'):
-                    values = [x.decode('utf-8') if isinstance(x, bytes) else x for x in values]
+                if len(values) > 0 and hasattr(values[0], "decode"):
+                    values = [
+                        x.decode("utf-8") if isinstance(x, bytes) else x for x in values
+                    ]
                 obs_df[key] = values
             else:
                 # Categorical column stored as Group with codes/categories
-                if 'codes' in item and 'categories' in item:
+                if "codes" in item and "categories" in item:
                     # Read codes for selected indices
-                    codes = item['codes'][indices_list]
+                    codes = item["codes"][indices_list]
                     # Read categories
-                    categories = item['categories'][:]
+                    categories = item["categories"][:]
                     # Decode categories if bytes
-                    if len(categories) > 0 and hasattr(categories[0], 'decode'):
-                        categories = [x.decode('utf-8') if isinstance(x, bytes) else x for x in categories]
+                    if len(categories) > 0 and hasattr(categories[0], "decode"):
+                        categories = [
+                            x.decode("utf-8") if isinstance(x, bytes) else x
+                            for x in categories
+                        ]
                     # Map codes to category values
                     values = [categories[c] if c >= 0 else None for c in codes]
                     obs_df[key] = values
 
     # Read var (gene metadata) - all genes
-    var_group = h5_file['var']
+    var_group = h5_file["var"]
 
-    # Determine index key name (could be 'index' or '_index')
-    var_index_key = '_index' if '_index' in var_group else 'index'
+    # Determine index key name - try common alternatives
+    var_index_key = None
+    for possible_key in ["_index", "index", "row_names", "gene_names", "var_names"]:
+        if possible_key in var_group:
+            var_index_key = possible_key
+            break
+
+    assert var_index_key is not None, (
+        f"Could not find var index in h5ad file. "
+        f"Available var keys: {list(var_group.keys())}"
+    )
 
     var_index_raw = var_group[var_index_key][:]
-    logger.info(f"  var index dtype: {var_index_raw.dtype}, first 5: {var_index_raw[:5]}")
+    logger.info(
+        f"  var index dtype: {var_index_raw.dtype}, first 5: {var_index_raw[:5]}"
+    )
 
     # Convert to strings, handling bytes
-    if len(var_index_raw) > 0 and hasattr(var_index_raw[0], 'decode'):
-        var_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in var_index_raw]
+    if len(var_index_raw) > 0 and hasattr(var_index_raw[0], "decode"):
+        var_index = [
+            x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in var_index_raw
+        ]
     else:
         var_index = [str(x) for x in var_index_raw]
 
     logger.info(f"  Converted var index first 5: {var_index[:5]}")
 
     # Check if index contains only numeric strings (invalid gene names)
-    is_all_numeric = all(name.isdigit() for name in var_index[:min(100, len(var_index))])
+    is_all_numeric = all(
+        name.isdigit() for name in var_index[: min(100, len(var_index))]
+    )
 
     if is_all_numeric:
-        logger.warning("  ⚠️  var index contains only numeric strings, looking for gene symbols...")
+        logger.warning(
+            "  ⚠️  var index contains only numeric strings, looking for gene symbols..."
+        )
         # Check common gene name columns
         gene_col_found = False
-        for potential_gene_col in ['gene_symbols', 'gene_names', 'genes', 'var_names', 'feature_name']:
+        for potential_gene_col in [
+            "gene_symbols",
+            "gene_names",
+            "genes",
+            "var_names",
+            "feature_name",
+        ]:
             if potential_gene_col in var_group:
                 logger.info(f"  Found {potential_gene_col} column, using as index")
                 gene_names_raw = var_group[potential_gene_col][:]
-                if hasattr(gene_names_raw[0], 'decode'):
-                    var_index = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in gene_names_raw]
+                if hasattr(gene_names_raw[0], "decode"):
+                    var_index = [
+                        x.decode("utf-8") if isinstance(x, bytes) else str(x)
+                        for x in gene_names_raw
+                    ]
                 else:
                     var_index = [str(x) for x in gene_names_raw]
                 logger.info(f"  Updated var index first 5: {var_index[:5]}")
@@ -240,30 +379,40 @@ def _read_h5ad_subset(h5_file, indices: np.ndarray) -> sc.AnnData:
 
     var_df = pd.DataFrame(index=var_index)
     for key in var_group.keys():
-        if key not in (var_index_key, '_index', 'index'):
+        if key not in (var_index_key, "_index", "index"):
             item = var_group[key]
 
             # Check if it's a Dataset or a Group (categorical)
             if isinstance(item, h5py.Dataset):
                 values = item[:]
-                if len(values) > 0 and hasattr(values[0], 'decode'):
-                    values = [x.decode('utf-8') if isinstance(x, bytes) else x for x in values]
+                if len(values) > 0 and hasattr(values[0], "decode"):
+                    values = [
+                        x.decode("utf-8") if isinstance(x, bytes) else x for x in values
+                    ]
                 var_df[key] = values
             else:
                 # Categorical column
-                if 'codes' in item and 'categories' in item:
-                    codes = item['codes'][:]
-                    categories = item['categories'][:]
-                    if len(categories) > 0 and hasattr(categories[0], 'decode'):
-                        categories = [x.decode('utf-8') if isinstance(x, bytes) else x for x in categories]
+                if "codes" in item and "categories" in item:
+                    codes = item["codes"][:]
+                    categories = item["categories"][:]
+                    if len(categories) > 0 and hasattr(categories[0], "decode"):
+                        categories = [
+                            x.decode("utf-8") if isinstance(x, bytes) else x
+                            for x in categories
+                        ]
                     values = [categories[c] if c >= 0 else None for c in codes]
                     var_df[key] = values
 
     # Read .X matrix for selected rows only
-    x_group = h5_file['X']
+    x_group = h5_file["X"]
 
     # Check if it's CSR sparse matrix (stored as Group with data/indices/indptr)
-    if isinstance(x_group, h5py.Group) and 'data' in x_group and 'indices' in x_group and 'indptr' in x_group:
+    if (
+        isinstance(x_group, h5py.Group)
+        and "data" in x_group
+        and "indices" in x_group
+        and "indptr" in x_group
+    ):
         # CSR format - read selected rows efficiently
         logger.info("  Reading CSR sparse matrix (selected rows only)")
         X = _read_csr_subset(x_group, indices)
@@ -295,12 +444,14 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
     # Debug: log CSR group structure
     logger.info(f"  CSR group keys: {list(csr_group.keys())}")
     logger.info(f"  CSR group attrs: {dict(csr_group.attrs)}")
-    for key in ['data', 'indices', 'indptr']:
+    for key in ["data", "indices", "indptr"]:
         if key in csr_group:
             ds = csr_group[key]
-            logger.info(f"  {key}: shape={ds.shape}, dtype={ds.dtype}, attrs={dict(ds.attrs)}")
+            logger.info(
+                f"  {key}: shape={ds.shape}, dtype={ds.dtype}, attrs={dict(ds.attrs)}"
+            )
 
-    indptr_full = csr_group['indptr'][:]
+    indptr_full = csr_group["indptr"][:]
 
     # Build new CSR matrix with only selected rows
     data_list = []
@@ -312,8 +463,8 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
         end = indptr_full[row_idx + 1]
 
         # Read data and indices for this row
-        row_data = csr_group['data'][start:end]
-        row_indices_csr = csr_group['indices'][start:end]
+        row_data = csr_group["data"][start:end]
+        row_indices_csr = csr_group["indices"][start:end]
 
         data_list.append(row_data)
         indices_list.append(row_indices_csr)
@@ -321,7 +472,9 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
 
     # Concatenate all rows
     data = np.concatenate(data_list) if data_list else np.array([], dtype=np.float32)
-    indices_concat = np.concatenate(indices_list) if indices_list else np.array([], dtype=np.int32)
+    indices_concat = (
+        np.concatenate(indices_list) if indices_list else np.array([], dtype=np.int32)
+    )
     indptr = np.array(indptr_new, dtype=np.int32)
 
     # Determine number of columns
@@ -329,16 +482,16 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
     n_cols = None
 
     # Approach 1: Check 'shape' attribute on various datasets
-    for key in ['indices', 'data', 'indptr']:
-        if 'shape' in csr_group[key].attrs:
-            shape = csr_group[key].attrs['shape']
+    for key in ["indices", "data", "indptr"]:
+        if "shape" in csr_group[key].attrs:
+            shape = csr_group[key].attrs["shape"]
             if len(shape) >= 2:
                 n_cols = shape[1]
                 break
 
     # Approach 2: Check parent group attributes
-    if n_cols is None and 'shape' in csr_group.attrs:
-        shape = csr_group.attrs['shape']
+    if n_cols is None and "shape" in csr_group.attrs:
+        shape = csr_group.attrs["shape"]
         if len(shape) >= 2:
             n_cols = shape[1]
 
@@ -348,7 +501,7 @@ def _read_csr_subset(csr_group, row_indices: np.ndarray):
             n_cols = int(indices_concat.max()) + 1
         else:
             # No data - check full indices dataset
-            full_indices = csr_group['indices'][:]
+            full_indices = csr_group["indices"][:]
             n_cols = int(full_indices.max()) + 1 if len(full_indices) > 0 else 0
 
     if n_cols is None or n_cols == 0:
@@ -385,23 +538,25 @@ def _validate_and_convert_to_csr(adata: sc.AnnData) -> sc.AnnData:
     import h5py
 
     # Check if in backed mode (file-backed, not loaded into memory)
-    is_backed = hasattr(adata, 'isbacked') and adata.isbacked
+    is_backed = hasattr(adata, "isbacked") and adata.isbacked
 
     if is_backed:
         logger.info("  File is in backed mode (streaming from disk/S3)")
 
         # For backed mode, check the underlying HDF5 storage format
         # We can't convert formats in backed mode without loading into memory
-        h5_group = adata.file['X']
+        h5_group = adata.file["X"]
 
         # Check if it's stored as CSR sparse matrix
-        if 'data' in h5_group and 'indices' in h5_group and 'indptr' in h5_group:
+        if "data" in h5_group and "indices" in h5_group and "indptr" in h5_group:
             logger.info("  ✅ .X is stored as CSR sparse matrix in HDF5")
         # Check if it's dense array with chunking (acceptable for streaming)
         elif isinstance(h5_group, h5py.Dataset):
             chunks = h5_group.chunks
             if chunks is not None:
-                logger.info("  ✅ .X is stored as chunked dense array (chunk size: %s)", chunks)
+                logger.info(
+                    "  ✅ .X is stored as chunked dense array (chunk size: %s)", chunks
+                )
             else:
                 # Dense array without chunking - will load entire matrix on first access!
                 assert False, (
@@ -681,7 +836,11 @@ def _validate_outputs(
     # This uses incremental access - samples BEFORE loading if max_cells specified
     logger.info("Loading h5ad file with same sampling as export...")
     adata = _load_h5ad_from_path_or_s3(
-        h5ad_path, max_cells=max_cells, seed=seed, s3_profile=s3_profile, s3_anon=s3_anon
+        h5ad_path,
+        max_cells=max_cells,
+        seed=seed,
+        s3_profile=s3_profile,
+        s3_anon=s3_anon,
     )
     logger.info("  Loaded shape: %s", adata.shape)
 
@@ -835,7 +994,9 @@ def _compute_label_intersection(
     # Load obs columns from each file
     all_obs_columns = []
     for h5ad_path in h5ad_paths:
-        adata = _load_h5ad_from_path_or_s3(h5ad_path, s3_profile=s3_profile, s3_anon=s3_anon)
+        adata = _load_h5ad_from_path_or_s3(
+            h5ad_path, s3_profile=s3_profile, s3_anon=s3_anon
+        )
         obs_columns = set(adata.obs.columns)
         all_obs_columns.append(obs_columns)
         logger.info("  %s: %d obs columns", Path(str(h5ad_path)).name, len(obs_columns))
@@ -886,7 +1047,11 @@ def _process_single_h5ad_file(
     # For S3 files, sampling happens during load for efficiency
     # For local files, sampling happens after load
     adata = _load_h5ad_from_path_or_s3(
-        h5ad_path, max_cells=max_cells, seed=seed, s3_profile=s3_profile, s3_anon=s3_anon
+        h5ad_path,
+        max_cells=max_cells,
+        seed=seed,
+        s3_profile=s3_profile,
+        s3_anon=s3_anon,
     )
     logger.info("  Loaded data shape: %s", adata.shape)
 
@@ -990,6 +1155,278 @@ def _process_multiple_h5ad_files(
     logger.info("  Total cells: %d", len(final_embeddings))
 
     return final_embeddings, final_labels
+
+
+@app.command()
+def inspect(
+    h5ad_path: str = typer.Argument(
+        help="Path or S3 URI to h5ad file to inspect",
+    ),
+    s3_profile: str = typer.Option(
+        None,
+        help="AWS profile name to use for S3 access",
+    ),
+    s3_anon: bool = typer.Option(
+        False,
+        help="Access S3 bucket anonymously without credentials",
+    ),
+) -> None:
+    """
+    Inspect h5ad file structure and metadata without processing.
+
+    Shows file format details including:
+    - Number of cells and genes
+    - X matrix storage format (dense/sparse, CSR/CSC, chunked)
+    - Available obs columns (cell metadata)
+    - File size estimates
+    - S3 incremental access compatibility
+    """
+    import h5py
+
+    logger.info("Inspecting h5ad file: %s", h5ad_path)
+
+    # Open file (local or S3)
+    if h5ad_path.startswith("s3://"):
+        logger.info("Opening S3 file...")
+
+        # Build S3FileSystem configuration
+        s3_config: dict[str, Any] = {
+            "anon": s3_anon,
+            "skip_instance_cache": True,
+            "use_listings_cache": False,
+        }
+
+        if s3_profile is not None:
+            logger.info("  Using AWS profile: %s", s3_profile)
+            s3_config["profile"] = s3_profile
+
+        endpoint_url = os.getenv("AWS_ENDPOINT_URL", None)
+        if endpoint_url:
+            logger.info("  Using custom S3 endpoint: %s", endpoint_url)
+            s3_config["client_kwargs"] = {"endpoint_url": endpoint_url}
+
+        if s3_anon:
+            logger.info("  Using anonymous S3 access")
+
+        fs = S3FileSystem(**s3_config)
+        s3_path = h5ad_path.replace("s3://", "")
+
+        try:
+            s3_file = fs.open(s3_path, "rb")
+            h5_file = h5py.File(s3_file, "r")
+            logger.info("  Successfully opened S3 file")
+        except Exception as e:
+            logger.error("  Failed to open S3 file: %s", e)
+            raise typer.Exit(1)
+    else:
+        logger.info("Opening local file...")
+        try:
+            h5_file = h5py.File(h5ad_path, "r")
+            logger.info("  Successfully opened local file")
+        except Exception as e:
+            logger.error("  Failed to open file: %s", e)
+            raise typer.Exit(1)
+
+    # Print file structure
+    logger.info("=" * 60)
+    logger.info("FILE STRUCTURE")
+    logger.info("=" * 60)
+
+    # Get number of cells and genes
+    obs_group = h5_file["obs"]
+    # Determine obs index key
+    if "_index" in obs_group:
+        obs_index_key = "_index"
+    elif "index" in obs_group:
+        obs_index_key = "index"
+    else:
+        logger.error("Could not find obs index (expected '_index' or 'index')")
+        logger.error("Available obs keys: %s", list(obs_group.keys()))
+        h5_file.close()
+        raise typer.Exit(1)
+
+    n_cells = obs_group[obs_index_key].shape[0]
+
+    var_group = h5_file["var"]
+    # Determine var index key - try common alternatives
+    var_index_key = None
+    for possible_key in ["_index", "index", "row_names", "gene_names", "var_names"]:
+        if possible_key in var_group:
+            var_index_key = possible_key
+            break
+
+    if var_index_key is None:
+        logger.error("Could not find var index")
+        logger.error("Available var keys: %s", list(var_group.keys()))
+        h5_file.close()
+        raise typer.Exit(1)
+
+    n_genes = var_group[var_index_key].shape[0]
+
+    logger.info("Dimensions:")
+    logger.info("  Cells: %d", n_cells)
+    logger.info("  Genes: %d", n_genes)
+
+    # Analyze X matrix storage
+    logger.info("\nX Matrix Storage:")
+    x_group = h5_file["X"]
+
+    # Check if CSR sparse matrix
+    is_csr = (
+        isinstance(x_group, h5py.Group)
+        and "data" in x_group
+        and "indices" in x_group
+        and "indptr" in x_group
+    )
+
+    if is_csr:
+        logger.info("  Format: CSR Sparse Matrix")
+        data_size = x_group["data"].size * x_group["data"].dtype.itemsize
+        indices_size = x_group["indices"].size * x_group["indices"].dtype.itemsize
+        indptr_size = x_group["indptr"].size * x_group["indptr"].dtype.itemsize
+        total_size_mb = (data_size + indices_size + indptr_size) / (1024**2)
+        logger.info("  Data elements: %d", x_group["data"].size)
+        logger.info("  Sparsity: %.2f%%", 100 * (1 - x_group["data"].size / (n_cells * n_genes)))
+        logger.info("  Storage size: ~%.2f MB", total_size_mb)
+        logger.info("  S3 Compatibility: ✅ Efficient (row-wise access)")
+    elif isinstance(x_group, h5py.Dataset):
+        logger.info("  Format: Dense Array")
+        logger.info("  Shape: %s", x_group.shape)
+        logger.info("  Dtype: %s", x_group.dtype)
+
+        chunks = x_group.chunks
+        if chunks is not None:
+            logger.info("  Chunking: ✅ Enabled")
+            logger.info("    Chunk size: %s", chunks)
+
+            chunk_rows, chunk_cols = chunks
+            chunk_bytes = chunk_rows * chunk_cols * x_group.dtype.itemsize
+            chunk_kb = chunk_bytes / 1024
+
+            # Analyze chunking strategy
+            logger.info("    Chunk dimensions: %d cells × %d genes", chunk_rows, chunk_cols)
+            logger.info("    Bytes per chunk: %.1f KB", chunk_kb)
+
+            # Determine if optimized for cell (row) or gene (column) access
+            if chunk_cols == x_group.shape[1]:
+                # Full rows - optimized for cell access
+                logger.info("    Strategy: Row-oriented (cell-optimized)")
+                logger.info("    Chunks per cell read: 1")
+                logger.info("    S3 Compatibility: ✅ Excellent (cell access)")
+            elif chunk_rows == x_group.shape[0]:
+                # Full columns - optimized for gene access (bad for cells!)
+                logger.info("    Strategy: Column-oriented (gene-optimized)")
+                chunks_per_cell = int(np.ceil(x_group.shape[1] / chunk_cols))
+                data_per_cell_kb = chunks_per_cell * chunk_kb
+                logger.info("    Chunks per cell read: %d", chunks_per_cell)
+                logger.info("    Data transfer per cell: %.1f KB", data_per_cell_kb)
+                logger.info("    S3 Compatibility: ❌ Very inefficient (cell access)")
+            else:
+                # Balanced chunking
+                logger.info("    Strategy: Balanced")
+                chunks_per_cell = int(np.ceil(x_group.shape[1] / chunk_cols))
+                data_per_cell_kb = chunks_per_cell * chunk_kb
+                logger.info("    Chunks per cell read: ~%d", chunks_per_cell)
+                logger.info("    Data transfer per cell: ~%.1f KB", data_per_cell_kb)
+
+                if chunk_rows <= 100 and data_per_cell_kb < 1024:
+                    logger.info("    S3 Compatibility: ✅ Good (reasonable cell access)")
+                else:
+                    logger.info("    S3 Compatibility: ⚠️  Suboptimal (high overhead per cell)")
+        else:
+            logger.info("  Chunking: ❌ Not chunked")
+            size_gb = (x_group.shape[0] * x_group.shape[1] * x_group.dtype.itemsize) / (1024**3)
+            logger.info("  Storage size: ~%.2f GB", size_gb)
+
+            # Check HDF5 storage layout
+            plist = x_group.id.get_create_plist()
+            layout = plist.get_layout()
+            layout_names = {0: "COMPACT", 1: "CONTIGUOUS", 2: "CHUNKED"}
+            logger.info("  HDF5 Layout: %s", layout_names.get(layout, "UNKNOWN"))
+
+            if layout == 1:  # H5D_CONTIGUOUS
+                logger.info("  Storage: Row-major (C-contiguous)")
+                logger.info("  S3 Compatibility: ✅ Efficient (contiguous row access)")
+                logger.info("")
+                logger.info("  📊 Access characteristics:")
+                bytes_per_row = x_group.shape[1] * x_group.dtype.itemsize
+                kb_per_row = bytes_per_row / 1024
+                logger.info("    Data per cell: ~%.1f KB", kb_per_row)
+                logger.info("    Sequential cell reads are efficient over S3")
+                logger.info("    Random cell access requires seeking in ~%.2f GB file", size_gb)
+            else:
+                logger.info("  S3 Compatibility: ⚠️  Unknown (unexpected layout)")
+
+            # Optionally suggest chunking for even better S3 performance
+            if size_gb > 1.0 and layout == 1:
+                logger.info("")
+                logger.info("  💡 Optional: Add chunking for better S3 random access:")
+                target_chunk_kb = 100
+                target_chunk_bytes = target_chunk_kb * 1024
+                bytes_per_row = x_group.shape[1] * x_group.dtype.itemsize
+                optimal_chunk_rows = max(1, int(target_chunk_bytes / bytes_per_row))
+                logger.info("    chunks=(%d, %d)  # %d cells per chunk, ~%.1f KB per chunk",
+                           optimal_chunk_rows, x_group.shape[1],
+                           optimal_chunk_rows,
+                           (optimal_chunk_rows * x_group.shape[1] * x_group.dtype.itemsize) / 1024)
+                logger.info("    (Chunking enables efficient random cell access patterns)")
+    else:
+        logger.info("  Format: Unknown (%s)", type(x_group))
+        logger.info("  S3 Compatibility: ❌ Unknown")
+
+    # List obs columns
+    logger.info("\nObs Columns (Cell Metadata):")
+    obs_columns = []
+    for key in sorted(obs_group.keys()):
+        if key not in (obs_index_key, "_index", "index"):
+            item = obs_group[key]
+            if isinstance(item, h5py.Dataset):
+                dtype_str = str(item.dtype)
+                obs_columns.append((key, dtype_str, "regular"))
+            elif isinstance(item, h5py.Group) and "codes" in item and "categories" in item:
+                n_categories = item["categories"].shape[0]
+                obs_columns.append((key, f"categorical ({n_categories} levels)", "categorical"))
+            else:
+                obs_columns.append((key, str(type(item)), "unknown"))
+
+    if obs_columns:
+        max_name_len = max(len(name) for name, _, _ in obs_columns)
+        for name, dtype, _ in obs_columns:
+            logger.info("  %-*s  %s", max_name_len, name, dtype)
+    else:
+        logger.info("  (no obs columns)")
+
+    # Estimate obs metadata size
+    obs_size_bytes = 0
+    for key in obs_group.keys():
+        item = obs_group[key]
+        if isinstance(item, h5py.Dataset):
+            obs_size_bytes += item.size * item.dtype.itemsize
+        elif isinstance(item, h5py.Group) and "codes" in item:
+            obs_size_bytes += item["codes"].size * item["codes"].dtype.itemsize
+            obs_size_bytes += item["categories"].size * item["categories"].dtype.itemsize
+
+    obs_size_mb = obs_size_bytes / (1024**2)
+    logger.info("\nObs Metadata Size: ~%.2f MB", obs_size_mb)
+    if obs_size_mb > 100:
+        logger.info("  ⚠️  Large metadata may slow S3 access")
+
+    # Run S3 validation if it's an S3 file
+    if h5ad_path.startswith("s3://"):
+        logger.info("\n" + "=" * 60)
+        logger.info("S3 INCREMENTAL ACCESS VALIDATION")
+        logger.info("=" * 60)
+        try:
+            _validate_s3_incremental_access(h5_file)
+            logger.info("✅ File is suitable for S3 incremental access")
+        except ValueError as e:
+            logger.error("❌ File is NOT suitable for S3 incremental access")
+            logger.error("\n%s", str(e))
+            h5_file.close()
+            raise typer.Exit(1)
+
+    h5_file.close()
+    logger.info("\n✅ Inspection complete")
 
 
 @app.command()
