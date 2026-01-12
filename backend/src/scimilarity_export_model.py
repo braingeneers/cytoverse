@@ -167,7 +167,7 @@ def model(
         help="Path to save the ONNX model",
     ),
     validation_h5ad: Path = typer.Option(
-        "tests/fixtures/GSE136831_subsample_100.h5ad",
+        "fixtures/GSE136831_subsample_100.h5ad",
         help="Path to h5ad file for validation - should be out of distribution",
     ),
 ) -> None:
@@ -177,7 +177,7 @@ def model(
     then combines them into a single ONNX model.
     """
     print(f"Loading model from {model_path}...")
-    ce = CellEmbedding(model_path)
+    ce = CellEmbedding(str(model_path))
 
     print("Converting to ONNX format...")
     # Create output directory if it doesn't exist
