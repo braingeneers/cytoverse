@@ -5,29 +5,18 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "export scimilarity model dev",
+      "name": "scimilarity export model",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/backend/src/scimilarity_export_model.py",
       "console": "integratedTerminal",
       "args": [
         "data/models/scimilarity/model_v1.1",
-        "${workspaceFolder}/public/models/dev/embedding"
+        "${workspaceFolder}/public/models/scimilarity/embedding"
       ]
     },
     {
-      "name": "download marson2025",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/backend/src/download_h5ad_subset.py",
-      "console": "integratedTerminal",
-      "args": [
-        "~/data/h5ad/marson2025/urls.txt",
-        "~/data/h5ad/marson2025/"
-      ]
-    },
-    {
-      "name": "h5ad to embeddings",
+      "name": "h5ad to scimilarity embeddings path",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/backend/src/h5ad_to_embeddings.py",
@@ -48,26 +37,54 @@
       ]
     },
     {
-      "name": "export scimilarity embedding dev",
+      "name": "h5ad to scimilarity embeddings s3",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/src/scimilarity_to_embeddings.py",
+      "program": "${workspaceFolder}/backend/src/h5ad_to_embeddings.py",
       "console": "integratedTerminal",
+      "env": {
+        "HDF5_ENV_DEBUG": "1"
+      },
       "args": [
-        "embeddings",
-        "data/models/scimilarity/model_v1.1/cellsearch",
+        // "s3://h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad",
+        // "public/models/scimilarity/embedding/model.onnx",
+        // "public/models/scimilarity/embedding/genes.txt",
+        // "data/references/dev",
+        // "--labels",
+        // "CellType",
+        // "--labels",
+        // "cortical_layer_label",
+        // "--s3-profile",
+        // "local",
+        // "--max-cells",
+        // "4",
+        // "--batch-size",
+        // "2"
+        "s3://h5ad/adata_metaatlas_final_raw.h5ad",
+        "public/models/scimilarity/embedding/model.onnx",
+        "public/models/scimilarity/embedding/genes.txt",
         "data/references/dev",
+        "--s3-profile",
+        "local",
         "--labels",
-        "prediction",
+        "Type.v1",
         "--labels",
-        "tissue",
-        "--labels",
-        "author_label",
-        "--labels",
-        "study",
-        "--num-embeddings",
-        "100_000",
-        "--validate"
+        "Subtype.v1",
+        "--max-cells",
+        "4",
+        "--batch-size",
+        "2"
+        // "s3://genome-scale-tcell-perturb-seq/marson2025_data/D1_Rest.assigned_guide.h5ad",
+        // "public/models/scimilarity/embedding/model.onnx",
+        // "public/models/scimilarity/embedding/genes.txt",
+        // "data/references/dev",
+        // "--labels",
+        // "perturbed_gene_name",
+        // "--s3-anon",
+        // "--max-cells",
+        // "4",
+        // "--batch-size",
+        // "2"
       ]
     },
     {
