@@ -7,6 +7,14 @@ test:
 	npx vitest run frontend/tests/unit --silent
 	npx playwright test --config frontend/playwright.config.ts
 
+test-no-capture:
+	cd backend && python -m pytest tests --capture=no --log-cli-level=DEBUG
+
+benchmark:
+	cd backend && python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
+
+
+# Frontend
 build:
 	npm run build
 	echo "Removing dev from models list"
@@ -18,11 +26,17 @@ deploy:
 	rsync -avh --delete dist/ \
 		rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/
 
-benchmark:
-	cd backend && python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
 
-test-no-capture:
-	cd backend && python -m pytest tests --capture=no --log-cli-level=DEBUG
+# Data ingestion
+inspect-h5ad:
+	python backend/src/h5ad_to_embeddings.py inspect \
+		fixtures/GSE136831_subsample_100.h5ad	
+
+	python backend/src/h5ad_to_embeddings.py inspect \
+		~/data/h5ad/adata_metaatlas_final_raw.h5ad
+
+	python backend/src/h5ad_to_embeddings.py inspect \
+		~/data/h5ad/allen-celltypes+human-cortex+various-cortical-areas.h5ad
 
 download-marson2025:
 	cd backend && python src/download_h5ad_subset.py \
