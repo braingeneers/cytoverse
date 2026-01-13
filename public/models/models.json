@@ -1,0 +1,46 @@
+[
+  {
+    "id": "scimilarity-scimilarity",
+    "model": {
+      "id": "scimilarity_v0.4.0",
+      "title": "SCimilarity",
+      "paper_url": "https://doi.org/10.1038/s41586-024-08411-y",
+      "repo_url": "https://github.com/Genentech/scimilarity",
+      "params": {
+        "batch_size": 32,
+        "default_category": "prediction"
+      }
+    },
+    "reference": {
+      "id": "scimilarity_reference_v1.1",
+      "title": "SCimilarity Reference",
+      "paper_url": "https://doi.org/10.1038/s41586-024-08411-y",
+      "repo_url": "https://zenodo.org/records/10685499",
+      "params": {
+        "num_cells": 20000000
+      }
+    }
+  },
+  {
+    "id": "geneformer-sspsygene",
+    "model": {
+      "id": "geneformer",
+      "title": "Geneformer",
+      "paper_url": "https://doi.org/10.1038/s41586-024-08411-y",
+      "repo_url": "https://github.com/Genentech/scimilarity",
+      "params": {
+        "batch_size": 16,
+        "default_category": "Type.v1"
+      }
+    },
+    "reference": {
+      "id": "sspsygene",
+      "title": "SSPsyGene Reference",
+      "paper_url": "https://doi.org/10.1038/s41586-024-08411-y",
+      "repo_url": "https://zenodo.org/records/10685499",
+      "params": {
+        "num_cells": 20000000
+      }
+    }
+  }
+]
