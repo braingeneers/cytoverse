@@ -891,7 +891,7 @@ const createWorker = () => {
 const loadAvailableModels = async () => {
   try {
     // Load reference models from models.json
-    const response = await fetch('models/models.json');
+    const response = await fetch('models.json');
     const modelsConfig = await response.json();
 
     const referenceModels = modelsConfig.map((config: any) => ({
@@ -1017,7 +1017,8 @@ const loadCategoriesFromMetadata = async () => {
 
         // Set default category
         if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
-          const defaultCategory = selectedModelInfo.modelConfig?.params?.default_category;
+          const defaultCategory =
+            selectedModelInfo.modelConfig?.params?.default_category;
           if (defaultCategory && categories.includes(defaultCategory)) {
             selectedCategory.value = defaultCategory;
           } else if (categories.length > 0) {
