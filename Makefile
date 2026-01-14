@@ -96,6 +96,23 @@ sspsygene-geneformer-embeddings:
 	--labels Type.v1 \
 	--labels Subtype.v1
 
+# sspsygene embeddings from geneformer model
+arc-stack-model:
+	python backend/src/arc_stack_export_model.py \
+	data/models/arc-stack/Stack-Large \
+	public/models/arc-stack/embedding
+
+sspsygene-arc-stack-embeddings:
+	python backend/src/h5ad_to_embeddings.py \
+	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
+	public/models/arc-stack/embedding/model.onnx \
+	public/models/arc-stack/embedding/genes.txt \
+	data/references/arc-stack \
+	--max-cells 10_000 \
+	--batch-size 4 \
+	--labels Type.v1 \
+	--labels Subtype.v1
+
 # IVF
 ivfpq-train:
 	python backend/src/ivfpq_train.py train \
