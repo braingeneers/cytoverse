@@ -34,6 +34,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "black>=25.1.0",
+    "cairosvg>=2.8.2",
     "debugpy>=1.8.15",
     "flake8>=7.2.0",
     "graphviz>=0.21",
