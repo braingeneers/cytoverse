@@ -2,6 +2,8 @@
 
 Label, share and display cells using foundation models client side within the browser.
 
+[![DOI](https://img.shields.io/badge/DOI-10.1101/2025.01.15.123456-blue)](https://doi.org/10.64898/2026.01.29.702554)
+
 [https://cells-test.gi.ucsc.edu/cytoverse](https://cells-test.gi.ucsc.edu/cytoverse)
 
 ![Alt text](screenshot.png?raw=true 'CytoVerse Screenshot')
@@ -21,7 +23,7 @@ This architecture ensures privacy, scalability, and collaborative potential with
 
 ## Data and Compute Flow
 
-![Alt text](notebooks/figures/architecture.svg?raw=true 'CytoVerse Data Flow')
+![Alt text](notebooks/figures/architecture_horizontal_full.svg?raw=true 'CytoVerse Data Flow')
 
 ## Install
 
@@ -120,6 +122,24 @@ make ivfpq-train pumap
 ## Concordance and Performance
 
 See [the analysis notebook and figures](notebooks/analysis.ipynb) for a detailed comparison with running on a server with the underlying foundation model.
+
+## Citing CytoVerse
+
+If you use **CytoVerse** for analysis or exploration, consider citing our publication -
+
+```bibtex
+@article {Currie2026.01.29.702554,
+    author = {Currie, Robert and Gonzalez Ferrer, Jesus and Mostajo-Radji, Mohammed A and Haussler, David},
+    title = {CytoVerse: Single-Cell AI Foundation Models in the Browser},
+    elocation-id = {2026.01.29.702554},
+    year = {2026},
+    doi = {10.64898/2026.01.29.702554},
+    publisher = {Cold Spring Harbor Laboratory},
+    url = {https://www.biorxiv.org/content/early/2026/01/30/2026.01.29.702554},
+    eprint = {https://www.biorxiv.org/content/early/2026/01/30/2026.01.29.702554.full.pdf},
+    journal = {bioRxiv}
+}
+```
 
 ## References
 
