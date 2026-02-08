@@ -11,7 +11,9 @@ test('Run and do NOT wait for results...', async ({ page }) => {
   const modelSelector = await page.getByTestId('model-select-dropdown');
   await modelSelector.click();
   await page.waitForSelector('.v-list-item');
-  const optionToSelect = page.locator('.v-list-item', { hasText: 'dev' });
+  const optionToSelect = page.locator('.v-list-item', {
+    hasText: 'scimilarity-subset',
+  });
   await optionToSelect.click();
 
   const categorySelector = await page.getByTestId('category-select-dropdown');
@@ -59,7 +61,9 @@ test('Create a user index...', async ({ page }) => {
   const modelSelector = await page.getByTestId('model-select-dropdown');
   await modelSelector.click();
   await page.waitForSelector('.v-list-item');
-  const optionToSelect = page.locator('.v-list-item', { hasText: 'dev' });
+  const optionToSelect = page.locator('.v-list-item', {
+    hasText: 'scimilarity-subset',
+  });
   await optionToSelect.click();
 
   const categorySelector = await page.getByTestId('category-select-dropdown');

@@ -1,6 +1,5 @@
 data
 public/models
-public/sample.h5ad
 
 .tsbuildinfo.*
 tsconfig.tsbuildinfo

@@ -6,16 +6,27 @@ import numpy as np
 
 from typing import List, Dict
 
-import anndata
 import scanpy as sc
 
-import scimilarity
 from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
 
 import torch
 import onnx
 import onnxruntime as ort
+
+
+import warnings
+
+# Suppress specific deprecation warnings from PyTorch ONNX export as we explicitly
+# use the torchscript instead of dynamo exporter so that the graph when viewed
+# in netron is more interpretable.
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*legacy TorchScript-based ONNX export.*",
+    category=DeprecationWarning
+)
 
 
 # Create Typer app
@@ -343,7 +354,7 @@ def model(
     max_diff = np.max(np.abs(combined_onnx_output - scimilarity_output))
     mean_diff = np.mean(np.abs(combined_onnx_output - scimilarity_output))
 
-    print(f"  ONNX vs SCimilarity get_embeddings:")
+    print("  ONNX vs SCimilarity get_embeddings:")
     print(f"    Max absolute difference: {max_diff:.2e}")
     print(f"    Mean absolute difference: {mean_diff:.2e}")
 

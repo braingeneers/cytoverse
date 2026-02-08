@@ -1,30 +1,7 @@
-# Default ivfpq parameters
-export model_id=scimilarity
+# Default
+model_id ?= "scimilarity"
 
-test:
-	npx vitest run tests/unit
-	python -m pytest tests/unit
-	python -m pytest tests/e2e
-	npx playwright test tests/e2e/run.spec.ts
-
-build:
-	npm run build
-	echo "Removing dev from models list"
-	sed -i '' '/^dev$$/d' ./dist/models/models.txt
-	rm -rf dist/models/dev
-
-deploy:
-	echo "Updating https://cells-test.gi.ucsc.edu/cytoverse/..."
-	rsync -avh --delete dist/ \
-		rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/
-
-benchmark:
-	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
-
-test-no-capture:
-	python -m pytest ivfpq/python/tests --capture=no --log-cli-level=DEBUG
-
-# Populate model artifacts for the selected model to web/public/models/<model_id>
+# Populate model artifacts for the selected model to public/models/<model_id>
 notice:
 	@echo "⚙️ Populating $(model_id)"
 	@echo "- Embeddings & metadata to data/references/$(model_id)"
@@ -33,23 +10,13 @@ notice:
 update-models-list:
 	ls -d public/models/*/ | while read -r dir; do basename "$$dir"; done > public/models/models.txt
 
-scimilarity: model_id=scimilarity
-scimilarity: stratify_label=prediction
-scimilarity: notice scimilarity-model \
-	scimilarity-embeddings ivfpq-train pumap update-models-list
-
-sspsygene: model_id=sspsygene
-sspsygene: stratify_label=Type.v1
-sspsygene: notice scimilarity-model \
-	sspsygene-embeddings ivfpq-train pumap update-models-list
-
-# Embedding Model (only one for now)
+# Model
 scimilarity-model:
 	python scripts/scimilarity_export_model.py \
 	data/models/scimilarity/model_v1.1 \
 	public/models/$(model_id)/embedding
 
-# Embeddings (Must be first as model uses these to validate the export)
+# Embeddings
 scimilarity-embeddings:
 	python scripts/scimilarity_to_embeddings.py  embeddings \
 	data/models/scimilarity/model_v1.1/cellsearch \
@@ -63,6 +30,15 @@ scimilarity-aligned-embeddings:
 	python scripts/scimilarity_to_embeddings.py annotation-aligned \
 	data/models/scimilarity/model_v1.1 \
 	data/references/$(model_id)
+
+scimilarity-subset-embeddings:
+	python scripts/scimilarity_to_embeddings.py  embeddings \
+	data/models/scimilarity/model_v1.1/cellsearch \
+	data/references/$(model_id)/ \
+	--num-embeddings 10_000 \
+	--labels prediction \
+	--labels study \
+	--validate
 
 sspsygene-embeddings:
 	python scripts/h5ad_to_embeddings.py \
@@ -110,6 +86,22 @@ pumap-export:
 
 pumap: pumap-train pumap-map pumap-export
 
+# Specific models and references
+scimilarity-subset: model_id=scimilarity-subset
+scimilarity-subset: stratify_label=prediction
+scimilarity-subset: notice scimilarity-model \
+	scimilarity-subset-embeddings ivfpq-train pumap update-models-list
+
+scimilarity: model_id=scimilarity
+scimilarity: stratify_label=prediction
+scimilarity: notice scimilarity-model \
+	scimilarity-embeddings ivfpq-train pumap update-models-list
+
+sspsygene: model_id=sspsygene
+sspsygene: stratify_label=Type.v1
+sspsygene: notice scimilarity-model \
+	sspsygene-embeddings ivfpq-train pumap update-models-list
+
 # Testing
 update-validations:
 	python scripts/label.py \
@@ -118,3 +110,26 @@ update-validations:
 	python scripts/label.py \
 	      public/sample.h5ad \
 	      tests/e2e/sample.labels.csv
+
+test:
+	npx vitest run tests/unit
+	python -m pytest tests/unit
+	python -m pytest tests/e2e
+	npx playwright test tests/e2e/run.spec.ts
+
+build:
+	npm run build
+	echo "Removing dev from models list"
+	sed -i '' '/^dev$$/d' ./dist/models/models.txt
+	rm -rf dist/models/dev
+
+deploy:
+	echo "Updating https://cells-test.gi.ucsc.edu/cytoverse/..."
+	rsync -avh --delete dist/ \
+		rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/
+
+benchmark:
+	python -m pytest tests/unit/test_performance.py --capture=no --log-cli-level=DEBUG
+
+test-no-capture:
+	python -m pytest ivfpq/python/tests --capture=no --log-cli-level=DEBUG

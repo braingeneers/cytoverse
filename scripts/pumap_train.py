@@ -81,9 +81,10 @@ def train(
             nan_count = nan_mask.sum()
             nan_percentage = (nan_count / len(stratify_values)) * 100
 
-            typer.echo(
-                f"⚠️ NaN values in '{stratify_label}' column: {nan_count} ({nan_percentage:.2f}%)"
-            )
+            if nan_count > 0:
+                typer.echo(
+                    f"⚠️ NaN values in '{stratify_label}' column: {nan_count} ({nan_percentage:.2f}%)"
+                )
 
             if nan_percentage >= 10:
                 typer.echo(
@@ -116,20 +117,28 @@ def train(
                 )
                 selected_indices = selected_valid_indices
             else:
-                print(
-                    f"Selecting {num_vectors} stratified vectors from {vectors.shape[0]} total vectors based on '{stratify_label}' column"
-                )
+                # Clamp num_vectors to available vectors
+                if num_vectors >= vectors.shape[0]:
+                    if num_vectors > vectors.shape[0]:
+                        typer.echo(
+                            f"Requested {num_vectors} vectors but only {vectors.shape[0]} available, using all vectors"
+                        )
+                    selected_indices = np.arange(vectors.shape[0])
+                else:
+                    print(
+                        f"Selecting {num_vectors} stratified vectors from {vectors.shape[0]} total vectors based on '{stratify_label}' column"
+                    )
 
-                # Create indices array for stratified splitting
-                indices = np.arange(vectors.shape[0])
+                    # Create indices array for stratified splitting
+                    indices = np.arange(vectors.shape[0])
 
-                # Use train_test_split for stratified sampling
-                selected_indices, _ = train_test_split(
-                    indices,
-                    test_size=1.0 - (num_vectors / vectors.shape[0]),
-                    stratify=stratify_values,
-                    random_state=42,
-                )
+                    # Use train_test_split for stratified sampling
+                    selected_indices, _ = train_test_split(
+                        indices,
+                        test_size=1.0 - (num_vectors / vectors.shape[0]),
+                        stratify=stratify_values,
+                        random_state=42,
+                    )
 
             training_vector_ids = selected_indices
             vectors = vectors[selected_indices]

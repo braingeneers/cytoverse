@@ -25,9 +25,7 @@ This architecture ensures privacy, scalability, and collaborative potential with
 
 ![Alt text](notebooks/figures/architecture_horizontal_full.svg?raw=true 'CytoVerse Data Flow')
 
-## Install
-
-Create a ./data/ folder and download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/models/scimilarity/model_v1.1 and the tutorial [h5ad file](https://zenodo.org/records/13685881) into ./data/GSE136831_subsample.h5ad
+## Develop
 
 Install python dependencies and create a virtual env:
 
@@ -40,11 +38,39 @@ npm install
 npx playwright install
 ```
 
-Export SCimilarity embeddings and labels, train a parametric umap model on a stratified subset of cells, train IVFPQ, populate partitions and export models to ONNX:
+Create a ./data/ folder and download and unpack the scimilarity [model and dataset](https://zenodo.org/records/10685499) (~30GB) into data/models/scimilarity/model_v1.1.
+
+Then to create a small reference for development and end to end testing purposes:
+
+```
+make scimilarity-subset
+```
+
+Run the web app:
+
+```
+npm run dev
+```
+
+And then open http://localhost:5173/ in a browser.
+
+Generate a distribution including all models under public/models in dist/:
+
+```
+npm run build
+```
+
+## Full SCimilarity Reference
+
+To export all 23.3 million SCimilarity embeddings and labels, train a parametric
+umap model on a stratified subset of cells, train IVFPQ, populate partitions and
+export models to ONNX:
 
 ```
 make scimilarity
 ```
+
+NOTE: This will take several hours on a laptop
 
 Verify that public/models/scimilarity is populated (~1.2G Total):
 
@@ -82,24 +108,10 @@ public/models/scimilarity
     └── y.bin
 ```
 
-Run tests:
+Run unit and e2e including browser tests (assumes full SCimilarity reference build)
 
 ```
 make test
-```
-
-Install web app dependencies and run local dev server:
-
-```
-npm run dev
-```
-
-Open http://localhost:5173/ in a browser
-
-Generate a distribution including all models under public/models in dist/:
-
-```
-npm run build
 ```
 
 ## Creating References

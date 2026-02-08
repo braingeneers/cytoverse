@@ -935,8 +935,13 @@ const loadCategoriesFromMetadata = async () => {
         if (!selectedCategory.value || !categories.includes(selectedCategory.value)) {
           if (baseModelId === 'scimilarity' && categories.includes('prediction')) {
             selectedCategory.value = 'prediction';
-          } else if (baseModelId === 'brain' && categories.includes('CellType')) {
-            selectedCategory.value = 'CellType';
+          } else if (
+            baseModelId === 'scimilarity-subset' &&
+            categories.includes('prediction')
+          ) {
+            selectedCategory.value = 'prediction';
+          } else if (baseModelId === 'sspsygene' && categories.includes('Type.v1')) {
+            selectedCategory.value = 'Type.v1';
           } else if (categories.length > 0) {
             selectedCategory.value = categories[0];
           }
