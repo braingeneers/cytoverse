@@ -159,9 +159,7 @@ let cancelFeatureImportance = false;
 // Handle messages from main thread
 self.addEventListener(
   'message',
-  async function (
-    event: MessageEvent<StartMessage | FeatureImportanceRequestMessage>
-  ) {
+  async function (event: MessageEvent<StartMessage | FeatureImportanceRequestMessage>) {
     console.log('Worker received message:', event.data.type);
 
     if (event.data.type === 'start') {
@@ -389,12 +387,14 @@ function getCellNames(annData: H5File): string[] {
     const obsGroup = obs as H5Group;
     const obsKeys = obsGroup.keys();
     const indexKeys = [
-      'index',
-      '_index',
-      'barcodes',
-      '_barcodes',
-      'cell_id',
-      'cell_name',
+      'index', // Standard Pandas/Scanpy export.
+      'barcodes', // 10x Genomics standard.
+      'Cells', // Seurat (R) conversion standard.
+      'barcode', // Common manual naming.
+      'cell_id', // Metadata/Atlas standard.
+      '_index', // Automated backup/safety name.
+      'cell_name', // Legacy/custom pipelines.
+      '_barcodes', // Versioned/filtered backup.
     ];
 
     for (const key of indexKeys) {
@@ -1051,10 +1051,14 @@ async function calculateFeatureImportance(
     console.log('Current raw data initialized:', !!currentRawData);
 
     if (!model || !currentRawData) {
-      throw new Error(`Model or data not initialized (model: ${!!model}, data: ${!!currentRawData})`);
+      throw new Error(
+        `Model or data not initialized (model: ${!!model}, data: ${!!currentRawData})`
+      );
     }
 
-    console.log(`Calculating feature importance for cell ${cellId} (index ${cellIndex})`);
+    console.log(
+      `Calculating feature importance for cell ${cellId} (index ${cellIndex})`
+    );
 
     // Extract cell expression data
     const cellExpression = new Float32Array(model.genes.length);
@@ -1098,7 +1102,10 @@ async function calculateFeatureImportance(
     }
 
     // Get baseline embedding
-    const baselineTensor = new Tensor('float32', cellExpression, [1, model.genes.length]);
+    const baselineTensor = new Tensor('float32', cellExpression, [
+      1,
+      model.genes.length,
+    ]);
     const baselineResults = await model.embeddingSession.run({ input: baselineTensor });
     const baselineEmbedding = new Float32Array(
       baselineResults.output.data as Float32Array
@@ -1130,7 +1137,10 @@ async function calculateFeatureImportance(
         return;
       }
 
-      const batchGenes = expressedGenes.slice(i, Math.min(i + batchSize, expressedGenes.length));
+      const batchGenes = expressedGenes.slice(
+        i,
+        Math.min(i + batchSize, expressedGenes.length)
+      );
 
       for (const geneIdx of batchGenes) {
         // Check cancellation frequently
@@ -1146,7 +1156,10 @@ async function calculateFeatureImportance(
         perturbed[geneIdx] = 0.0;
 
         // Get embedding for perturbed input
-        const perturbedTensor = new Tensor('float32', perturbed, [1, model.genes.length]);
+        const perturbedTensor = new Tensor('float32', perturbed, [
+          1,
+          model.genes.length,
+        ]);
         const perturbedResults = await model.embeddingSession.run({
           input: perturbedTensor,
         });

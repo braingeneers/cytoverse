@@ -119,9 +119,9 @@ test:
 
 build:
 	npm run build
-	echo "Removing dev from models list"
-	sed -i '' '/^dev$$/d' ./dist/models/models.txt
-	rm -rf dist/models/dev
+	echo "Removing scimilarity-subset from models list"
+	sed -i '' '/^scimilarity-subset$$/d' ./dist/models/models.txt
+	rm -rf dist/models/scimilarity-subset
 
 deploy:
 	echo "Updating https://cells-test.gi.ucsc.edu/cytoverse/..."
