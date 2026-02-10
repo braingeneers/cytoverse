@@ -446,17 +446,20 @@ function getSampleGenes(annData: H5File): string[] {
     const varGroup = varData as H5Group;
     const varKeys = varGroup.keys();
     const geneKeys = [
-      'symbol',
+      'feature_name', // Direct 10x Genomics output; very common.
+      'gene_symbols', // Standard naming convention in Python pipelines.
+      'gene_name', // Standard naming in R-to-Python conversions.
+      'symbol', // Common manual/shorthand naming.
+      'index', // The fallback for reset dataframes.
+      'gene_ids', // Usually Ensembl IDs; used if symbols are missing.
+      '_index', // "The ""emergency"" fallback."
+      // Other common variations to check for:
       'gene_symbol',
-      'gene_symbols',
-      'gene_name',
       'gene_names',
       'feature_name',
       'features',
-      'index',
-      '_index',
       'gene_id',
-      'gene_ids',
+      'Genes',
     ];
 
     for (const key of geneKeys) {

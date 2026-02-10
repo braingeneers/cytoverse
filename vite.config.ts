@@ -41,14 +41,17 @@ export default defineConfig({
         {
           src: 'node_modules/onnxruntime-web/dist/*.wasm',
           dest: 'assets',
+          preserveTimestamps: true,
         },
         {
           src: 'public/*',
           dest: './',
+          preserveTimestamps: true,
         },
         {
           src: 'public/models/*',
           dest: './models',
+          preserveTimestamps: true,
         },
       ],
     }),

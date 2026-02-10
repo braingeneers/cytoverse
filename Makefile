@@ -123,6 +123,11 @@ build:
 	sed -i '' '/^scimilarity-subset$$/d' ./dist/models/models.txt
 	rm -rf dist/models/scimilarity-subset
 
+deploy-dry:
+	rsync -a --delete --dry-run --out-format="%n" \
+		dist/ \
+		rcurrie@hgwdev.gi.ucsc.edu:/usr/local/apache/htdocs-cells/cytoverse/
+
 deploy:
 	echo "Updating https://cells-test.gi.ucsc.edu/cytoverse/..."
 	rsync -avh --delete dist/ \
