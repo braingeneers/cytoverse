@@ -419,8 +419,19 @@ function getCellNames(annData: H5File): string[] {
  * Validate gene symbols
  */
 function validateGeneSymbols(geneArray: string[]): boolean {
-  const knownGenes = ['TP53', 'BRCA1'];
-  return knownGenes.some((gene) => geneArray.includes(gene));
+  const hugoMarkers = [
+    'ACTB',   // Beta-actin, ubiquitous housekeeping gene
+    'GAPDH',  // Classic housekeeping enzyme
+    'MALAT1', // Highly abundant lncRNA in virtually all cells
+    'B2M',    // Beta-2 microglobulin, present in all nucleated cells
+    'PTPRC',  // CD45, pan-leukocyte marker
+    'RPL13',  // Ribosomal protein, extremely abundant
+    'TMSB4X', // Thymosin beta-4, one of most abundant transcripts
+    'TP53',   // Tumor suppressor, widely studied
+  ];
+  const upperGenes = new Set(geneArray.map((g) => g.toUpperCase()));
+  const matches = hugoMarkers.filter((marker) => upperGenes.has(marker)).length;
+  return matches >= 2;
 }
 
 /**
@@ -436,7 +447,7 @@ function getSampleGenes(annData: H5File): string[] {
   if (varData.type === 'Dataset') {
     try {
       const varValue = (varData as H5DataSet).value as Array<[string]>;
-      return varValue.map((e) => e[0]);
+      return varValue.map((e) => e[0].toUpperCase());
     } catch {
       throw new Error('Unable to extract gene names from var Dataset');
     }
@@ -468,7 +479,7 @@ function getSampleGenes(annData: H5File): string[] {
           const genes = (varGroup.get(key) as H5DataSet).value as string[];
           if (validateGeneSymbols(genes)) {
             console.log(`Found gene names in var/${key}`);
-            return genes;
+            return genes.map((g) => g.toUpperCase());
           }
         } catch {
           console.warn(`Failed to read gene names from var/${key}`);
@@ -482,7 +493,7 @@ function getSampleGenes(annData: H5File): string[] {
         const potentialGenes = (varGroup.get(firstKey) as H5DataSet).value as string[];
         if (Array.isArray(potentialGenes) && validateGeneSymbols(potentialGenes)) {
           console.warn('Falling back to using var index as gene names');
-          return potentialGenes;
+          return potentialGenes.map((g) => g.toUpperCase());
         }
       } catch {
         console.warn(
