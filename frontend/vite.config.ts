@@ -46,10 +46,12 @@ export default defineConfig({
         {
           src: '../public/*',
           dest: './',
+          preserveTimestamps: true,
         },
         {
           src: '../public/models/*',
           dest: './models',
+          preserveTimestamps: true,
         },
       ],
     }),
