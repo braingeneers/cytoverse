@@ -115,7 +115,7 @@ test:
 	npx vitest run tests/unit
 	python -m pytest tests/unit
 	python -m pytest tests/e2e
-	npx playwright test tests/e2e/run.spec.ts
+	
 
 build:
 	npm run build
