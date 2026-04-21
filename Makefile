@@ -112,9 +112,10 @@ update-validations:
 	      tests/e2e/sample.labels.csv
 
 test:
-	npx vitest run tests/unit
 	python -m pytest tests/unit
 	python -m pytest tests/e2e
+	npx vitest run tests/unit --silent
+	npx playwright test --config playwright.config.ts
 	
 
 build:
