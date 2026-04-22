@@ -58,6 +58,20 @@ sspsygene-embeddings:
 	--labels Type.v1 \
 	--labels Subtype.v1
 
+# Small sspsygene reference through UCE-brain (Stage 3 bootstrap run: 1k-10k cells)
+sspsygene-ucebrain-embeddings:
+	uce-edge/.venv/bin/python scripts/h5ad_to_embeddings.py \
+	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
+	uce-edge/model_files/uce-brain-pilot-8l-512d \
+	data/references/sspsygene-ucebrain \
+	--foundation-model uce-brain \
+	--max-cells $(or $(max_cells),5000) \
+	--labels Dataset \
+	--labels Gestational_week \
+	--labels Class \
+	--labels Type.v1 \
+	--labels Subtype.v1
+
 # IVF
 ivfpq-train:
 	python scripts/ivfpq_train.py train \
@@ -108,6 +122,13 @@ sspsygene: model_id=sspsygene
 sspsygene: stratify_label=Type.v1
 sspsygene: notice scimilarity-model \
 	sspsygene-embeddings ivfpq-train pumap update-models-list
+
+# Full sspsygene-ucebrain pipeline: export → embeddings → ivfpq → pumap
+sspsygene-ucebrain: model_id=sspsygene-ucebrain
+sspsygene-ucebrain: display_name=SSPsyGene - UCE Brain
+sspsygene-ucebrain: stratify_label=Type.v1
+sspsygene-ucebrain: notice uce-brain-model \
+	sspsygene-ucebrain-embeddings ivfpq-train pumap update-models-list
 
 # Testing
 update-validations:
