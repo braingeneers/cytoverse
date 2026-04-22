@@ -62,7 +62,7 @@ sspsygene-embeddings:
 sspsygene-ucebrain-embeddings:
 	uce-edge/.venv/bin/python scripts/h5ad_to_embeddings.py \
 	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
-	uce-edge/model_files/uce-brain-pilot-8l-512d \
+	data/models/uce-brain/uce-brain-pilot-8l-512d \
 	data/references/sspsygene-ucebrain \
 	--foundation-model uce-brain \
 	--max-cells $(or $(max_cells),5000) \

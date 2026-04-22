@@ -66,11 +66,11 @@ def ingest(
     ),
     brain_src: Path = typer.Option(
         None,
-        help="[uce-brain only] Path to UCE-brain/src. Defaults to uce-edge/UCE-brain/src.",
+        help="[uce-brain only] Path to UCE-brain/src. Defaults to uce-brain/src.",
     ),
     gene_dict: Path = typer.Option(
         None,
-        help="[uce-brain only] Path to human_gene_dict.json. Defaults to uce-edge/UCE-brain/gene_data/human_gene_dict.json.",
+        help="[uce-brain only] Path to human_gene_dict.json. Defaults to uce-brain/gene_data/human_gene_dict.json.",
     ),
     device: str = typer.Option(
         None,
@@ -237,14 +237,13 @@ _UCE_PAD_TOKEN_IDX = 0
 
 
 def _default_brain_src() -> Path:
-    return Path(__file__).resolve().parent.parent / "uce-edge" / "UCE-brain" / "src"
+    return Path(__file__).resolve().parent.parent / "uce-brain" / "src"
 
 
 def _default_gene_dict() -> Path:
     return (
         Path(__file__).resolve().parent.parent
-        / "uce-edge"
-        / "UCE-brain"
+        / "uce-brain"
         / "gene_data"
         / "human_gene_dict.json"
     )

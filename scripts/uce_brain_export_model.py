@@ -38,9 +38,9 @@ from safetensors.torch import load_file
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BRAIN_SRC = REPO_ROOT / "uce-edge" / "UCE-brain" / "src"
-DEFAULT_CKPT = REPO_ROOT / "uce-edge" / "model_files" / "uce-brain-pilot-8l-512d"
-DEFAULT_GENE_DICT = REPO_ROOT / "uce-edge" / "UCE-brain" / "gene_data" / "human_gene_dict.json"
+DEFAULT_BRAIN_SRC = REPO_ROOT / "uce-brain" / "src"
+DEFAULT_CKPT = REPO_ROOT / "data" / "models" / "uce-brain" / "uce-brain-pilot-8l-512d"
+DEFAULT_GENE_DICT = REPO_ROOT / "uce-brain" / "gene_data" / "human_gene_dict.json"
 
 # UCE-brain sampler constants (see UCE-brain/src/uce_brain/data/sampler.py)
 PAD_TOKEN_IDX = 0
