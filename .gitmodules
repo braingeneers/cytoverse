@@ -1,4 +1,3 @@
-[submodule "uce-brain"]
-	path = uce-brain
+[submodule "uce-brain/uce-brain"]
+	path = uce-brain/uce-brain
 	url = https://github.com/snap-stanford/UCE-brain.git
-	branch = main

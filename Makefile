@@ -16,11 +16,11 @@ scimilarity-model:
 	data/models/scimilarity/model_v1.1 \
 	public/models/$(model_id)/embedding
 
-# UCE-brain export uses uce-edge's venv (has torch/uce_brain/safetensors).
-# Produces transformer.onnx + protein_embeddings.bin + gene_dict.json + metadata.json.
+# UCE-brain export: runs in uce-brain/.venv, stages into uce-brain/artifacts/,
+# then promotes into public/models/<model_id>/embedding/ + metadata.json.
 uce-brain-model:
-	uce-edge/.venv/bin/python scripts/uce_brain_export_model.py \
-	public/models/$(model_id) \
+	uce-brain/.venv/bin/python uce-brain/scripts/export_model.py \
+	--promote-to public/models/$(model_id) \
 	--display-name "$(display_name)"
 
 # Embeddings
@@ -58,13 +58,12 @@ sspsygene-embeddings:
 	--labels Type.v1 \
 	--labels Subtype.v1
 
-# Small sspsygene reference through UCE-brain (Stage 3 bootstrap run: 1k-10k cells)
+# UCE-brain reference embeddings (PyTorch ground truth, not ONNX).
+# Runs under uce-brain/.venv which carries torch/safetensors/uce_brain.
 sspsygene-ucebrain-embeddings:
-	uce-edge/.venv/bin/python scripts/h5ad_to_embeddings.py \
+	uce-brain/.venv/bin/python uce-brain/scripts/embed_h5ad.py \
 	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
-	data/models/uce-brain/uce-brain-pilot-8l-512d \
 	data/references/sspsygene-ucebrain \
-	--foundation-model uce-brain \
 	--max-cells $(or $(max_cells),5000) \
 	--labels Dataset \
 	--labels Gestational_week \

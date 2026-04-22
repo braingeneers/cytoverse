@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 """Export UCE-brain artifacts for browser inference in cytoverse.
 
-Mirrors scripts/scimilarity_export_model.py in spirit but ships a different
-artifact set — UCE-brain's pipeline is tokens + gather + transformer, not
-raw-counts → normalize → embed. The transformer runs in the browser via ONNX;
-everything upstream (log1p/normalize, weighted sampling, chrom ordering,
+Produces ONNX + data artifacts, validates them, then optionally promotes
+into public/models/<name>/embedding/. The transformer runs in the browser
+via ONNX; everything upstream (normalize, weighted sampling, chrom ordering,
 CLS/PAD inserts, protein embedding gather) is JS-side.
 
-Outputs (under <output_path>/):
-  embedding/transformer.onnx          8-layer brain core, FP32, opset 17
-  embedding/protein_embeddings.bin    (N_rows, 5120) FP32, ~400 MB, post-LayerNorm
-  embedding/gene_dict.json            renumbered gene dict + special-token map
-  metadata.json                       foundationModel / embeddingDim / displayName
+Default output: uce-brain/artifacts/ (local staging area).
+After vetting, promote with --promote-to public/models/<name>.
 
-The cytoverse venv doesn't carry uce_brain or transformers; invoke this
-script with the uce-edge venv:
+Invoke with the uce-brain venv:
 
-  uce-edge/.venv/bin/python scripts/uce_brain_export_model.py \\
-      --output-path public/models/sspsygene-ucebrain \\
-      --display-name "SSPsyGene - UCE Brain"
-
-Defaults point at the uce-edge submodules and checkpoint.
+  uce-brain/.venv/bin/python uce-brain/scripts/export_model.py \\
+      [--output-path uce-brain/artifacts] \\
+      [--promote-to public/models/sspsygene-ucebrain] \\
+      [--display-name "SSPsyGene - UCE Brain"]
 """
 from __future__ import annotations
 
@@ -37,10 +31,13 @@ import onnxruntime as ort
 from safetensors.torch import load_file
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BRAIN_SRC = REPO_ROOT / "uce-brain" / "src"
-DEFAULT_CKPT = REPO_ROOT / "data" / "models" / "uce-brain" / "uce-brain-pilot-8l-512d"
-DEFAULT_GENE_DICT = REPO_ROOT / "uce-brain" / "gene_data" / "human_gene_dict.json"
+# uce-brain/ container is parent of this script's directory
+UCE_BRAIN_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = UCE_BRAIN_ROOT.parent
+DEFAULT_BRAIN_SRC = UCE_BRAIN_ROOT / "uce-brain" / "src"
+DEFAULT_CKPT = UCE_BRAIN_ROOT / "data" / "models" / "uce-brain-pilot-8l-512d"
+DEFAULT_GENE_DICT = UCE_BRAIN_ROOT / "uce-brain" / "gene_data" / "human_gene_dict.json"
+DEFAULT_OUTPUT = UCE_BRAIN_ROOT / "artifacts"
 
 # UCE-brain sampler constants (see UCE-brain/src/uce_brain/data/sampler.py)
 PAD_TOKEN_IDX = 0
@@ -357,16 +354,21 @@ def write_metadata(
 
 @app.command()
 def export(
-    output_path: Path = typer.Argument(
-        help="Output model directory (e.g. public/models/sspsygene-ucebrain)",
+    output_path: Path = typer.Option(
+        DEFAULT_OUTPUT,
+        help="Staging directory for exported artifacts (default: uce-brain/artifacts/)",
+    ),
+    promote_to: Optional[Path] = typer.Option(
+        None,
+        help="If set, copy artifacts into <promote-to>/embedding/ and write metadata.json there",
     ),
     display_name: str = typer.Option(
         "UCE Brain",
-        help="Human-readable name shown in the model dropdown",
+        help="Human-readable name shown in the model dropdown (used when promoting)",
     ),
     brain_src: Path = typer.Option(
         DEFAULT_BRAIN_SRC,
-        help="Path to UCE-brain/src (must contain uce_brain/ package)",
+        help="Path to uce-brain/src (must contain uce_brain/ package)",
     ),
     ckpt: Path = typer.Option(
         DEFAULT_CKPT,
@@ -381,7 +383,7 @@ def export(
         False, help="Skip the ~400 MB protein_embeddings.bin + gene_dict.json"
     ),
 ) -> None:
-    """Export UCE-brain artifacts to <output_path>/ for browser consumption."""
+    """Export UCE-brain artifacts to uce-brain/artifacts/, then optionally promote."""
     if not brain_src.exists():
         print(f"❌ brain_src not found: {brain_src}")
         raise typer.Exit(1)
@@ -393,30 +395,37 @@ def export(
         raise typer.Exit(1)
 
     output_path.mkdir(parents=True, exist_ok=True)
-    embedding_dir = output_path / "embedding"
 
     print(f"Loading UCE-brain from {ckpt}")
     core, embedding_layer = load_brain(ckpt, brain_src)
 
-    transformer_path = embedding_dir / "transformer.onnx"
+    transformer_path = output_path / "transformer.onnx"
     export_transformer(core, embedding_layer, transformer_path, opset=opset)
     validate_transformer_concordance(core, embedding_layer, transformer_path)
 
     if skip_embeddings:
         print("\nSkipping protein embedding extraction (--skip-embeddings)")
-        # Still need a minimal info dict so metadata.json is complete
         gene_dict_info = {"num_rows": 0, "embedding_dim": EMBEDDING_DIM}
     else:
-        gene_dict_info = extract_protein_embeddings(ckpt, gene_dict, embedding_dir)
-
-    write_metadata(output_path, display_name, gene_dict_info)
+        gene_dict_info = extract_protein_embeddings(ckpt, gene_dict, output_path)
 
     print(f"\n🎉 UCE-brain export complete: {output_path}")
-    print(f"  - {embedding_dir / 'transformer.onnx'}")
+    print(f"  - {output_path / 'transformer.onnx'}")
     if not skip_embeddings:
-        print(f"  - {embedding_dir / 'protein_embeddings.bin'}")
-        print(f"  - {embedding_dir / 'gene_dict.json'}")
-    print(f"  - {output_path / 'metadata.json'}")
+        print(f"  - {output_path / 'protein_embeddings.bin'}")
+        print(f"  - {output_path / 'gene_dict.json'}")
+
+    if promote_to is not None:
+        import shutil
+        embedding_dir = promote_to / "embedding"
+        embedding_dir.mkdir(parents=True, exist_ok=True)
+        for fname in ["transformer.onnx", "protein_embeddings.bin", "gene_dict.json"]:
+            src = output_path / fname
+            if src.exists():
+                shutil.copy2(src, embedding_dir / fname)
+                print(f"  → promoted {fname} to {embedding_dir / fname}")
+        write_metadata(promote_to, display_name, gene_dict_info)
+        print(f"  → {promote_to / 'metadata.json'}")
 
 
 if __name__ == "__main__":

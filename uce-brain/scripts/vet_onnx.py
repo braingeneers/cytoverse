@@ -7,7 +7,10 @@ onnxruntime CPU provider. If this passes, the exported model is fine and the
 browser failure is specific to onnxruntime-web's WebGPU backend.
 
 Usage:
-  uce-edge/.venv/bin/python scripts/uce_brain_vet_onnx.py \\
+  uce-brain/.venv/bin/python uce-brain/scripts/vet_onnx.py \\
+    uce-brain/artifacts
+  # or against a promoted model dir:
+  uce-brain/.venv/bin/python uce-brain/scripts/vet_onnx.py \\
     public/models/sspsygene-ucebrain/embedding
 """
 
