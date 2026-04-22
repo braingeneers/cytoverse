@@ -125,21 +125,28 @@ def export_transformer(
     mask = torch.ones(EXPORT_BATCH, EXPORT_SEQ_LEN, dtype=torch.float32)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # dynamo=True uses torch.export (not TorchScript) and correctly handles
+    # dynamic seq_len inside nn.MultiheadAttention — the TorchScript exporter
+    # bakes the traced seq_len as a constant into internal Reshape ops despite
+    # dynamic_axes being declared, causing ORT failures at any other seq_len.
+    # dynamic_shapes is the dynamo-era replacement for dynamic_axes.
+    # external_data=False inlines weights into the single .onnx file (no sidecar).
+    batch_dim = torch.export.Dim("batch")
+    seq_dim = torch.export.Dim("seq_len")
     torch.onnx.export(
         core,
         (src, mask),
         str(out_path),
         input_names=["src", "mask"],
         output_names=["gene_embeddings", "cell_embedding"],
-        dynamic_axes={
-            "src": {0: "batch", 1: "seq_len"},
-            "mask": {0: "batch", 1: "seq_len"},
-            "gene_embeddings": {0: "batch", 1: "seq_len"},
-            "cell_embedding": {0: "batch"},
+        dynamic_shapes={
+            "src": {0: batch_dim, 1: seq_dim},
+            "mask": {0: batch_dim, 1: seq_dim},
         },
         opset_version=opset,
-        do_constant_folding=True,
-        dynamo=False,
+        dynamo=True,
+        external_data=False,
     )
     size_mb = out_path.stat().st_size / 1e6
     print(f"  Exported {size_mb:.1f} MB")
@@ -378,7 +385,7 @@ def export(
         DEFAULT_GENE_DICT,
         help="Path to UCE-brain human_gene_dict.json",
     ),
-    opset: int = typer.Option(17, help="ONNX opset version"),
+    opset: int = typer.Option(18, help="ONNX opset version"),
     skip_embeddings: bool = typer.Option(
         False, help="Skip the ~400 MB protein_embeddings.bin + gene_dict.json"
     ),
