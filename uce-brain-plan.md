@@ -14,7 +14,7 @@ Source of truth for per-model config: a new `public/models/<name>/metadata.json`
 
 Foundation that ships independently of whether UCE-Brain works.
 
-1. Add `public/models/<name>/metadata.json` for each existing model with `{ foundationModel: "scimilarity", embeddingDim: 128, displayName: "..." }`. Keep `pumap/metadata.json` for backward compatibility; this new file is for *foundation-model-level* metadata.
+1. Add `public/models/<name>/metadata.json` for each existing model with `{ foundationModel: "scimilarity", embeddingDim: 128, displayName: "..." }`. Keep `pumap/metadata.json` for backward compatibility; this new file is for _foundation-model-level_ metadata.
 2. App fetches `metadata.json` per model to populate the dropdown with `displayName`, and passes `foundationModel` to the worker via the `start` message (App already knows the model id; fetching metadata there is one extra roundtrip).
 3. Worker: extract the current SCimilarity embedding logic into `embedBatchScimilarity(batch) -> Float32Array`. Dispatch on `foundationModel`. For now only the SCimilarity branch exists — behavior is identical.
 4. Keep `models.txt` as the flat list of model ids — it's the cheapest directory listing and already works.
@@ -61,8 +61,9 @@ Once UCE-brain is functional end-to-end, explore the PQ compression/accuracy tra
 Current SCimilarity: d=128, pq_m=16, pq_k=256 (one byte per 8-d sub-vector → 16 bytes/vector, 16× compression before IVF bucketing).
 
 At d=512 there's more room to play. Candidates:
+
 - **pq_m=16, k=256** — same bytes/vector as SCimilarity (32× compression vs 512×4 raw) — aggressive, lossy, minimal disk
-- **pq_m=32, k=256** — 2× the bytes, 16× compression — middle ground, matches SCimilarity's *ratio*
+- **pq_m=32, k=256** — 2× the bytes, 16× compression — middle ground, matches SCimilarity's _ratio_
 - **pq_m=64, k=256** — 8× compression — conservative, likely near-raw accuracy
 - **raw (no PQ)** — 2048 bytes/vector, baseline recall target
 
@@ -111,3 +112,5 @@ contract.
   `scimilarity-subset-embeddings`, equivalents for `scimilarity` and
   `sspsygene`, and the new `sspsygene-ucebrain` target — still produce a
   complete, browseable model directory with no manual steps.
+- Unit tests for uce-brain
+- Re-organize uce-edge and/or uce-brain as submodules and move checkpoints up into data/models

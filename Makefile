@@ -16,6 +16,13 @@ scimilarity-model:
 	data/models/scimilarity/model_v1.1 \
 	public/models/$(model_id)/embedding
 
+# UCE-brain export uses uce-edge's venv (has torch/uce_brain/safetensors).
+# Produces transformer.onnx + protein_embeddings.bin + gene_dict.json + metadata.json.
+uce-brain-model:
+	uce-edge/.venv/bin/python scripts/uce_brain_export_model.py \
+	public/models/$(model_id) \
+	--display-name "$(display_name)"
+
 # Embeddings
 scimilarity-embeddings:
 	python scripts/scimilarity_to_embeddings.py  embeddings \
