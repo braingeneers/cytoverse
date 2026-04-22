@@ -815,12 +815,30 @@ const loadAvailableModels = async () => {
     const text = await response.text();
     const modelNames = text.split('\n').filter((name) => name.trim());
 
-    const referenceModels = modelNames.map((name) => ({
-      title: name,
-      value: name,
-      isUserIndex: false,
-      baseModelId: name,
-    }));
+    // Fetch per-model metadata.json in parallel; fall back to the id for display
+    // name if a model doesn't have one yet.
+    const referenceModels = await Promise.all(
+      modelNames.map(async (name) => {
+        let displayName = name;
+        try {
+          const metaResp = await fetch(`${sitePath}/models/${name}/metadata.json`);
+          if (metaResp.ok) {
+            const meta = await metaResp.json();
+            if (typeof meta.displayName === 'string' && meta.displayName) {
+              displayName = meta.displayName;
+            }
+          }
+        } catch {
+          // Leave displayName as the model id
+        }
+        return {
+          title: displayName,
+          value: name,
+          isUserIndex: false,
+          baseModelId: name,
+        };
+      })
+    );
 
     // Load user indexes from IndexedDB
     const userIndexes = await userIndexService.getUserIndexMetadata();

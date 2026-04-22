@@ -22,8 +22,17 @@ const NUM_PARTITIONS_TO_SEARCH = 4;
 const BATCH_SIZE = 32;
 
 // TypeScript interfaces
+type FoundationModel = 'scimilarity' | 'uce-brain';
+
+interface ModelMetadata {
+  foundationModel: FoundationModel;
+  embeddingDim: number;
+  displayName?: string;
+}
+
 interface ModelInfo {
   modelID: string;
+  foundationModel: FoundationModel;
   genes: string[];
   embeddingSession: InferenceSession;
   mappingSession: InferenceSession;
@@ -221,6 +230,25 @@ async function instantiateModel(
   console.log(`Instantiating model ${modelID} from ${modelsURL}`);
   // self.postMessage({ type: 'status', message: 'Downloading model...' } as StatusMessage)
 
+  // Fetch foundation-model metadata. Missing or malformed metadata is treated as
+  // legacy SCimilarity for backward compatibility with existing deployments.
+  let metadata: ModelMetadata = { foundationModel: 'scimilarity', embeddingDim: 128 };
+  try {
+    const metaResp = await fetch(`${modelsURL}/${modelID}/metadata.json`);
+    if (metaResp.ok) {
+      metadata = { ...metadata, ...(await metaResp.json()) };
+    }
+  } catch (e) {
+    console.warn(`No metadata.json for ${modelID}, defaulting to scimilarity`, e);
+  }
+  console.log(`Foundation model: ${metadata.foundationModel}`);
+
+  if (metadata.foundationModel !== 'scimilarity') {
+    throw new Error(
+      `Foundation model "${metadata.foundationModel}" is not yet supported in the worker`
+    );
+  }
+
   // Fetch model genes
   let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`);
   if (!response.ok) {
@@ -361,7 +389,14 @@ async function instantiateModel(
     ivfpq = null;
   }
 
-  return { modelID, genes, embeddingSession, mappingSession, ivfpq };
+  return {
+    modelID,
+    foundationModel: metadata.foundationModel,
+    genes,
+    embeddingSession,
+    mappingSession,
+    ivfpq,
+  };
 }
 
 /**
