@@ -158,15 +158,14 @@ def validate_transformer_concordance(
 ) -> None:
     """Compare PyTorch vs ONNX transformer outputs on the same input.
 
-    uce-edge already proved this works; we re-run it here so the export
-    script catches regressions immediately.
+    Validates at the export seq_len AND at a second non-export seq_len. The
+    torchscript exporter can bake reshape targets from the traced shape, so
+    even with dynamic_axes declared, the graph may silently fail at runtime
+    on any seq_len other than the one used during tracing. Catching this
+    here (rather than in the browser) is cheap.
     """
     print(f"\n2. Validating ONNX concordance vs PyTorch")
 
-    # Validate at the same shape used for export — the torchscript exporter
-    # bakes some reshape constants from the traced shape, so smaller shapes
-    # fail at runtime even though the dynamic_axes are declared. uce-edge
-    # already proved dynamic shapes work in practice via the browser path.
     g = torch.Generator().manual_seed(42)
     ids = torch.randint(1, VOCAB_SIZE, (EXPORT_BATCH, EXPORT_SEQ_LEN), generator=g)
     with torch.no_grad():
@@ -184,17 +183,39 @@ def validate_transformer_concordance(
     cell_onnx_np = outputs[1]
 
     max_diff = np.max(np.abs(cell_pt_np - cell_onnx_np))
-    # Cosine per row (they're already L2-normalized, so this is just a dot)
     cos_per_row = np.sum(cell_pt_np * cell_onnx_np, axis=1)
     min_cos = float(cos_per_row.min())
 
-    print(f"  max|diff| = {max_diff:.2e}")
-    print(f"  min cosine = {min_cos:.6f}")
-
+    print(f"  export seq_len={EXPORT_SEQ_LEN}: max|diff|={max_diff:.2e}  min cosine={min_cos:.6f}")
     if min_cos < 0.9999:
         print(f"  ❌ Concordance failed: min cosine {min_cos:.6f} < 0.9999")
         raise typer.Exit(1)
-    print(f"  ✅ Concordance: min cosine {min_cos:.6f} ≥ 0.9999")
+
+    # Second shape — browser will run at arbitrary seq_len based on sampler
+    # output. Catch any baked-in reshape constants that break on non-export
+    # shapes (this regression happened in torch 2.11+ and nearly cost us the
+    # Stage 4 demo).
+    alt_seq_len = EXPORT_SEQ_LEN + 47  # arbitrary, != 1024
+    g2 = torch.Generator().manual_seed(43)
+    ids2 = torch.randint(1, VOCAB_SIZE, (EXPORT_BATCH, alt_seq_len), generator=g2)
+    with torch.no_grad():
+        src2 = embedding_layer(ids2)
+    mask2 = torch.ones(EXPORT_BATCH, alt_seq_len, dtype=torch.float32)
+    with torch.no_grad():
+        _, cell_pt2 = core(src2, mask2)
+    try:
+        out2 = session.run(None, {"src": src2.cpu().numpy(), "mask": mask2.cpu().numpy()})
+    except Exception as e:
+        print(f"  ❌ Dynamic seq_len={alt_seq_len} failed: {e}")
+        print("     The exported graph has baked-in reshape constants from the trace.")
+        print("     Consider reusing the committed uce-edge/web/brain_8l_fp32.onnx.")
+        raise typer.Exit(1)
+    cos2 = float(np.sum(cell_pt2.cpu().numpy() * out2[1], axis=1).min())
+    print(f"  alt    seq_len={alt_seq_len}: min cosine={cos2:.6f}")
+    if cos2 < 0.9999:
+        print(f"  ❌ Alt-shape concordance {cos2:.6f} < 0.9999")
+        raise typer.Exit(1)
+    print(f"  ✅ Concordance holds at both seq_len={EXPORT_SEQ_LEN} and {alt_seq_len}")
 
 
 def extract_protein_embeddings(

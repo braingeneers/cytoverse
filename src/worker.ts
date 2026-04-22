@@ -28,8 +28,8 @@ import {
   validPrefixLength,
 } from './uceBrain';
 
-env.logLevel = 'verbose';
-env.debug = true;
+// ORT log level defaults to 'warning'. Bump to 'verbose' only when debugging
+// a specific ONNX issue — every kernel logs per call otherwise.
 
 // Configuration
 const NUM_NEAREST_NEIGHBORS = 50;
