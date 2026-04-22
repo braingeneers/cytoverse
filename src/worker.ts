@@ -12,6 +12,21 @@ import h5wasm from 'h5wasm';
 import { InferenceSession, Tensor, env } from 'onnxruntime-web';
 import { IVFPQ, SearchResults } from './ivfpq';
 import { UserIVFPQ } from './userIvfpq';
+import {
+  UCE_PAD_LENGTH,
+  UCE_SAMPLE_SIZE,
+  UCEGeneDict,
+  UCESentenceTokens,
+  RNG,
+  normalizeCounts,
+  weightedSample,
+  buildSentence,
+  chromOrderFromSample,
+  gather,
+  buildGeneTable,
+  cachedFetchBytes,
+  validPrefixLength,
+} from './uceBrain';
 
 env.logLevel = 'verbose';
 env.debug = true;
@@ -30,13 +45,24 @@ interface ModelMetadata {
   displayName?: string;
 }
 
+interface UCEBrainModel {
+  proteinEmbeddings: Float32Array;
+  tableRows: number;
+  embDim: number;
+  geneDict: UCEGeneDict;
+  sentenceTokens: UCESentenceTokens;
+}
+
 interface ModelInfo {
   modelID: string;
   foundationModel: FoundationModel;
+  /** SCimilarity: list of model-input genes. UCE-brain: empty (alignment is per-sample via gene_dict). */
   genes: string[];
   embeddingSession: InferenceSession;
   mappingSession: InferenceSession;
   ivfpq: IVFPQ | UserIVFPQ;
+  /** UCE-brain-only artifacts. Null for SCimilarity. */
+  uceBrain: UCEBrainModel | null;
 }
 
 interface StartMessage {
@@ -243,104 +269,38 @@ async function instantiateModel(
   }
   console.log(`Foundation model: ${metadata.foundationModel}`);
 
-  if (metadata.foundationModel !== 'scimilarity') {
-    throw new Error(
-      `Foundation model "${metadata.foundationModel}" is not yet supported in the worker`
-    );
-  }
-
-  // Fetch model genes
-  let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  const genes = (await response.text()).split('\n');
-  console.log('Model Genes', genes.slice(0, 5));
-
-  // Fetch embedding model
-  response = await fetch(`${modelsURL}/${modelID}/embedding/model.onnx`);
-  if (!response.ok) {
-    throw new Error(`Error fetching onnx file: ${response.status}`);
-  }
-
-  // Get total size from Content-Length header if available
-  const contentLength = response.headers.get('content-length');
-  const totalBytes = contentLength ? parseInt(contentLength, 10) : null;
-
-  // Collect chunks dynamically (Content-Length may not be available in all servers)
-  const chunks: Uint8Array[] = [];
-  const reader = response.body!.getReader();
-  let receivedBytes = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    receivedBytes += value.length;
-
-    self.postMessage({
-      type: 'progress',
-      message: 'Downloading model...',
-      countFinished: Math.round(receivedBytes / (1024 * 1024)),
-      totalToProcess: totalBytes ? Math.round(totalBytes / (1024 * 1024)) : 0,
-    } as ProgressMessage);
-  }
-
-  // Concatenate all chunks into a single array
-  const modelArray = new Uint8Array(receivedBytes);
-  let position = 0;
-  for (const chunk of chunks) {
-    modelArray.set(chunk, position);
-    position += chunk.length;
-  }
-
-  // Configure ONNX Runtime
-  self.postMessage({
-    type: 'status',
-    message: 'Instantiating model...',
-  } as StatusMessage);
+  // Configure ONNX Runtime (shared by both foundation models)
   env.wasm.numThreads = Math.max(1, navigator.hardwareConcurrency - 4);
   env.wasm.proxy = true;
 
-  // Create inference sessions
-  let sessionOptions = {};
-  if (useWebGPU && maxTextureSize >= genes.length) {
-    console.log('Configuring embedding session to use WebGPU...');
-    sessionOptions = {
-      executionProviders: [
-        {
-          name: 'webgpu',
-          deviceType: 'gpu',
-          powerPreference: 'high-performance',
-        },
-      ],
-      graphOptimizationLevel: 'all',
-    };
+  // Branch on foundation model: each loads its own embedding session + any
+  // model-specific assets. Mapping session + IVFPQ setup is shared below.
+  let genes: string[] = [];
+  let embeddingSession: InferenceSession;
+  let uceBrain: UCEBrainModel | null = null;
+
+  if (metadata.foundationModel === 'scimilarity') {
+    ({ genes, embeddingSession } = await loadScimilarityEmbedding(
+      modelsURL,
+      modelID,
+      useWebGPU,
+      maxTextureSize
+    ));
+  } else if (metadata.foundationModel === 'uce-brain') {
+    ({ embeddingSession, uceBrain } = await loadUCEBrainEmbedding(
+      modelsURL,
+      modelID,
+      useWebGPU
+    ));
   } else {
-    if (useWebGPU && maxTextureSize < genes.length) {
-      console.warn(
-        `Embeddings dimention of ${genes.length} exceeds max gpu texture size of ${maxTextureSize} (likely running on Apple Silicon).`
-      );
-      console.warn('Falling back to WebAssembly execution for embedding only');
-    }
-    console.log('Configuring embedding session to use WebAssembly...');
-    sessionOptions = {
-      executionProviders: ['wasm'],
-      executionMode: 'parallel',
-      graphOptimizationLevel: 'all',
-    };
+    throw new Error(`Unknown foundation model: ${metadata.foundationModel}`);
   }
 
-  const embeddingSession = await InferenceSession.create(
-    modelArray.buffer,
-    sessionOptions
-  );
-  console.log('Model Output names', embeddingSession.outputNames);
-
-  // Create mapping session
+  // Create mapping session (same config shape regardless of foundation model)
+  let mappingSessionOptions: Record<string, unknown>;
   if (useWebGPU) {
     console.log('Configuring mapping session to use WebGPU...');
-    sessionOptions = {
+    mappingSessionOptions = {
       executionProviders: [
         {
           name: 'webgpu',
@@ -352,7 +312,7 @@ async function instantiateModel(
     };
   } else {
     console.log('Configuring mapping session to use WebAssembly...');
-    sessionOptions = {
+    mappingSessionOptions = {
       executionProviders: ['wasm'],
       executionMode: 'parallel',
       graphOptimizationLevel: 'all',
@@ -361,7 +321,7 @@ async function instantiateModel(
 
   const mappingSession = await InferenceSession.create(
     `${modelsURL}/${modelID}/pumap/model.onnx`,
-    sessionOptions
+    mappingSessionOptions
   );
   console.log('Mapper Output names', mappingSession.outputNames);
 
@@ -396,6 +356,246 @@ async function instantiateModel(
     embeddingSession,
     mappingSession,
     ivfpq,
+    uceBrain,
+  };
+}
+
+/**
+ * Load SCimilarity embedding model: genes.txt + model.onnx.
+ * Progress is reported via ProgressMessage during the model download.
+ */
+async function loadScimilarityEmbedding(
+  modelsURL: string,
+  modelID: string,
+  useWebGPU: boolean,
+  maxTextureSize: number
+): Promise<{ genes: string[]; embeddingSession: InferenceSession }> {
+  let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  const genes = (await response.text()).split('\n');
+  console.log('Model Genes', genes.slice(0, 5));
+
+  response = await fetch(`${modelsURL}/${modelID}/embedding/model.onnx`);
+  if (!response.ok) {
+    throw new Error(`Error fetching onnx file: ${response.status}`);
+  }
+
+  const contentLength = response.headers.get('content-length');
+  const totalBytes = contentLength ? parseInt(contentLength, 10) : null;
+
+  const chunks: Uint8Array[] = [];
+  const reader = response.body!.getReader();
+  let receivedBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    receivedBytes += value.length;
+
+    self.postMessage({
+      type: 'progress',
+      message: 'Downloading model...',
+      countFinished: Math.round(receivedBytes / (1024 * 1024)),
+      totalToProcess: totalBytes ? Math.round(totalBytes / (1024 * 1024)) : 0,
+    } as ProgressMessage);
+  }
+
+  const modelArray = new Uint8Array(receivedBytes);
+  let position = 0;
+  for (const chunk of chunks) {
+    modelArray.set(chunk, position);
+    position += chunk.length;
+  }
+
+  self.postMessage({
+    type: 'status',
+    message: 'Instantiating model...',
+  } as StatusMessage);
+
+  let sessionOptions: Record<string, unknown>;
+  if (useWebGPU && maxTextureSize >= genes.length) {
+    console.log('Configuring embedding session to use WebGPU...');
+    sessionOptions = {
+      executionProviders: [
+        {
+          name: 'webgpu',
+          deviceType: 'gpu',
+          powerPreference: 'high-performance',
+        },
+      ],
+      graphOptimizationLevel: 'all',
+    };
+  } else {
+    if (useWebGPU && maxTextureSize < genes.length) {
+      console.warn(
+        `Embeddings dimention of ${genes.length} exceeds max gpu texture size of ${maxTextureSize} (likely running on Apple Silicon).`
+      );
+      console.warn('Falling back to WebAssembly execution for embedding only');
+    }
+    console.log('Configuring embedding session to use WebAssembly...');
+    sessionOptions = {
+      executionProviders: ['wasm'],
+      executionMode: 'parallel',
+      graphOptimizationLevel: 'all',
+    };
+  }
+
+  const embeddingSession = await InferenceSession.create(
+    modelArray.buffer,
+    sessionOptions
+  );
+  console.log('Model Output names', embeddingSession.outputNames);
+
+  return { genes, embeddingSession };
+}
+
+/**
+ * Load UCE-brain embedding model:
+ *   transformer.onnx  (~117 MB)
+ *   protein_embeddings.bin  (~400 MB; Cache API for durability across reloads)
+ *   gene_dict.json  (~1.5 MB)
+ *
+ * The transformer *must* run on WebGPU for reasonable performance (CPU is 10x
+ * slower at seq_len=1024), so we pick WebAssembly only when WebGPU is
+ * unavailable. The protein embedding table lives in JS memory and feeds the
+ * per-cell gather — it is not uploaded to the GPU.
+ */
+async function loadUCEBrainEmbedding(
+  modelsURL: string,
+  modelID: string,
+  useWebGPU: boolean
+): Promise<{ embeddingSession: InferenceSession; uceBrain: UCEBrainModel }> {
+  const base = `${modelsURL}/${modelID}/embedding`;
+
+  // Fetch gene_dict (small, not cached — spec may change during development)
+  self.postMessage({
+    type: 'status',
+    message: 'Loading UCE-brain gene dict...',
+  } as StatusMessage);
+  const geneDictResp = await fetch(`${base}/gene_dict.json`);
+  if (!geneDictResp.ok) {
+    throw new Error(`Failed to fetch gene_dict.json: ${geneDictResp.status}`);
+  }
+  const geneDict = (await geneDictResp.json()) as UCEGeneDict;
+  console.log(
+    `UCE-brain gene_dict: ${Object.keys(geneDict.genes).length} genes, ` +
+      `table ${geneDict.num_rows}×${geneDict.embedding_dim}`
+  );
+
+  // Fetch protein embedding table via Cache API. 400 MB — one-time download.
+  self.postMessage({
+    type: 'status',
+    message: 'Loading protein embeddings (~400 MB)...',
+  } as StatusMessage);
+  const tableUrl = `${base}/protein_embeddings.bin`;
+  const tableResult = await cachedFetchBytes(tableUrl);
+  const proteinEmbeddings = new Float32Array(tableResult.buffer);
+  const expectedLen = geneDict.num_rows * geneDict.embedding_dim;
+  if (proteinEmbeddings.length !== expectedLen) {
+    throw new Error(
+      `protein_embeddings.bin length ${proteinEmbeddings.length} != ` +
+        `expected ${expectedLen} (${geneDict.num_rows} × ${geneDict.embedding_dim})`
+    );
+  }
+  console.log(
+    `Protein embeddings loaded: ${(tableResult.buffer.byteLength / 1e6).toFixed(0)} MB, ` +
+      `${tableResult.fromCache ? 'cache HIT' : 'cache MISS'}, ${tableResult.ms.toFixed(0)} ms`
+  );
+
+  // Fetch transformer.onnx with progress
+  self.postMessage({
+    type: 'status',
+    message: 'Downloading UCE-brain transformer...',
+  } as StatusMessage);
+  const xfResp = await fetch(`${base}/transformer.onnx`);
+  if (!xfResp.ok) {
+    throw new Error(`Failed to fetch transformer.onnx: ${xfResp.status}`);
+  }
+  const xfContentLength = xfResp.headers.get('content-length');
+  const xfTotalBytes = xfContentLength ? parseInt(xfContentLength, 10) : null;
+  const xfChunks: Uint8Array[] = [];
+  const xfReader = xfResp.body!.getReader();
+  let xfReceived = 0;
+  while (true) {
+    const { done, value } = await xfReader.read();
+    if (done) break;
+    xfChunks.push(value);
+    xfReceived += value.length;
+    self.postMessage({
+      type: 'progress',
+      message: 'Downloading UCE-brain transformer...',
+      countFinished: Math.round(xfReceived / (1024 * 1024)),
+      totalToProcess: xfTotalBytes ? Math.round(xfTotalBytes / (1024 * 1024)) : 0,
+    } as ProgressMessage);
+  }
+  const xfArray = new Uint8Array(xfReceived);
+  let xfPos = 0;
+  for (const chunk of xfChunks) {
+    xfArray.set(chunk, xfPos);
+    xfPos += chunk.length;
+  }
+
+  self.postMessage({
+    type: 'status',
+    message: 'Instantiating UCE-brain transformer...',
+  } as StatusMessage);
+
+  // WebGPU first, WASM fallback. The transformer is the performance-critical
+  // path — without GPU this will be slow.
+  let sessionOptions: Record<string, unknown>;
+  if (useWebGPU) {
+    console.log('Configuring UCE-brain embedding session to use WebGPU...');
+    sessionOptions = {
+      executionProviders: [
+        {
+          name: 'webgpu',
+          deviceType: 'gpu',
+          powerPreference: 'high-performance',
+        },
+      ],
+      graphOptimizationLevel: 'all',
+    };
+  } else {
+    console.warn(
+      'UCE-brain requires WebGPU for reasonable performance. ' +
+        'Falling back to WebAssembly — expect 10x slower per-cell inference.'
+    );
+    sessionOptions = {
+      executionProviders: ['wasm'],
+      executionMode: 'parallel',
+      graphOptimizationLevel: 'all',
+    };
+  }
+
+  const embeddingSession = await InferenceSession.create(
+    xfArray.buffer,
+    sessionOptions
+  );
+  console.log('UCE-brain transformer output names:', embeddingSession.outputNames);
+
+  // Build the sentence-tokens helper (numeric chromosome map — gene_dict has
+  // string keys from JSON).
+  const chromosomeTokenMap: Record<number, number> = {};
+  for (const [k, v] of Object.entries(geneDict.chromosome_token_map)) {
+    chromosomeTokenMap[parseInt(k, 10)] = v;
+  }
+  const sentenceTokens: UCESentenceTokens = {
+    specials: geneDict.specials,
+    chromosomeTokenMap,
+  };
+
+  return {
+    embeddingSession,
+    uceBrain: {
+      proteinEmbeddings,
+      tableRows: geneDict.num_rows,
+      embDim: geneDict.embedding_dim,
+      geneDict,
+      sentenceTokens,
+    },
   };
 }
 
@@ -921,9 +1121,17 @@ async function start(
     }
 
     const { isSparse, data, indices, indptr } = rawCountsData;
-    const inflationIndices = precomputeInflationIndices(model.genes, sampleGenes);
 
-    // Store data globally for feature importance
+    // SCimilarity needs gene-to-model alignment indices; UCE-brain does not
+    // (its alignment happens via the gene_dict protein table).
+    const inflationIndices =
+      model.foundationModel === 'scimilarity'
+        ? precomputeInflationIndices(model.genes, sampleGenes)
+        : [];
+
+    // Store data globally for feature importance. inflationIndices is empty
+    // for UCE-brain — the feature-importance path short-circuits with a
+    // "not supported" error for that foundation model.
     currentRawData = {
       data,
       indices,
@@ -952,107 +1160,31 @@ async function start(
     const allPartitionIds: Uint16Array = new Uint16Array(cellNames.length);
     const allPQCodes: Uint8Array[] = new Array(cellNames.length);
 
-    // Reusable batch data buffer (max size)
-    const batchDataBuffer = new Float32Array(BATCH_SIZE * model.genes.length);
-
-    // Process batches
-    for (let batchStart = 0; batchStart < cellNames.length; batchStart += BATCH_SIZE) {
-      // console.log(`Processing batch starting at cell ${batchStart}`);
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, cellNames.length);
-      const currentBatchSize = batchEnd - batchStart;
-
-      // Prepare batch data (reuse buffer, zero only what's needed)
-      const batchData =
-        currentBatchSize === BATCH_SIZE
-          ? batchDataBuffer
-          : batchDataBuffer.subarray(0, currentBatchSize * model.genes.length);
-      batchData.fill(0);
-      fillBatchData(
-        batchStart,
-        currentBatchSize,
-        data,
-        indices,
-        indptr,
-        isSparse,
+    if (model.foundationModel === 'scimilarity') {
+      await processCellsScimilarity(
+        cellNames,
         sampleGenes,
         inflationIndices,
-        batchData
-      );
-
-      // Run embedding model
-      const inputTensor = new Tensor('float32', batchData, [
-        currentBatchSize,
-        model.genes.length,
-      ]);
-
-      const embeddingResults = await model.embeddingSession.run({
-        input: inputTensor,
-      });
-
-      // Generate UMAP coordinates
-      const mappingResults = await model.mappingSession.run({
-        input: embeddingResults.output,
-      });
-
-      // Parse coordinates
-      const coordinates: number[][] = [];
-      for (let i = 0; i < mappingResults.output.dims[0]; i++) {
-        const startIndex = i * 2;
-        coordinates.push([
-          Number(mappingResults.output.data[startIndex]),
-          Number(mappingResults.output.data[startIndex + 1]),
-        ]);
-      }
-
-      // Label cells using IVFPQ
-      const embeddingDim = embeddingResults.output.dims[1] as number;
-      const { labelIds, confidences, partitionIds, pqCodes } = await labelCells(
-        embeddingResults.output.data as Float32Array,
-        currentBatchSize,
-        embeddingDim,
+        rawCountsData,
         labelIndices,
-        useUserIndex
+        useUserIndex,
+        allPartitionIds,
+        allPQCodes
       );
-
-      // Retain artifacts for user index
-      allPartitionIds.set(partitionIds, batchStart);
-      for (let i = 0; i < currentBatchSize; i++) {
-        allPQCodes[batchStart + i] = pqCodes[i];
-      }
-
-      // Send labeled updates as batch
-      const labeledBatch: CellUpdate[] = [];
-      for (let i = 0; i < currentBatchSize; i++) {
-        const cellIndex = batchStart + i;
-        if (labelIds[i] !== -1) {
-          labeledBatch.push({
-            cellId: cellNames[cellIndex],
-            x: coordinates[i][0],
-            y: coordinates[i][1],
-            labelId: labelIds[i],
-            confidence: confidences[i],
-          });
-        }
-      }
-      if (labeledBatch.length > 0) {
-        // console.log(`Sending batch of ${labeledBatch.length} labeled cells`);
-        self.postMessage({
-          type: 'cell_batch_update',
-          cells: labeledBatch,
-        } as CellBatchUpdate);
-      }
-
-      // Send progress
-      self.postMessage({
-        type: 'progress',
-        message: 'Labeling',
-        countFinished: batchEnd,
-        totalToProcess: cellNames.length,
-      } as ProgressMessage);
-
-      // Clean up tensors
-      embeddingResults.output.dispose();
-      mappingResults.output.dispose();
+    } else if (model.foundationModel === 'uce-brain') {
+      await processCellsUCEBrain(
+        cellNames,
+        sampleGenes,
+        rawCountsData,
+        labelIndices,
+        useUserIndex,
+        allPartitionIds,
+        allPQCodes
+      );
+    } else {
+      throw new Error(
+        `Unknown foundation model at processing time: ${model.foundationModel}`
+      );
     }
 
     // Clean up
@@ -1087,6 +1219,343 @@ async function start(
 }
 
 /**
+ * Batched SCimilarity processing loop. Inflates each batch into the model's
+ * gene space, runs the embedding + PUMAP sessions, and emits labels via IVFPQ.
+ */
+async function processCellsScimilarity(
+  cellNames: string[],
+  sampleGenes: string[],
+  inflationIndices: number[],
+  rawCountsData: RawCountsData,
+  labelIndices: Int16Array,
+  useUserIndex: boolean,
+  allPartitionIds: Uint16Array,
+  allPQCodes: Uint8Array[]
+): Promise<void> {
+  const { isSparse, data, indices, indptr } = rawCountsData;
+  const batchDataBuffer = new Float32Array(BATCH_SIZE * model!.genes.length);
+
+  for (let batchStart = 0; batchStart < cellNames.length; batchStart += BATCH_SIZE) {
+    const batchEnd = Math.min(batchStart + BATCH_SIZE, cellNames.length);
+    const currentBatchSize = batchEnd - batchStart;
+
+    const batchData =
+      currentBatchSize === BATCH_SIZE
+        ? batchDataBuffer
+        : batchDataBuffer.subarray(0, currentBatchSize * model!.genes.length);
+    batchData.fill(0);
+    fillBatchData(
+      batchStart,
+      currentBatchSize,
+      data,
+      indices,
+      indptr,
+      isSparse,
+      sampleGenes,
+      inflationIndices,
+      batchData
+    );
+
+    const inputTensor = new Tensor('float32', batchData, [
+      currentBatchSize,
+      model!.genes.length,
+    ]);
+    const embeddingResults = await model!.embeddingSession.run({ input: inputTensor });
+    const mappingResults = await model!.mappingSession.run({
+      input: embeddingResults.output,
+    });
+
+    const coordinates: number[][] = [];
+    for (let i = 0; i < mappingResults.output.dims[0]; i++) {
+      const startIndex = i * 2;
+      coordinates.push([
+        Number(mappingResults.output.data[startIndex]),
+        Number(mappingResults.output.data[startIndex + 1]),
+      ]);
+    }
+
+    const embeddingDim = embeddingResults.output.dims[1] as number;
+    const { labelIds, confidences, partitionIds, pqCodes } = await labelCells(
+      embeddingResults.output.data as Float32Array,
+      currentBatchSize,
+      embeddingDim,
+      labelIndices,
+      useUserIndex
+    );
+
+    allPartitionIds.set(partitionIds, batchStart);
+    for (let i = 0; i < currentBatchSize; i++) {
+      allPQCodes[batchStart + i] = pqCodes[i];
+    }
+
+    emitBatchUpdates(
+      cellNames,
+      batchStart,
+      currentBatchSize,
+      coordinates,
+      labelIds,
+      confidences
+    );
+
+    self.postMessage({
+      type: 'progress',
+      message: 'Labeling',
+      countFinished: batchEnd,
+      totalToProcess: cellNames.length,
+    } as ProgressMessage);
+
+    embeddingResults.output.dispose();
+    mappingResults.output.dispose();
+  }
+}
+
+/**
+ * Per-cell UCE-brain processing loop. Runs the full JS pipeline (normalize →
+ * weighted-sample → sentence → gather) then the transformer, one cell at a
+ * time. Per uce-edge empirical results, batching across cells hurts because
+ * transformer attention is O(L²); larger L per cell dominates over any
+ * per-step overhead from B=1 vs B>1.
+ *
+ * PUMAP and IVFPQ are still runnable on batched vectors — we accumulate a
+ * small flush buffer and call them every N cells.
+ */
+async function processCellsUCEBrain(
+  cellNames: string[],
+  sampleGenes: string[],
+  rawCountsData: RawCountsData,
+  labelIndices: Int16Array,
+  useUserIndex: boolean,
+  allPartitionIds: Uint16Array,
+  allPQCodes: Uint8Array[]
+): Promise<void> {
+  if (model!.uceBrain === null) {
+    throw new Error('UCE-brain processing requested but uceBrain model is null');
+  }
+  const { proteinEmbeddings, tableRows, embDim, geneDict, sentenceTokens } =
+    model!.uceBrain;
+  const { isSparse, data, indices, indptr } = rawCountsData;
+  const G = sampleGenes.length;
+
+  // Align sample genes to the UCE-brain protein table (per-h5ad, once).
+  const geneTable = buildGeneTable(sampleGenes, geneDict);
+  const nAligned = geneTable.symbols.length;
+  console.log(
+    `UCE-brain gene alignment: ${nAligned}/${sampleGenes.length} sample genes ` +
+      `matched to the protein table`
+  );
+  if (nAligned < 100) {
+    throw new Error(
+      `Only ${nAligned} of ${sampleGenes.length} sample genes match the UCE-brain ` +
+        `protein table. Check gene-symbol normalization.`
+    );
+  }
+
+  // Reusable per-cell buffers
+  const rawCell = new Float32Array(G);
+  const alignedCounts = new Float32Array(nAligned);
+
+  // Flush cadence for PUMAP + IVFPQ. 64 is a round number that keeps UI
+  // updates frequent while amortizing the batch session overhead.
+  const FLUSH = 64;
+  // embeddingDim for UCE-brain is the transformer output dim (typically 512).
+  // We discover this from the first inference and grow the buffer on-demand.
+  let flushBuffer: Float32Array | null = null;
+  let embeddingDim = -1;
+  let bufCount = 0;
+  const bufCellIndices = new Int32Array(FLUSH);
+
+  async function flushBatch(): Promise<void> {
+    if (bufCount === 0 || flushBuffer === null) return;
+    const batchView = flushBuffer.subarray(0, bufCount * embeddingDim);
+
+    // PUMAP
+    const mappingTensor = new Tensor('float32', batchView, [bufCount, embeddingDim]);
+    const mappingResults = await model!.mappingSession.run({ input: mappingTensor });
+    const coordinates: number[][] = [];
+    for (let i = 0; i < mappingResults.output.dims[0]; i++) {
+      const start = i * 2;
+      coordinates.push([
+        Number(mappingResults.output.data[start]),
+        Number(mappingResults.output.data[start + 1]),
+      ]);
+    }
+
+    // IVFPQ labeling (search one cell at a time, as in the SCimilarity path)
+    const { labelIds, confidences, partitionIds, pqCodes } = await labelCells(
+      batchView,
+      bufCount,
+      embeddingDim,
+      labelIndices,
+      useUserIndex
+    );
+
+    // Scatter artifacts back by original cell index
+    for (let i = 0; i < bufCount; i++) {
+      const cellIdx = bufCellIndices[i];
+      allPartitionIds[cellIdx] = partitionIds[i];
+      allPQCodes[cellIdx] = pqCodes[i];
+    }
+
+    // Emit labeled cells
+    const labeledBatch: CellUpdate[] = [];
+    for (let i = 0; i < bufCount; i++) {
+      if (labelIds[i] !== -1) {
+        const cellIdx = bufCellIndices[i];
+        labeledBatch.push({
+          cellId: cellNames[cellIdx],
+          x: coordinates[i][0],
+          y: coordinates[i][1],
+          labelId: labelIds[i],
+          confidence: confidences[i],
+        });
+      }
+    }
+    if (labeledBatch.length > 0) {
+      self.postMessage({
+        type: 'cell_batch_update',
+        cells: labeledBatch,
+      } as CellBatchUpdate);
+    }
+
+    mappingResults.output.dispose();
+    bufCount = 0;
+  }
+
+  // Main per-cell loop
+  for (let cellIdx = 0; cellIdx < cellNames.length; cellIdx++) {
+    // 1. Read raw counts into rawCell (G-wide, sample-gene order)
+    rawCell.fill(0);
+    if (isSparse) {
+      const [start, end] = indptr!.slice([[cellIdx, cellIdx + 2]]) as number[];
+      const values = data.slice([[start, end]]) as number[];
+      const valueIndices = indices!.slice([[start, end]]) as number[];
+      for (let j = 0; j < valueIndices.length; j++) {
+        rawCell[valueIndices[j]] = Number(values[j]);
+      }
+    } else {
+      let sampleExpression: number[];
+      if (data.shape.length === 1) {
+        sampleExpression = data.slice([[cellIdx * G, (cellIdx + 1) * G]]) as number[];
+      } else if (data.shape.length === 2) {
+        sampleExpression = data.slice([
+          [cellIdx, cellIdx + 1],
+          [0, G],
+        ]) as number[];
+      } else {
+        throw new Error('Unsupported data shape');
+      }
+      for (let j = 0; j < G; j++) rawCell[j] = Number(sampleExpression[j]);
+    }
+
+    // 2. Scatter to aligned-gene order (the order of geneTable.symbols)
+    for (let j = 0; j < nAligned; j++) {
+      alignedCounts[j] = rawCell[geneTable.sampleIndices[j]];
+    }
+
+    // 3. log1p + sum-to-1 normalize
+    const weights = normalizeCounts(alignedCounts);
+
+    // 4. Weighted sampling with replacement
+    const rng = new RNG(cellIdx);
+    const sampleIndices = weightedSample(weights, UCE_SAMPLE_SIZE, rng);
+
+    // 5. Chromosome order (uq sorted + shuffled by the same rng)
+    const chromOrder = chromOrderFromSample(sampleIndices, geneTable, rng);
+
+    // 6. Build sentence (tokens + attention mask, padded to UCE_PAD_LENGTH)
+    const { tokenIds, attentionMask } = buildSentence(
+      sampleIndices,
+      chromOrder,
+      geneTable,
+      sentenceTokens,
+      UCE_PAD_LENGTH
+    );
+
+    // 7. Dynamic seq_len: trim to valid prefix — padding is always at the tail
+    const validLen = validPrefixLength(attentionMask);
+    const idsSlice = tokenIds.subarray(0, validLen);
+    const maskSlice = attentionMask.slice(0, validLen);
+
+    // 8. Gather protein embeddings (1, validLen, embDim)
+    const src = gather(proteinEmbeddings, tableRows, embDim, idsSlice, 1, validLen);
+
+    // 9. Run transformer
+    const srcTensor = new Tensor('float32', src, [1, validLen, embDim]);
+    const maskTensor = new Tensor('float32', maskSlice, [1, validLen]);
+    const out = await model!.embeddingSession.run({
+      src: srcTensor,
+      mask: maskTensor,
+    });
+    const cellEmb = out.cell_embedding.data as Float32Array;
+
+    // Discover output dim on first run
+    if (embeddingDim === -1) {
+      embeddingDim = cellEmb.length;
+      flushBuffer = new Float32Array(FLUSH * embeddingDim);
+      console.log(`UCE-brain cell embedding dim: ${embeddingDim}`);
+    }
+
+    // Copy into flush buffer
+    flushBuffer!.set(cellEmb, bufCount * embeddingDim);
+    bufCellIndices[bufCount] = cellIdx;
+    bufCount++;
+
+    out.cell_embedding.dispose();
+    if (out.gene_embeddings) out.gene_embeddings.dispose();
+
+    if (bufCount >= FLUSH) {
+      await flushBatch();
+    }
+
+    // Progress every cell — per-cell time is ~100+ ms so this isn't chatty.
+    if ((cellIdx + 1) % 10 === 0 || cellIdx === cellNames.length - 1) {
+      self.postMessage({
+        type: 'progress',
+        message: 'Labeling',
+        countFinished: cellIdx + 1,
+        totalToProcess: cellNames.length,
+      } as ProgressMessage);
+    }
+  }
+
+  // Final flush
+  await flushBatch();
+}
+
+/**
+ * Emit a cell_batch_update for the current batch. Shared by SCimilarity +
+ * (indirectly) the UCE-brain flush path.
+ */
+function emitBatchUpdates(
+  cellNames: string[],
+  batchStart: number,
+  currentBatchSize: number,
+  coordinates: number[][],
+  labelIds: number[],
+  confidences: number[]
+): void {
+  const labeledBatch: CellUpdate[] = [];
+  for (let i = 0; i < currentBatchSize; i++) {
+    const cellIndex = batchStart + i;
+    if (labelIds[i] !== -1) {
+      labeledBatch.push({
+        cellId: cellNames[cellIndex],
+        x: coordinates[i][0],
+        y: coordinates[i][1],
+        labelId: labelIds[i],
+        confidence: confidences[i],
+      });
+    }
+  }
+  if (labeledBatch.length > 0) {
+    self.postMessage({
+      type: 'cell_batch_update',
+      cells: labeledBatch,
+    } as CellBatchUpdate);
+  }
+}
+
+/**
  * Calculate feature importance for a specific cell
  */
 async function calculateFeatureImportance(
@@ -1103,6 +1572,20 @@ async function calculateFeatureImportance(
       throw new Error(
         `Model or data not initialized (model: ${!!model}, data: ${!!currentRawData})`
       );
+    }
+
+    if (model.foundationModel !== 'scimilarity') {
+      // UCE-brain's sampler-based pipeline doesn't admit SCimilarity's
+      // gene-zeroing perturbation cleanly — zeroing a gene changes weighted
+      // sampling and chromosome ordering, so each perturbation is as
+      // expensive as a fresh inference pass. A separate importance method
+      // (e.g., attention-roll-out or gradient-based) is a follow-up spike.
+      currentFeatureImportanceCellId = null;
+      self.postMessage({
+        type: 'error',
+        error: `Feature importance is not available for ${model.foundationModel} models.`,
+      } as ErrorMessage);
+      return;
     }
 
     console.log(
