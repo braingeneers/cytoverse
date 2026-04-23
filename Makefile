@@ -64,7 +64,7 @@ sspsygene-ucebrain-embeddings:
 	uce-brain/.venv/bin/python uce-brain/scripts/embed_h5ad.py \
 	~/data/h5ad/adata_metaatlas_final_raw.h5ad \
 	data/references/sspsygene-ucebrain \
-	--max-cells $(or $(max_cells),100) \
+	--max-cells $(or $(max_cells),10000) \
 	--labels Dataset \
 	--labels Gestational_week \
 	--labels Class \

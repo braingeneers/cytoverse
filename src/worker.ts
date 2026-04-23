@@ -635,7 +635,8 @@ function getCellNames(annData: H5File): string[] {
     for (const key of indexKeys) {
       if (obsKeys.includes(key)) {
         try {
-          return (obsGroup.get(key) as H5DataSet).value as string[];
+          const names = readStringColumn(obsGroup, key);
+          if (names) return names;
         } catch {
           console.warn(`Failed to read cell names from obs/${key}`);
         }
@@ -667,6 +668,37 @@ function validateGeneSymbols(geneArray: string[]): boolean {
   const upperGenes = new Set(geneArray.map((g) => g.toUpperCase()));
   const matches = hugoMarkers.filter((marker) => upperGenes.has(marker)).length;
   return matches >= 2;
+}
+
+/**
+ * Read a var/obs column that may be either a flat string dataset or a
+ * categorical group `{categories, codes}` (AnnData's pandas.Categorical
+ * encoding, used by CELLxGENE exports and modern scanpy writes).
+ */
+function readStringColumn(
+  group: H5Group,
+  key: string
+): string[] | null {
+  const node = group.get(key);
+  if (node.type === 'Dataset') {
+    const v = (node as H5DataSet).value;
+    return Array.isArray(v) ? (v as string[]) : null;
+  }
+  if (node.type === 'Group') {
+    const sub = node as H5Group;
+    const subKeys = sub.keys();
+    if (subKeys.includes('categories') && subKeys.includes('codes')) {
+      const categories = (sub.get('categories') as H5DataSet).value as string[];
+      const codes = (sub.get('codes') as H5DataSet).value as ArrayLike<number | bigint>;
+      const out = new Array<string>(codes.length);
+      for (let i = 0; i < codes.length; i++) {
+        const c = Number(codes[i]);
+        out[i] = c >= 0 ? categories[c] : '';
+      }
+      return out;
+    }
+  }
+  return null;
 }
 
 /**
@@ -711,8 +743,8 @@ function getSampleGenes(annData: H5File): string[] {
     for (const key of geneKeys) {
       if (varKeys.includes(key)) {
         try {
-          const genes = (varGroup.get(key) as H5DataSet).value as string[];
-          if (validateGeneSymbols(genes)) {
+          const genes = readStringColumn(varGroup, key);
+          if (genes && validateGeneSymbols(genes)) {
             console.log(`Found gene names in var/${key}`);
             return genes.map((g) => g.toUpperCase());
           }
@@ -725,8 +757,8 @@ function getSampleGenes(annData: H5File): string[] {
     if (varKeys.length > 0) {
       try {
         const firstKey = varKeys[0];
-        const potentialGenes = (varGroup.get(firstKey) as H5DataSet).value as string[];
-        if (Array.isArray(potentialGenes) && validateGeneSymbols(potentialGenes)) {
+        const potentialGenes = readStringColumn(varGroup, firstKey);
+        if (potentialGenes && validateGeneSymbols(potentialGenes)) {
           console.warn('Falling back to using var index as gene names');
           return potentialGenes.map((g) => g.toUpperCase());
         }
@@ -883,6 +915,82 @@ function getRawCounts(annData: H5File): RawCountsData {
 }
 
 /**
+ * Read cell `cellIndex`'s raw expression into `outBuffer` at `outOffset`.
+ *
+ * Handles both sparse CSR (which may return BigInt int64 indptr/indices from
+ * h5wasm for CELLxGENE-style exports) and dense layouts through the same call
+ * site. The caller supplies a reusable buffer — no per-cell allocations.
+ *
+ * `indexMap`:
+ *   - `null` (identity): writes to `outBuffer[outOffset + sampleGeneIdx]`.
+ *   - otherwise: writes to `outBuffer[outOffset + indexMap[sampleGeneIdx]]`,
+ *     skipping entries where the mapped index is `-1`. This is SCimilarity's
+ *     inflation from sample-gene space to model-gene space.
+ *
+ * The caller is responsible for zeroing `outBuffer` before reuse if needed
+ * (only the sparse/inflated path skips slots; identity-dense fills every slot).
+ */
+function readCellInto(
+  cellIndex: number,
+  rawCountsData: RawCountsData,
+  numSampleGenes: number,
+  outBuffer: Float32Array,
+  outOffset: number,
+  indexMap: number[] | null
+): void {
+  const { isSparse, data, indices, indptr } = rawCountsData;
+
+  if (isSparse) {
+    const ptr = indptr!.slice([[cellIndex, cellIndex + 2]]) as ArrayLike<number | bigint>;
+    const start = Number(ptr[0]);
+    const end = Number(ptr[1]);
+    const values = data.slice([[start, end]]) as ArrayLike<number | bigint>;
+    const valueIndices = indices!.slice([[start, end]]) as ArrayLike<number | bigint>;
+
+    if (indexMap === null) {
+      for (let j = 0; j < valueIndices.length; j++) {
+        outBuffer[outOffset + Number(valueIndices[j])] = Number(values[j]);
+      }
+    } else {
+      for (let j = 0; j < valueIndices.length; j++) {
+        const mapped = indexMap[Number(valueIndices[j])];
+        if (mapped !== -1) {
+          outBuffer[outOffset + mapped] = Number(values[j]);
+        }
+      }
+    }
+    return;
+  }
+
+  let row: ArrayLike<number | bigint>;
+  if (data.shape.length === 1) {
+    row = data.slice([
+      [cellIndex * numSampleGenes, (cellIndex + 1) * numSampleGenes],
+    ]) as ArrayLike<number | bigint>;
+  } else if (data.shape.length === 2) {
+    row = data.slice([
+      [cellIndex, cellIndex + 1],
+      [0, numSampleGenes],
+    ]) as ArrayLike<number | bigint>;
+  } else {
+    throw new Error('Unsupported data shape');
+  }
+
+  if (indexMap === null) {
+    for (let j = 0; j < numSampleGenes; j++) {
+      outBuffer[outOffset + j] = Number(row[j]);
+    }
+  } else {
+    for (let j = 0; j < numSampleGenes; j++) {
+      const mapped = indexMap[j];
+      if (mapped !== -1) {
+        outBuffer[outOffset + mapped] = Number(row[j]);
+      }
+    }
+  }
+}
+
+/**
  * Precompute inflation indices for gene mapping
  */
 function precomputeInflationIndices(
@@ -904,50 +1012,20 @@ function precomputeInflationIndices(
 function fillBatchData(
   batchStart: number,
   currentBatchSize: number,
-  data: H5DataSet,
-  indices: H5DataSet | null,
-  indptr: H5DataSet | null,
-  isSparse: boolean,
+  rawCountsData: RawCountsData,
   sampleGenes: string[],
   inflationIndices: number[],
   inflatedBatchData: Float32Array
 ): void {
   for (let batchSlot = 0; batchSlot < currentBatchSize; batchSlot++) {
-    const cellIndex = batchStart + batchSlot;
-    const batchOffset = batchSlot * model!.genes.length;
-
-    if (isSparse) {
-      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]) as number[];
-      const values = data.slice([[start, end]]) as number[];
-      const valueIndices = indices!.slice([[start, end]]) as number[];
-
-      for (let j = 0; j < valueIndices.length; j++) {
-        const sampleIndex = inflationIndices[valueIndices[j]];
-        if (sampleIndex !== -1) {
-          inflatedBatchData[batchOffset + sampleIndex] = Number(values[j]);
-        }
-      }
-    } else {
-      let sampleExpression: number[] | null = null;
-      if (data.shape.length === 1) {
-        sampleExpression = data.slice([
-          [cellIndex * sampleGenes.length, (cellIndex + 1) * sampleGenes.length],
-        ]) as number[];
-      } else if (data.shape.length === 2) {
-        sampleExpression = data.slice([
-          [cellIndex, cellIndex + 1],
-          [0, sampleGenes.length],
-        ]) as number[];
-      } else {
-        throw new Error('Unsupported data shape');
-      }
-      for (let geneIndex = 0; geneIndex < sampleGenes.length; geneIndex++) {
-        const sampleIndex = inflationIndices[geneIndex];
-        if (sampleIndex !== -1) {
-          inflatedBatchData[batchOffset + sampleIndex] = sampleExpression[geneIndex];
-        }
-      }
-    }
+    readCellInto(
+      batchStart + batchSlot,
+      rawCountsData,
+      sampleGenes.length,
+      inflatedBatchData,
+      batchSlot * model!.genes.length,
+      inflationIndices
+    );
   }
 }
 
@@ -1232,7 +1310,6 @@ async function processCellsScimilarity(
   allPartitionIds: Uint16Array,
   allPQCodes: Uint8Array[]
 ): Promise<void> {
-  const { isSparse, data, indices, indptr } = rawCountsData;
   const batchDataBuffer = new Float32Array(BATCH_SIZE * model!.genes.length);
 
   for (let batchStart = 0; batchStart < cellNames.length; batchStart += BATCH_SIZE) {
@@ -1247,10 +1324,7 @@ async function processCellsScimilarity(
     fillBatchData(
       batchStart,
       currentBatchSize,
-      data,
-      indices,
-      indptr,
-      isSparse,
+      rawCountsData,
       sampleGenes,
       inflationIndices,
       batchData
@@ -1333,7 +1407,6 @@ async function processCellsUCEBrain(
   }
   const { proteinEmbeddings, tableRows, embDim, geneDict, sentenceTokens } =
     model!.uceBrain;
-  const { isSparse, data, indices, indptr } = rawCountsData;
   const G = sampleGenes.length;
 
   // Align sample genes to the UCE-brain protein table (per-h5ad, once).
@@ -1423,29 +1496,10 @@ async function processCellsUCEBrain(
 
   // Main per-cell loop
   for (let cellIdx = 0; cellIdx < cellNames.length; cellIdx++) {
-    // 1. Read raw counts into rawCell (G-wide, sample-gene order)
-    rawCell.fill(0);
-    if (isSparse) {
-      const [start, end] = indptr!.slice([[cellIdx, cellIdx + 2]]) as number[];
-      const values = data.slice([[start, end]]) as number[];
-      const valueIndices = indices!.slice([[start, end]]) as number[];
-      for (let j = 0; j < valueIndices.length; j++) {
-        rawCell[valueIndices[j]] = Number(values[j]);
-      }
-    } else {
-      let sampleExpression: number[];
-      if (data.shape.length === 1) {
-        sampleExpression = data.slice([[cellIdx * G, (cellIdx + 1) * G]]) as number[];
-      } else if (data.shape.length === 2) {
-        sampleExpression = data.slice([
-          [cellIdx, cellIdx + 1],
-          [0, G],
-        ]) as number[];
-      } else {
-        throw new Error('Unsupported data shape');
-      }
-      for (let j = 0; j < G; j++) rawCell[j] = Number(sampleExpression[j]);
-    }
+    // 1. Read raw counts into rawCell (G-wide, sample-gene order). Sparse
+    // path skips unset slots, so zero first; dense fills every slot.
+    if (rawCountsData.isSparse) rawCell.fill(0);
+    readCellInto(cellIdx, rawCountsData, G, rawCell, 0, null);
 
     // 2. Scatter to aligned-gene order (the order of geneTable.symbols)
     for (let j = 0; j < nAligned; j++) {
@@ -1594,44 +1648,14 @@ async function calculateFeatureImportance(
 
     // Extract cell expression data
     const cellExpression = new Float32Array(model.genes.length);
-    const { data, indices, indptr, isSparse, inflationIndices } = currentRawData;
-
-    if (isSparse) {
-      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]) as number[];
-      const values = data.slice([[start, end]]) as number[];
-      const valueIndices = indices!.slice([[start, end]]) as number[];
-
-      for (let j = 0; j < valueIndices.length; j++) {
-        const sampleIndex = inflationIndices[valueIndices[j]];
-        if (sampleIndex !== -1) {
-          cellExpression[sampleIndex] = Number(values[j]);
-        }
-      }
-    } else {
-      let sampleExpression: number[] | null = null;
-      if (data.shape.length === 1) {
-        sampleExpression = data.slice([
-          [
-            cellIndex * currentRawData.sampleGenes.length,
-            (cellIndex + 1) * currentRawData.sampleGenes.length,
-          ],
-        ]) as number[];
-      } else if (data.shape.length === 2) {
-        sampleExpression = data.slice([
-          [cellIndex, cellIndex + 1],
-          [0, currentRawData.sampleGenes.length],
-        ]) as number[];
-      } else {
-        throw new Error('Unsupported data shape');
-      }
-
-      for (let j = 0; j < inflationIndices.length; j++) {
-        const sampleIndex = inflationIndices[j];
-        if (sampleIndex !== -1) {
-          cellExpression[sampleIndex] = Number(sampleExpression[j]);
-        }
-      }
-    }
+    readCellInto(
+      cellIndex,
+      currentRawData,
+      currentRawData.sampleGenes.length,
+      cellExpression,
+      0,
+      currentRawData.inflationIndices
+    );
 
     // Get baseline embedding
     const baselineTensor = new Tensor('float32', cellExpression, [

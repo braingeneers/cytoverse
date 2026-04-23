@@ -108,14 +108,16 @@ def train(
                     f"Adjusted selection size: {adjusted_num_vectors} vectors from {len(valid_indices)} valid vectors"
                 )
 
-                # Use train_test_split for stratified sampling on valid indices
-                selected_valid_indices, _ = train_test_split(
-                    valid_indices,
-                    test_size=1.0 - (adjusted_num_vectors / len(valid_indices)),
-                    stratify=valid_stratify_values,
-                    random_state=42,
-                )
-                selected_indices = selected_valid_indices
+                if adjusted_num_vectors == len(valid_indices):
+                    selected_indices = valid_indices
+                else:
+                    selected_valid_indices, _ = train_test_split(
+                        valid_indices,
+                        test_size=1.0 - (adjusted_num_vectors / len(valid_indices)),
+                        stratify=valid_stratify_values,
+                        random_state=42,
+                    )
+                    selected_indices = selected_valid_indices
             else:
                 # Clamp num_vectors to available vectors
                 if num_vectors >= vectors.shape[0]:
