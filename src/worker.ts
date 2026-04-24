@@ -136,6 +136,20 @@ interface ErrorMessage {
   error: string;
 }
 
+interface PerfCounters {
+  /** h5ad reading: getCellNames, getSampleGenes, getRawCounts, per-cell readCellInto. */
+  readMs: number;
+  /** Per-cell preprocessing. Zero for SCimilarity (folded into embedding). */
+  preprocessMs: number;
+  /** Foundation model inference: model.onnx (SCimilarity) or transformer.onnx (UCE-brain). */
+  embeddingMs: number;
+  /** IVFPQ search + consensus labeling. */
+  labelingMs: number;
+  /** PUMAP inference. */
+  plottingMs: number;
+  cellCount: number;
+}
+
 interface FinishedMessage {
   type: 'finished';
   datasetLabel: string;
@@ -143,6 +157,7 @@ interface FinishedMessage {
   cellNames: string[];
   partitionIds: Uint16Array;
   pqCodes: Uint8Array[];
+  perf: PerfCounters;
 }
 
 interface FeatureImportanceRequestMessage {
@@ -167,6 +182,33 @@ interface FeatureImportanceResultMessage {
     expression: number;
     index: number;
   }>;
+}
+
+function newPerfCounters(): PerfCounters {
+  return {
+    readMs: 0,
+    preprocessMs: 0,
+    embeddingMs: 0,
+    labelingMs: 0,
+    plottingMs: 0,
+    cellCount: 0,
+  };
+}
+
+function logPerfSummary(perf: PerfCounters): void {
+  const total =
+    perf.readMs + perf.preprocessMs + perf.embeddingMs + perf.labelingMs + perf.plottingMs;
+  const pct = (v: number) => (total > 0 ? ((v / total) * 100).toFixed(1) : '0.0');
+  const perCell = (v: number) =>
+    perf.cellCount > 0 ? (v / perf.cellCount).toFixed(2) : '0.00';
+  console.log(
+    `Perf (${perf.cellCount} cells, ${(total / 1000).toFixed(2)}s total):\n` +
+      `  read:       ${perf.readMs.toFixed(0)} ms (${pct(perf.readMs)}%, ${perCell(perf.readMs)} ms/cell)\n` +
+      `  preprocess: ${perf.preprocessMs.toFixed(0)} ms (${pct(perf.preprocessMs)}%, ${perCell(perf.preprocessMs)} ms/cell)\n` +
+      `  embedding:  ${perf.embeddingMs.toFixed(0)} ms (${pct(perf.embeddingMs)}%, ${perCell(perf.embeddingMs)} ms/cell)\n` +
+      `  labeling:   ${perf.labelingMs.toFixed(0)} ms (${pct(perf.labelingMs)}%, ${perCell(perf.labelingMs)} ms/cell)\n` +
+      `  plotting:   ${perf.plottingMs.toFixed(0)} ms (${pct(perf.plottingMs)}%, ${perCell(perf.plottingMs)} ms/cell)`
+  );
 }
 
 // Global state
@@ -1037,7 +1079,8 @@ async function labelCells(
   batchSize: number,
   embeddingDim: number,
   labelIndices: Int16Array,
-  useUserIndex: boolean
+  useUserIndex: boolean,
+  perf: PerfCounters
 ): Promise<{
   labelIds: number[];
   confidences: number[];
@@ -1056,7 +1099,9 @@ async function labelCells(
       const queryVector = embeddings.subarray(offset, offset + embeddingDim);
 
       // Search using IVFPQ with optional artifact retention
+      const tSearch = performance.now();
       const searchResults: SearchResults = await model!.ivfpq.search(queryVector);
+      perf.labelingMs += performance.now() - tSearch;
 
       // Compute consensus label
       let consensusLabelId = -1;
@@ -1159,10 +1204,14 @@ async function start(
     // Store globally for feature importance
     currentH5File = annData;
 
+    const perf = newPerfCounters();
+
     // Extract metadata
     let cellNames: string[];
     try {
+      const tRead = performance.now();
       cellNames = getCellNames(annData);
+      perf.readMs += performance.now() - tRead;
       currentCellNames = cellNames;
       console.log(`Found ${cellNames.length} cells`);
     } catch (error) {
@@ -1175,7 +1224,9 @@ async function start(
 
     let sampleGenes: string[];
     try {
+      const tRead = performance.now();
       sampleGenes = getSampleGenes(annData);
+      perf.readMs += performance.now() - tRead;
       console.log(`Found ${sampleGenes.length} genes`);
     } catch (error) {
       throw new Error(
@@ -1188,7 +1239,9 @@ async function start(
     // Extract raw counts
     let rawCountsData: RawCountsData;
     try {
+      const tRead = performance.now();
       rawCountsData = getRawCounts(annData);
+      perf.readMs += performance.now() - tRead;
       console.log(`Found expression data (sparse: ${rawCountsData.isSparse})`);
     } catch (error) {
       throw new Error(
@@ -1247,7 +1300,8 @@ async function start(
         labelIndices,
         useUserIndex,
         allPartitionIds,
-        allPQCodes
+        allPQCodes,
+        perf
       );
     } else if (model.foundationModel === 'uce-brain') {
       await processCellsUCEBrain(
@@ -1257,13 +1311,17 @@ async function start(
         labelIndices,
         useUserIndex,
         allPartitionIds,
-        allPQCodes
+        allPQCodes,
+        perf
       );
     } else {
       throw new Error(
         `Unknown foundation model at processing time: ${model.foundationModel}`
       );
     }
+
+    perf.cellCount = cellNames.length;
+    logPerfSummary(perf);
 
     // Clean up
     // Keep annData open for feature importance calculations
@@ -1277,6 +1335,7 @@ async function start(
       cellNames: cellNames,
       partitionIds: allPartitionIds,
       pqCodes: allPQCodes,
+      perf,
     };
 
     self.postMessage(finishedMessage);
@@ -1308,7 +1367,8 @@ async function processCellsScimilarity(
   labelIndices: Int16Array,
   useUserIndex: boolean,
   allPartitionIds: Uint16Array,
-  allPQCodes: Uint8Array[]
+  allPQCodes: Uint8Array[],
+  perf: PerfCounters
 ): Promise<void> {
   const batchDataBuffer = new Float32Array(BATCH_SIZE * model!.genes.length);
 
@@ -1321,6 +1381,7 @@ async function processCellsScimilarity(
         ? batchDataBuffer
         : batchDataBuffer.subarray(0, currentBatchSize * model!.genes.length);
     batchData.fill(0);
+    const tRead = performance.now();
     fillBatchData(
       batchStart,
       currentBatchSize,
@@ -1329,15 +1390,21 @@ async function processCellsScimilarity(
       inflationIndices,
       batchData
     );
+    perf.readMs += performance.now() - tRead;
 
     const inputTensor = new Tensor('float32', batchData, [
       currentBatchSize,
       model!.genes.length,
     ]);
+    const tEmbed = performance.now();
     const embeddingResults = await model!.embeddingSession.run({ input: inputTensor });
+    perf.embeddingMs += performance.now() - tEmbed;
+
+    const tPlot = performance.now();
     const mappingResults = await model!.mappingSession.run({
       input: embeddingResults.output,
     });
+    perf.plottingMs += performance.now() - tPlot;
 
     const coordinates: number[][] = [];
     for (let i = 0; i < mappingResults.output.dims[0]; i++) {
@@ -1354,7 +1421,8 @@ async function processCellsScimilarity(
       currentBatchSize,
       embeddingDim,
       labelIndices,
-      useUserIndex
+      useUserIndex,
+      perf
     );
 
     allPartitionIds.set(partitionIds, batchStart);
@@ -1400,7 +1468,8 @@ async function processCellsUCEBrain(
   labelIndices: Int16Array,
   useUserIndex: boolean,
   allPartitionIds: Uint16Array,
-  allPQCodes: Uint8Array[]
+  allPQCodes: Uint8Array[],
+  perf: PerfCounters
 ): Promise<void> {
   if (model!.uceBrain === null) {
     throw new Error('UCE-brain processing requested but uceBrain model is null');
@@ -1443,7 +1512,9 @@ async function processCellsUCEBrain(
 
     // PUMAP
     const mappingTensor = new Tensor('float32', batchView, [bufCount, embeddingDim]);
+    const tPlot = performance.now();
     const mappingResults = await model!.mappingSession.run({ input: mappingTensor });
+    perf.plottingMs += performance.now() - tPlot;
     const coordinates: number[][] = [];
     for (let i = 0; i < mappingResults.output.dims[0]; i++) {
       const start = i * 2;
@@ -1459,7 +1530,8 @@ async function processCellsUCEBrain(
       bufCount,
       embeddingDim,
       labelIndices,
-      useUserIndex
+      useUserIndex,
+      perf
     );
 
     // Scatter artifacts back by original cell index
@@ -1498,9 +1570,12 @@ async function processCellsUCEBrain(
   for (let cellIdx = 0; cellIdx < cellNames.length; cellIdx++) {
     // 1. Read raw counts into rawCell (G-wide, sample-gene order). Sparse
     // path skips unset slots, so zero first; dense fills every slot.
+    const tRead = performance.now();
     if (rawCountsData.isSparse) rawCell.fill(0);
     readCellInto(cellIdx, rawCountsData, G, rawCell, 0, null);
+    perf.readMs += performance.now() - tRead;
 
+    const tPre = performance.now();
     // 2. Scatter to aligned-gene order (the order of geneTable.symbols)
     for (let j = 0; j < nAligned; j++) {
       alignedCounts[j] = rawCell[geneTable.sampleIndices[j]];
@@ -1532,14 +1607,17 @@ async function processCellsUCEBrain(
 
     // 8. Gather protein embeddings (1, validLen, embDim)
     const src = gather(proteinEmbeddings, tableRows, embDim, idsSlice, 1, validLen);
+    perf.preprocessMs += performance.now() - tPre;
 
     // 9. Run transformer
     const srcTensor = new Tensor('float32', src, [1, validLen, embDim]);
     const maskTensor = new Tensor('float32', maskSlice, [1, validLen]);
+    const tEmbed = performance.now();
     const out = await model!.embeddingSession.run({
       src: srcTensor,
       mask: maskTensor,
     });
+    perf.embeddingMs += performance.now() - tEmbed;
     const cellEmb = out.cell_embedding.data as Float32Array;
 
     // Discover output dim on first run
