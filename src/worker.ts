@@ -400,7 +400,8 @@ function getCellNames(annData: H5File): string[] {
     for (const key of indexKeys) {
       if (obsKeys.includes(key)) {
         try {
-          return (obsGroup.get(key) as H5DataSet).value as string[];
+          const names = readStringColumn(obsGroup, key);
+          if (names) return names;
         } catch {
           console.warn(`Failed to read cell names from obs/${key}`);
         }
@@ -432,6 +433,36 @@ function validateGeneSymbols(geneArray: string[]): boolean {
   const upperGenes = new Set(geneArray.map((g) => g.toUpperCase()));
   const matches = hugoMarkers.filter((marker) => upperGenes.has(marker)).length;
   return matches >= 2;
+}
+
+/**
+ * Read a var/obs column that may be either a flat string dataset or a
+ * categorical group `{categories, codes}` (AnnData's pandas.Categorical
+ * encoding, used by CELLxGENE exports and modern scanpy writes).
+ */
+function readStringColumn(group: H5Group, key: string): string[] | null {
+  const node = group.get(key);
+  if (node.type === 'Dataset') {
+    const v = (node as H5DataSet).value;
+    return Array.isArray(v) ? (v as string[]) : null;
+  }
+  if (node.type === 'Group') {
+    const sub = node as H5Group;
+    const subKeys = sub.keys();
+    if (subKeys.includes('categories') && subKeys.includes('codes')) {
+      const categories = (sub.get('categories') as H5DataSet).value as string[];
+      const codes = (sub.get('codes') as H5DataSet).value as ArrayLike<
+        number | bigint
+      >;
+      const out = new Array<string>(codes.length);
+      for (let i = 0; i < codes.length; i++) {
+        const c = Number(codes[i]);
+        out[i] = c >= 0 ? categories[c] : '';
+      }
+      return out;
+    }
+  }
+  return null;
 }
 
 /**
@@ -476,8 +507,8 @@ function getSampleGenes(annData: H5File): string[] {
     for (const key of geneKeys) {
       if (varKeys.includes(key)) {
         try {
-          const genes = (varGroup.get(key) as H5DataSet).value as string[];
-          if (validateGeneSymbols(genes)) {
+          const genes = readStringColumn(varGroup, key);
+          if (genes && validateGeneSymbols(genes)) {
             console.log(`Found gene names in var/${key}`);
             return genes.map((g) => g.toUpperCase());
           }
@@ -490,8 +521,8 @@ function getSampleGenes(annData: H5File): string[] {
     if (varKeys.length > 0) {
       try {
         const firstKey = varKeys[0];
-        const potentialGenes = (varGroup.get(firstKey) as H5DataSet).value as string[];
-        if (Array.isArray(potentialGenes) && validateGeneSymbols(potentialGenes)) {
+        const potentialGenes = readStringColumn(varGroup, firstKey);
+        if (potentialGenes && validateGeneSymbols(potentialGenes)) {
           console.warn('Falling back to using var index as gene names');
           return potentialGenes.map((g) => g.toUpperCase());
         }
@@ -682,34 +713,42 @@ function fillBatchData(
     const batchOffset = batchSlot * model!.genes.length;
 
     if (isSparse) {
-      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]) as number[];
-      const values = data.slice([[start, end]]) as number[];
-      const valueIndices = indices!.slice([[start, end]]) as number[];
+      const ptr = indptr!.slice([[cellIndex, cellIndex + 2]]) as ArrayLike<
+        number | bigint
+      >;
+      const start = Number(ptr[0]);
+      const end = Number(ptr[1]);
+      const values = data.slice([[start, end]]) as ArrayLike<number | bigint>;
+      const valueIndices = indices!.slice([[start, end]]) as ArrayLike<
+        number | bigint
+      >;
 
       for (let j = 0; j < valueIndices.length; j++) {
-        const sampleIndex = inflationIndices[valueIndices[j]];
+        const sampleIndex = inflationIndices[Number(valueIndices[j])];
         if (sampleIndex !== -1) {
           inflatedBatchData[batchOffset + sampleIndex] = Number(values[j]);
         }
       }
     } else {
-      let sampleExpression: number[] | null = null;
+      let sampleExpression: ArrayLike<number | bigint> | null = null;
       if (data.shape.length === 1) {
         sampleExpression = data.slice([
           [cellIndex * sampleGenes.length, (cellIndex + 1) * sampleGenes.length],
-        ]) as number[];
+        ]) as ArrayLike<number | bigint>;
       } else if (data.shape.length === 2) {
         sampleExpression = data.slice([
           [cellIndex, cellIndex + 1],
           [0, sampleGenes.length],
-        ]) as number[];
+        ]) as ArrayLike<number | bigint>;
       } else {
         throw new Error('Unsupported data shape');
       }
       for (let geneIndex = 0; geneIndex < sampleGenes.length; geneIndex++) {
         const sampleIndex = inflationIndices[geneIndex];
         if (sampleIndex !== -1) {
-          inflatedBatchData[batchOffset + sampleIndex] = sampleExpression[geneIndex];
+          inflatedBatchData[batchOffset + sampleIndex] = Number(
+            sampleExpression[geneIndex]
+          );
         }
       }
     }
@@ -1079,30 +1118,36 @@ async function calculateFeatureImportance(
     const { data, indices, indptr, isSparse, inflationIndices } = currentRawData;
 
     if (isSparse) {
-      const [start, end] = indptr!.slice([[cellIndex, cellIndex + 2]]) as number[];
-      const values = data.slice([[start, end]]) as number[];
-      const valueIndices = indices!.slice([[start, end]]) as number[];
+      const ptr = indptr!.slice([[cellIndex, cellIndex + 2]]) as ArrayLike<
+        number | bigint
+      >;
+      const start = Number(ptr[0]);
+      const end = Number(ptr[1]);
+      const values = data.slice([[start, end]]) as ArrayLike<number | bigint>;
+      const valueIndices = indices!.slice([[start, end]]) as ArrayLike<
+        number | bigint
+      >;
 
       for (let j = 0; j < valueIndices.length; j++) {
-        const sampleIndex = inflationIndices[valueIndices[j]];
+        const sampleIndex = inflationIndices[Number(valueIndices[j])];
         if (sampleIndex !== -1) {
           cellExpression[sampleIndex] = Number(values[j]);
         }
       }
     } else {
-      let sampleExpression: number[] | null = null;
+      let sampleExpression: ArrayLike<number | bigint> | null = null;
       if (data.shape.length === 1) {
         sampleExpression = data.slice([
           [
             cellIndex * currentRawData.sampleGenes.length,
             (cellIndex + 1) * currentRawData.sampleGenes.length,
           ],
-        ]) as number[];
+        ]) as ArrayLike<number | bigint>;
       } else if (data.shape.length === 2) {
         sampleExpression = data.slice([
           [cellIndex, cellIndex + 1],
           [0, currentRawData.sampleGenes.length],
-        ]) as number[];
+        ]) as ArrayLike<number | bigint>;
       } else {
         throw new Error('Unsupported data shape');
       }
