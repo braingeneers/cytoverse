@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3proxy-pod
+  labels:
+    app: s3proxy
+spec:
+  containers:
+    - name: s3proxy
+      image: andrewgaul/s3proxy
+      env:
+        - name: S3PROXY_IDENTITY
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: access-key-id
+        - name: S3PROXY_CREDENTIAL
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: secret-access-key
+        - name: JCLOUDS_PROVIDER
+          value: 'filesystem'
+        - name: JCLOUDS_FILESYSTEM_BASEDIR
+          value: '/data'
+        - name: S3PROXY_ENDPOINT
+          value: 'http://0.0.0.0:9000'
+        - name: S3PROXY_AUTHORIZATION
+          value: 'aws-v2-or-v4'
+      ports:
+        - containerPort: 9000
+          name: api
+      volumeMounts:
+        - mountPath: /data
+          name: local-files
+  volumes:
+    - name: local-files
+      hostPath:
+        path: /Users/rcurrie/data
+        type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3proxy-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: api
+  selector:
+    app: s3proxy

@@ -1,0 +1,7 @@
+.venv
+__pycache__
+*.pyc
+artifacts
+notebooks
+uce-brain/notebooks
+data/models/protein_embeddings

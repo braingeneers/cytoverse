@@ -1,0 +1,75 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: embed-h5ad
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: work
+          emptyDir: {}
+      containers:
+        - name: embed
+          image: cytoverse-uce-brain:local
+          imagePullPolicy: Never
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: { name: s3-credentials, key: access-key-id }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: s3-credentials, key: secret-access-key }
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://s3proxy-service:9000
+            - name: S3_H5AD_URI
+              value: s3://cytoverse.uce/allen-celltypes+human-cortex+m1-100.h5ad
+            # Space-separated list of obs columns to export as labels (optional)
+            - name: LABELS
+              value: ""
+            # Optional cap on cells (empty = all)
+            - name: MAX_CELLS
+              value: ""
+          volumeMounts:
+            - { name: work, mountPath: /work }
+          workingDir: /app
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              src="${S3_H5AD_URI}"
+              base="$(basename "${src}")"
+              stem="${base%.h5ad}"
+              bucket_prefix="$(dirname "${src}")"
+              out_uri="${bucket_prefix}/${stem}-embeddings"
+
+              echo "[embed] input : ${src}"
+              echo "[embed] output: ${out_uri}"
+
+              mkdir -p /work/in /work/out
+              aws s3 cp "${src}" "/work/in/${base}"
+
+              label_args=()
+              for l in ${LABELS}; do
+                label_args+=(--labels "${l}")
+              done
+              maxcells_args=()
+              if [ -n "${MAX_CELLS}" ]; then
+                maxcells_args+=(--max-cells "${MAX_CELLS}")
+              fi
+
+              python /app/scripts/embed_h5ad.py \
+                "/work/in/${base}" \
+                /work/out \
+                --device cpu \
+                "${label_args[@]}" \
+                "${maxcells_args[@]}"
+
+              ls -lh /work/out
+              aws s3 cp /work/out/ "${out_uri}/" --recursive
+              echo "[embed] done -> ${out_uri}/"

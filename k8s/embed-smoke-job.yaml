@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: embed-smoke
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: smoke
+          image: amazon/aws-cli:latest
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: { name: s3-credentials, key: access-key-id }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: s3-credentials, key: secret-access-key }
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://s3proxy-service:9000
+            - name: S3_H5AD_URI
+              value: s3://cytoverse.uce/allen-celltypes+human-cortex+m1-100.h5ad
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "[smoke] listing bucket root"
+              aws s3 ls s3://cytoverse.uce/ | head
+              echo "[smoke] copying ${S3_H5AD_URI} -> /tmp/input.h5ad"
+              aws s3 cp "${S3_H5AD_URI}" /tmp/input.h5ad
+              ls -lh /tmp/input.h5ad
+              echo "[smoke] round-tripping to s3://cytoverse.uce/_smoke-rt.h5ad"
+              aws s3 cp /tmp/input.h5ad s3://cytoverse.uce/_smoke-rt.h5ad
+              aws s3 ls s3://cytoverse.uce/_smoke-rt.h5ad
+              aws s3 rm s3://cytoverse.uce/_smoke-rt.h5ad
+              echo "[smoke] OK"
