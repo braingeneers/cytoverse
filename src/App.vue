@@ -35,6 +35,9 @@
             <v-btn variant="text" icon size="small" @click="helpModalOpen = true">
               <v-icon>mdi-help-circle</v-icon>
             </v-btn>
+            <v-btn variant="text" icon size="small" @click="openPaper">
+              <v-icon>mdi-newspaper</v-icon>
+            </v-btn>
             <v-btn variant="text" icon size="small" @click="openGithub">
               <v-icon>mdi-github</v-icon>
             </v-btn>
@@ -365,6 +368,7 @@
                 <li>Choose CPU or GPU processing (if available)</li>
                 <li>Click Start to begin analysis</li>
                 <li>Optionally create a user reference and share</li>
+                <li>Optionally click on labeled cells for gene/feature importance</li>
               </ol>
               <p>
                 The tool will display your cells in real-time as they are processed and
@@ -1442,6 +1446,10 @@ const openFileDialog = () => {
 
 const openGithub = () => {
   window.open('https://github.com/braingeneers/cytoverse', '_blank');
+};
+
+const openPaper = () => {
+  window.open('https://doi.org/10.64898/2026.01.29.702554', '_blank');
 };
 
 const updateIsMobile = () => {
