@@ -107,7 +107,10 @@ interface FinishedMessage {
   totalProcessed: number;
   cellNames: string[];
   partitionIds: Uint16Array;
-  pqCodes: Uint8Array[];
+  // Flat PQ codes: cellCount * pqCodeLength bytes (was Uint8Array[], one small array per cell —
+  // the per-array object overhead dominated retained memory at scale).
+  pqCodes: Uint8Array;
+  pqCodeLength: number;
 }
 
 interface FeatureImportanceRequestMessage {
@@ -954,7 +957,9 @@ async function start(
     } as StatusMessage);
 
     const allPartitionIds: Uint16Array = new Uint16Array(cellNames.length);
-    const allPQCodes: Uint8Array[] = new Array(cellNames.length);
+    // Flat PQ code store, allocated lazily once the code length is known from the first code.
+    let allPQCodes: Uint8Array | null = null;
+    let pqCodeLength = 0;
 
     // Reusable batch data buffer (max size)
     const batchDataBuffer = new Float32Array(BATCH_SIZE * model.genes.length);
@@ -1018,10 +1023,16 @@ async function start(
         useUserIndex
       );
 
-      // Retain artifacts for user index
+      // Retain artifacts for user index (flat PQ store; skip cells with no code)
       allPartitionIds.set(partitionIds, batchStart);
       for (let i = 0; i < currentBatchSize; i++) {
-        allPQCodes[batchStart + i] = pqCodes[i];
+        const code = pqCodes[i];
+        if (!code) continue;
+        if (allPQCodes === null) {
+          pqCodeLength = code.length;
+          allPQCodes = new Uint8Array(cellNames.length * pqCodeLength);
+        }
+        allPQCodes.set(code, (batchStart + i) * pqCodeLength);
       }
 
       // Send labeled updates as batch
@@ -1070,7 +1081,8 @@ async function start(
       totalProcessed: cellNames.length,
       cellNames: cellNames,
       partitionIds: allPartitionIds,
-      pqCodes: allPQCodes,
+      pqCodes: allPQCodes ?? new Uint8Array(0),
+      pqCodeLength,
     };
 
     self.postMessage(finishedMessage);

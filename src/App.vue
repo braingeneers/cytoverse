@@ -554,8 +554,9 @@ const indexToDelete = ref<{ id: string; name: string } | null>(null);
 // User Index state
 const canCreateIndex = ref(false);
 const currentUserIndexArtifacts = ref<{
-  partitionIds: Int16Array;
-  pqCodes: Uint8Array[];
+  partitionIds: Uint16Array;
+  pqCodes: Uint8Array; // flat, cellCount * pqCodeLength
+  pqCodeLength: number;
 } | null>(null);
 
 // Normalization parameters from metadata
@@ -629,6 +630,22 @@ const normalizeCoordinates = (x: number, y: number) => {
   return [normalizedX, normalizedY];
 };
 
+// Grow a typed array by copying the old contents and appending new values via set().
+// Avoids `new Float32Array([...old, ...new])`, whose spread boxes every element into a
+// temporary JS array — O(n) garbage per batch, O(n^2) and heavy GC pressure over a run.
+function appendF32(old: Float32Array, extra: ArrayLike<number>): Float32Array {
+  const out = new Float32Array(old.length + extra.length);
+  out.set(old);
+  out.set(extra, old.length);
+  return out;
+}
+function appendI16(old: Int16Array, extra: ArrayLike<number>): Int16Array {
+  const out = new Int16Array(old.length + extra.length);
+  out.set(old);
+  out.set(extra, old.length);
+  return out;
+}
+
 // Track cell ID to index mapping
 const cellIdToIndex = new Map<string, number>();
 
@@ -676,19 +693,15 @@ const handleCellBatchUpdate = (batchUpdate: CellBatchUpdate) => {
     }
   }
 
-  // Batch append new data to arrays
-  // REMIND: Switch to set() as its more efficient
+  // Batch append new data to arrays (grow via set(); see appendF32/appendI16).
   if (newXData.length > 0) {
-    query.x.value = new Float32Array([...query.x.value, ...newXData]);
-    query.y.value = new Float32Array([...query.y.value, ...newYData]);
-    query.labelIndices.value = new Int16Array([
-      ...query.labelIndices.value,
-      ...newLabels,
-    ]);
-    query.confidences.value = new Float32Array([
-      ...query.confidences.value,
-      ...batchUpdate.cells.map((c) => c.confidence ?? -1),
-    ]);
+    query.x.value = appendF32(query.x.value, newXData);
+    query.y.value = appendF32(query.y.value, newYData);
+    query.labelIndices.value = appendI16(query.labelIndices.value, newLabels);
+    query.confidences.value = appendF32(
+      query.confidences.value,
+      batchUpdate.cells.map((c) => c.confidence ?? -1)
+    );
   }
 };
 
@@ -785,8 +798,8 @@ const createWorker = () => {
           currentUserIndexArtifacts.value = {
             partitionIds: evt.data.partitionIds,
             pqCodes: evt.data.pqCodes,
+            pqCodeLength: evt.data.pqCodeLength,
           };
-          // currentUserIndexArtifacts.value?.pqCodes = evt.data.pqCodes;
           canCreateIndex.value = isUsingReferenceModel; // Only allow creating from reference models
         }
 

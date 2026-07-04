@@ -82,8 +82,13 @@ test('Create a user index...', async ({ page }) => {
     timeout: 60000, // Wait up to 60 seconds for the status to change
   });
   await page.getByTestId('create-index-button').click();
-  await page.fill('#input-v-23', 'My Index');
+  // Use the stable testid (the Vuetify auto-generated #input-v-NN id shifts between builds).
+  await page.getByTestId('new-index-name').locator('input').fill('My Index');
   await page.getByTestId('save-index-button').click();
+  // The save path runs transformArtifactsToUserIndex over the flat pqCodes; give it a beat
+  // and confirm it succeeded (dialog closes, no error dialog).
+  await expect(page.getByTestId('new-index-name')).toHaveCount(0, { timeout: 15000 });
+  await expect(page.getByTestId('error-title')).toHaveCount(0);
 
   // select the last model now
   // const modelSelector = await page.getByTestId('model-select-dropdown');

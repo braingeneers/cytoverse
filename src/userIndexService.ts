@@ -116,8 +116,9 @@ class UserIndexService {
     name: string,
     baseModelId: string,
     artifacts: {
-      partitionIds: Int16Array;
-      pqCodes: Uint8Array[];
+      partitionIds: Uint16Array;
+      pqCodes: Uint8Array; // flat, cellCount * pqCodeLength
+      pqCodeLength: number;
     },
     x: Float32Array,
     y: Float32Array,
@@ -144,7 +145,12 @@ class UserIndexService {
         };
       }
 
-      partitionGroups[partitionId].pqCodes.push(artifacts.pqCodes[cellIndex]);
+      partitionGroups[partitionId].pqCodes.push(
+        artifacts.pqCodes.subarray(
+          cellIndex * artifacts.pqCodeLength,
+          (cellIndex + 1) * artifacts.pqCodeLength
+        )
+      );
       partitionGroups[partitionId].labelIndices.push(labelIndices[cellIndex]);
     });
 
