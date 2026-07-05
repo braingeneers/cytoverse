@@ -498,7 +498,6 @@ const availableModels = ref<
 const isRunning = ref(false);
 const hasWebGPU = ref(false);
 const useWebGPU = ref(false);
-const maxTextureSize = ref(0);
 const isMobile = ref(window.innerWidth < 768);
 const isLoadingData = ref(false);
 
@@ -870,12 +869,6 @@ const loadAvailableModels = async () => {
 };
 
 const detectWebGPU = async () => {
-  // Check max texture size as a proxy for GPU capability as apple silicon
-  // has a limit of 16384 which is too low for our needs when embedding
-  const gl = document.createElement('canvas').getContext('webgl');
-  maxTextureSize.value = gl?.getParameter(gl.MAX_TEXTURE_SIZE);
-  console.info('Max Texture Size:', maxTextureSize.value);
-
   try {
     const webGPUSupported = await isWebGPUSupported();
     hasWebGPU.value = webGPUSupported;
@@ -1153,7 +1146,6 @@ const start = async () => {
       userIndexId: useUserIndex ? selectedModel.value : null,
       h5File: selectedFile.value,
       useWebGPU: useWebGPU.value,
-      maxTextureSize: maxTextureSize.value,
       labelIndices: baseRef.labelIndices.value,
     });
   }
@@ -1267,7 +1259,6 @@ const handleQueryCellClicked = (cellId: string, cellIndex: number) => {
         modelsURL: `${sitePath}/models`,
         h5File: selectedFile.value,
         useWebGPU: useWebGPU.value,
-        maxTextureSize: maxTextureSize.value,
         labelIndices: baseRef.labelIndices.value,
         useUserIndex: false,
         featureImportanceOnly: true, // Skip IVFPQ loading and cell processing
