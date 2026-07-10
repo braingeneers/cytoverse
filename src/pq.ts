@@ -115,7 +115,7 @@ export class PQDistance {
     type: 'json' | 'arraybuffer'
   ): Promise<unknown> {
     const fullPath = `${this.basePath}/${path}`;
-    const response = await fetch(fullPath);
+    const response = await fetch(fullPath, { cache: 'force-cache' });
     if (!response.ok) {
       throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`);
     }

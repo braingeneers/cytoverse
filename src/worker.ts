@@ -263,7 +263,9 @@ async function instantiateModel(
   // self.postMessage({ type: 'status', message: 'Downloading model...' } as StatusMessage)
 
   // Fetch model genes
-  let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`);
+  let response = await fetch(`${modelsURL}/${modelID}/embedding/genes.txt`, {
+    cache: 'force-cache',
+  });
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -271,7 +273,9 @@ async function instantiateModel(
   console.log('Model Genes', genes.slice(0, 5));
 
   // Fetch embedding model
-  response = await fetch(`${modelsURL}/${modelID}/embedding/model.onnx`);
+  response = await fetch(`${modelsURL}/${modelID}/embedding/model.onnx`, {
+    cache: 'force-cache',
+  });
   if (!response.ok) {
     throw new Error(`Error fetching onnx file: ${response.status}`);
   }

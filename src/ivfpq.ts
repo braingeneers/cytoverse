@@ -362,7 +362,10 @@ export class IVFPQ {
     type: 'json' | 'arraybuffer'
   ): Promise<unknown> {
     const fullPath = `${this.basePath}/${path}`;
-    const response = await fetch(fullPath);
+    // force-cache: serve model assets from the browser cache without a revalidation round-trip
+    // (they're immutable per deploy). This is what makes re-runs fast over a network — otherwise
+    // each of the hundreds of probed partitions costs a 304 round-trip.
+    const response = await fetch(fullPath, { cache: 'force-cache' });
     if (!response.ok) {
       throw new Error(`Failed to fetch ${fullPath}: ${response.statusText}`);
     }
