@@ -1,0 +1,16 @@
+{
+  "model": "scimilarity",
+  "device": "cpu",
+  "cells_file": "metaatlas_cells_100000.h5ad",
+  "baseline_mb": 899,
+  "run1_at_rest_mb": 3159,
+  "run1_peak_mb": 3245,
+  "run1_wall_s": 1341.2,
+  "post_reset_mb": 2319,
+  "post_reset_min_mb": 2319,
+  "released_mb": 840,
+  "released_vs_min_mb": 840,
+  "reset_status": "Reset — worker, model and index released. The next run will re-download them.",
+  "run2_reloaded": null,
+  "run2_wall_s": null
+}

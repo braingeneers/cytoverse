@@ -1,0 +1,13 @@
+{
+  "model": "scimilarity",
+  "device": "gpu",
+  "finished": true,
+  "status": "Finished: Labeled 100,000 cells in 21m 53s",
+  "wall_s": 1314.1,
+  "baseline_renderer_rss_mb": 894,
+  "peak_renderer_rss_mb": 3239,
+  "at_rest_renderer_rss_mb": 3101,
+  "peak_total_chrome_rss_mb": 3866,
+  "embedding_ep_log": "Configuring embedding session to use WebGPU...",
+  "fell_back_to_wasm": false
+}

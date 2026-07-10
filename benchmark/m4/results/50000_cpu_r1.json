@@ -1,0 +1,13 @@
+{
+  "model": "scimilarity",
+  "device": "cpu",
+  "finished": true,
+  "status": "Finished: Labeled 50,000 cells in 12m 3s",
+  "wall_s": 722.6,
+  "baseline_renderer_rss_mb": 899,
+  "peak_renderer_rss_mb": 3010,
+  "at_rest_renderer_rss_mb": 2941,
+  "peak_total_chrome_rss_mb": 3508,
+  "embedding_ep_log": "Configuring embedding session to use WebAssembly...",
+  "fell_back_to_wasm": false
+}
