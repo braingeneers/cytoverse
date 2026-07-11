@@ -131,6 +131,49 @@ python scripts/h5ad_to_embeddings.py \
 make ivfpq-train pumap
 ```
 
+## Adding a new foundation model
+
+CytoVerse is model-agnostic: for each model under `public/models/<model_id>/` it
+only loads a combined `embedding/model.onnx` (raw counts → embedding, with
+preprocessing baked into the graph), an `embedding/genes.txt` gene vocabulary, and
+the standard `ivfpq/` and `pumap/` artifacts. Only the ONNX export and the embedding
+generation are model-specific - the IVFPQ and PUMAP steps are shared. See
+[scripts/scimilarity_export_model.py](scripts/scimilarity_export_model.py) for a
+worked export example (the `dev` branch has an equivalent Geneformer export).
+
+1. **Export the model to ONNX.** Write `scripts/<model>_export_model.py` that wraps
+   the model as `torch.nn.Module`s - a preprocessing module (normalization,
+   tokenization, etc.), an embedding module (forward pass), and a combined module -
+   and exports the combined graph to
+   `public/models/<model_id>/embedding/model.onnx` at opset 17 with a dynamic batch
+   axis and input `[batch, n_genes]`. Write `genes.txt` (one gene symbol per line, in
+   input-column order) alongside it. Note that Tensorflow can also be exported
+   to ONNX.
+
+2. **Generate embeddings from your reference.** Run your reference h5ad through the
+   model to produce `embeddings.npy` and `labels.parquet` under
+   `data/references/<model_id>/`.
+
+   > **Note:** `scripts/h5ad_to_embeddings.py` is currently SCimilarity-specific — it
+   > loads a SCimilarity model directory and calls the SCimilarity SDK for
+   > preprocessing and embedding. To support a new model you will need to adapt it to
+   > be model-agnostic: drive the exported `embedding/model.onnx` directly (via
+   > onnxruntime) with raw counts aligned to `embedding/genes.txt`, rather than
+   > hard-coding the SCimilarity pipeline. (The `dev` branch has a generalized,
+   > ONNX-driven version of this script that can be used as a reference.)
+
+3. **Build the IVFPQ index and PUMAP projection** (model-agnostic):
+
+   ```
+   make ivfpq-train pumap model_id=<model_id> stratify_label=<label>
+   ```
+
+4. **Register the model** so it appears in the app's model selector:
+
+   ```
+   make update-models-list
+   ```
+
 ## Concordance and Performance
 
 See [the analysis notebook and figures](notebooks/analysis.ipynb) for a detailed comparison with running on a server with the underlying foundation model.
