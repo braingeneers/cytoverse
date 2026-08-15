@@ -173,8 +173,7 @@ Two gotchas found the hard way, both now fixed in `helpers.ts`:
 1. ~~Recapture Figs 1, 3, 4~~ -- Fig 1 done. Figs 3 and 4 blocked, see
    "Source-of-truth gaps" above; neither query dataset is on this machine.
 2. ~~Fix vector fonts and physical sizes~~ -- **done**, see Phase 2 status below.
-3. **Reproducibility** -- cherry-pick the m4 benchmark work onto `main`; add a
-   `make figures` target; remove `empty.eps`, `fig.eps` and the six uncited PDFs.
+3. ~~Reproducibility~~ -- **done**, see Phase 3 status below.
 4. **Export and verify** -- vector to EPS via `pdftocairo -eps`, raster to TIFF
    via `pdftocairo -tiff -r 300` at the exact final width. Add a check script
    reporting px width, mm width, and effective dpi per deliverable.
@@ -240,5 +239,67 @@ extracting every `Tf` operator from the content streams -- not by construction.
   fixing in the notebook or retiring those cells in favour of these scripts.
 - Fig 7's CPU runtime R-squared fits at 0.9996; `article.tex:255` says 0.9997.
   Rounding-level, affects no claim, but the text says 0.9997.
-- Fig 7 still reads its inputs from `.trees/benchmark/...` pending the Phase 3
-  cherry-pick.
+- Fig 7 reads its inputs from `benchmark/m4/results/`, merged onto this branch
+  in Phase 3.
+
+## Phase 3 status: reproducible from a clean checkout
+
+Everything now runs from one entry point:
+
+    make figures            # regenerate vector figures, then verify
+    make figures-data       # recompute the IVFPQ cache (slow; auto-runs if absent)
+    make figures-capture    # high-DPI app screenshots via Playwright
+    make figures-verify     # measure built files against Cell Press requirements
+
+`make figures` was tested cold: with the outputs deleted it rebuilds all four
+vector figures and passes verification.
+
+### Benchmark branch merged
+
+Figure 7's source is no longer stranded. The `benchmark` branch is merged into
+`paper-figures`, so `benchmark/m4/` -- harness, deterministic query generator,
+raw per-run results and `analyze.py` -- sits alongside the manuscript. The
+uncommitted worktree edits were committed first rather than discarded: they were
+substantive (reviewer-driven removal of the projected GPU extrapolation, the
+autoscaled memory axis, and a crash fix for non-scaling result files) and had
+never been recorded anywhere.
+
+`fig7_performance_scaling.py` now reads `benchmark/m4/results/` and reproduces
+identical fitted constants.
+
+### `scripts/figures/verify.py`
+
+Measures each built file rather than trusting the code that produced it: page
+box for width, font dictionary for Type 3 and family, `Tf` operators for the
+smallest type actually on the page, and IHDR for raster dpi. Exits non-zero on
+failure, so `make figures` cannot silently produce a non-compliant figure.
+
+    fig1_ui_guide.png              174.0 mm    934 dpi   OK
+    fig2_architecture.pdf          173.9 mm    6.27 pt   OK
+    fig5_recall_vs_probes.pdf      114.0 mm    6.00 pt   OK
+    fig6_distortion_grid.pdf       174.0 mm    6.00 pt   OK
+    fig7_performance_scaling.pdf   174.0 mm    6.00 pt   OK
+
+### Retired assets
+
+Nine uncited files moved to `paper/attic/` (not deleted -- `paper/` is untracked,
+so a delete would be unrecoverable). See `paper/attic/README.md` for provenance.
+`user-manual.pdf` turned out to be the Springer LaTeX template manual, not
+author-supplied supplementary material.
+
+### Incidental fix
+
+`make benchmark` had silently stopped working: the merge created a `benchmark/`
+directory shadowing the same-named target, so make reported "up to date" without
+running anything. Fixed with `.PHONY`.
+
+### Open
+
+- **Nothing is wired into `article.tex` yet.** It still references the old
+  filenames, so the paper builds exactly as before. Switching it over is a
+  deliberate next step.
+- Work is on branch `paper-figures`, not `main`, and nothing is pushed.
+- The manuscript is built on a **Springer** template (`numcompress.sty`,
+  `numbered.bst`) but targets Cell Patterns, a **Cell Press** journal. Worth
+  confirming the required submission format -- a manuscript question, not a
+  figure one.
