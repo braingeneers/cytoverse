@@ -1,3 +1,9 @@
+# Targets are all commands, not files. Without this, `make benchmark` resolves
+# against the benchmark/ directory and reports "up to date" without running.
+.PHONY: notice update-models-list test build deploy deploy-dry benchmark \
+	update-validations test-no-capture figures figures-data figures-vector \
+	figures-capture figures-verify
+
 # Default
 model_id ?= "scimilarity"
 
@@ -138,3 +144,31 @@ benchmark:
 
 test-no-capture:
 	python -m pytest ivfpq/python/tests --capture=no --log-cli-level=DEBUG
+
+# ---- Manuscript figures ----
+# Width assignments, journal requirements and open blockers: paper/FIGURES.md
+
+# Cached exact-kNN vs IVFPQ comparison behind Figures 5 and 6. Slow (loads the
+# SCimilarity model); the file is a build product, so this runs only when absent.
+paper/figures/data/ivfpq_metrics.pkl:
+	python scripts/figures/compute_ivfpq_metrics.py
+
+figures-data: paper/figures/data/ivfpq_metrics.pkl
+
+# Vector figures. Seconds, once the cache exists.
+figures-vector: paper/figures/data/ivfpq_metrics.pkl
+	python scripts/figures/fig2_architecture.py
+	python scripts/figures/fig5_recall_vs_probes.py
+	python scripts/figures/fig6_distortion_grid.py
+	python scripts/figures/fig7_performance_scaling.py
+
+# High-DPI app screenshots. Drives a real browser against the local references,
+# so it needs data/ populated and takes minutes.
+figures-capture:
+	npx playwright test --config playwright.figures.config.ts
+
+# Measure the built files against Cell Press requirements. Non-zero on failure.
+figures-verify:
+	python scripts/figures/verify.py
+
+figures: figures-vector figures-verify

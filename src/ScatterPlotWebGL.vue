@@ -284,6 +284,13 @@ const initializeScatterplot = () => {
   // Subscribe to click events
   scatterplot.subscribe('select', handleCellClick);
 
+  // Dev-only handle so the figure capture harness can select a specific cell by
+  // index instead of hunting for it in canvas pixel space. Stripped from
+  // production builds by the import.meta.env.DEV guard. See paper/FIGURES.md.
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__cytoverseScatterplot = scatterplot;
+  }
+
   const initialColumnData = {
     x: new Float32Array([...props.baseRefX, ...props.userRefX]),
     y: new Float32Array([...props.baseRefY, ...props.userRefY]),
