@@ -147,20 +147,25 @@ test-no-capture:
 
 # ---- Manuscript figures ----
 # Width assignments, journal requirements and open blockers: paper/FIGURES.md
+#
+# These targets use `uv run` so they work without a pre-activated venv, unlike
+# the bare `python` the older targets assume. Override with e.g.
+#     make figures PYTHON=python
+PYTHON ?= uv run python
 
 # Cached exact-kNN vs IVFPQ comparison behind Figures 5 and 6. Slow (loads the
 # SCimilarity model); the file is a build product, so this runs only when absent.
 paper/figures/data/ivfpq_metrics.pkl:
-	python scripts/figures/compute_ivfpq_metrics.py
+	$(PYTHON) scripts/figures/compute_ivfpq_metrics.py
 
 figures-data: paper/figures/data/ivfpq_metrics.pkl
 
 # Vector figures. Seconds, once the cache exists.
 figures-vector: paper/figures/data/ivfpq_metrics.pkl
-	python scripts/figures/fig2_architecture.py
-	python scripts/figures/fig5_recall_vs_probes.py
-	python scripts/figures/fig6_distortion_grid.py
-	python scripts/figures/fig7_performance_scaling.py
+	$(PYTHON) scripts/figures/fig2_architecture.py
+	$(PYTHON) scripts/figures/fig5_recall_vs_probes.py
+	$(PYTHON) scripts/figures/fig6_distortion_grid.py
+	$(PYTHON) scripts/figures/fig7_performance_scaling.py
 
 # High-DPI app screenshots. Drives a real browser against the local references,
 # so it needs data/ populated and takes minutes.
@@ -169,6 +174,6 @@ figures-capture:
 
 # Measure the built files against Cell Press requirements. Non-zero on failure.
 figures-verify:
-	python scripts/figures/verify.py
+	$(PYTHON) scripts/figures/verify.py
 
 figures: figures-vector figures-verify
