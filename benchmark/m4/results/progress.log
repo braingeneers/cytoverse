@@ -1,0 +1,65 @@
+15:39:10 DRIVER START cooldown=240s runs=10000:cpu:1 10000:gpu:1 10000:cpu:2 10000:gpu:2 10000:cpu:3 10000:gpu:3
+15:39:10 cooldown 240s before 10000/cpu/r1
+15:43:10 RUN 10000/cpu/r1 start
+15:43:39 DONE   10000 cpu r1: wall=22.1s peak=1957MB at_rest=1954MB finished=True fell_back=False ep=WASM
+15:43:39 cooldown 240s before 10000/gpu/r1
+15:47:39 RUN 10000/gpu/r1 start
+15:49:41 DONE   10000 gpu r1: wall=114.5s peak=2712MB at_rest=2641MB finished=True fell_back=False ep=WebGPU
+15:49:41 cooldown 240s before 10000/cpu/r2
+15:53:41 RUN 10000/cpu/r2 start
+15:54:09 DONE   10000 cpu r2: wall=22.2s peak=1916MB at_rest=1916MB finished=True fell_back=False ep=WASM
+15:54:09 cooldown 240s before 10000/gpu/r2
+15:58:09 RUN 10000/gpu/r2 start
+16:00:07 DONE   10000 gpu r2: wall=110.5s peak=2722MB at_rest=2606MB finished=True fell_back=False ep=WebGPU
+16:00:07 cooldown 240s before 10000/cpu/r3
+16:04:07 RUN 10000/cpu/r3 start
+16:04:36 DONE   10000 cpu r3: wall=22.1s peak=1923MB at_rest=1921MB finished=True fell_back=False ep=WASM
+16:04:36 cooldown 240s before 10000/gpu/r3
+16:08:36 RUN 10000/gpu/r3 start
+16:10:37 DONE   10000 gpu r3: wall=114s peak=2684MB at_rest=2550MB finished=True fell_back=False ep=WebGPU
+16:10:37 DRIVER DONE
+16:11:33 DRIVER START cooldown=240s runs=25000:cpu:1 25000:gpu:1 50000:cpu:1 50000:gpu:1
+16:11:33 cooldown 240s before 25000/cpu/r1
+16:15:33 RUN 25000/cpu/r1 start
+16:16:02 DONE   25000 cpu r1: wall=22.1s peak=1949MB at_rest=1949MB finished=True fell_back=False ep=WASM
+16:16:02 cooldown 240s before 25000/gpu/r1
+16:20:02 RUN 25000/gpu/r1 start
+16:25:12 DONE   25000 gpu r1: wall=303.1s peak=2818MB at_rest=2701MB finished=True fell_back=False ep=WebGPU
+16:25:12 cooldown 240s before 50000/cpu/r1
+16:29:12 RUN 50000/cpu/r1 start
+16:29:41 DONE   50000 cpu r1: wall=22.2s peak=1941MB at_rest=1939MB finished=True fell_back=False ep=WASM
+16:29:41 cooldown 240s before 50000/gpu/r1
+16:33:41 RUN 50000/gpu/r1 start
+16:44:29 DONE   50000 gpu r1: wall=641.1s peak=2960MB at_rest=2802MB finished=True fell_back=False ep=WebGPU
+16:44:29 DRIVER DONE
+16:50:56 DRIVER START cooldown=300s runs=10000:cpu:1 10000:cpu:2 10000:cpu:3 25000:cpu:1 50000:cpu:1
+16:50:56 cooldown 300s before 10000/cpu/r1
+16:55:56 RUN 10000/cpu/r1 start
+16:58:12 DONE   10000 cpu r1: wall=129.2s peak=2721MB at_rest=2625MB finished=True fell_back=False ep=WASM
+16:58:12 cooldown 300s before 10000/cpu/r2
+17:03:12 RUN 10000/cpu/r2 start
+17:05:38 DONE   10000 cpu r2: wall=139.6s peak=2809MB at_rest=2658MB finished=True fell_back=False ep=WASM
+17:05:38 cooldown 300s before 10000/cpu/r3
+17:10:38 RUN 10000/cpu/r3 start
+17:13:00 DONE   10000 cpu r3: wall=135s peak=2776MB at_rest=2678MB finished=True fell_back=False ep=WASM
+17:13:00 cooldown 300s before 25000/cpu/r1
+17:18:00 RUN 25000/cpu/r1 start
+17:23:52 DONE   25000 cpu r1: wall=345s peak=2915MB at_rest=2690MB finished=True fell_back=False ep=WASM
+17:23:52 cooldown 300s before 50000/cpu/r1
+17:28:52 RUN 50000/cpu/r1 start
+17:41:01 DONE   50000 cpu r1: wall=722.6s peak=3010MB at_rest=2941MB finished=True fell_back=False ep=WASM
+17:41:01 DRIVER DONE
+17:51:32 DRIVER START cooldown=180s runs=100000:gpu:1 100000:cpu:1 250000:cpu:1 500000:cpu:1
+17:51:32 cooldown 180s before 100000/gpu/r1
+17:54:32 RUN 100000/gpu/r1 start
+18:16:34 DONE  100000 gpu r1: wall=1314.1s peak=3239MB at_rest=3101MB finished=True fell_back=False ep=WebGPU
+18:16:34 cooldown 180s before 100000/cpu/r1
+18:19:34 RUN 100000/cpu/r1 start
+18:44:53 DONE  100000 cpu r1: wall=1511.8s peak=3264MB at_rest=3210MB finished=True fell_back=False ep=WASM
+18:44:53 cooldown 180s before 250000/cpu/r1
+18:47:53 RUN 250000/cpu/r1 start
+19:50:33 DONE  250000 cpu r1: wall=3753.7s peak=3846MB at_rest=3784MB finished=True fell_back=False ep=WASM
+19:50:33 cooldown 180s before 500000/cpu/r1
+19:53:33 RUN 500000/cpu/r1 start
+21:54:52 DONE  500000 cpu r1: wall=7271.7s peak=4726MB at_rest=4564MB finished=True fell_back=False ep=WASM
+21:54:52 DRIVER DONE

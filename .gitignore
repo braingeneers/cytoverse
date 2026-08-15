@@ -79,3 +79,7 @@ lightning_logs/
 # *.bak
 # *.swp
 # *~
+# Benchmark: large / machine-specific artifacts (benchmark/m4/results/ is committed intentionally)
+benchmark/**/.venv/
+benchmark/**/__pycache__/
+benchmark/datasets/
