@@ -24,39 +24,47 @@ wall-clock timed in-browser (MutationObserver on the status element). Raw per-ru
 | 25k   | GPU/WebGPU | 1 | 303.1 | 12.12 | 5m03s | 2,818 MB | 2,701 MB |
 | 50k   | GPU/WebGPU | 1 | 641.1 | 12.82 | 10m41s | 2,960 MB | 2,802 MB |
 | 100k  | GPU/WebGPU | 1 | 1,314.1 | 13.14 | 21m54s | 3,239 MB | 3,101 MB |
+| 250k  | GPU/WebGPU | 1 | 3,041.7 | 12.17 | 50m41s | 3,775 MB | 3,711 MB |
+| 500k  | GPU/WebGPU | 1 | 6,083.9 | 12.17 | **1h41m** | 4,516 MB | 4,355 MB |
 
 All runs finished with full cell counts and no WASM fallback (WebGPU genuinely engaged on GPU runs).
 10k has 3 repeats (variance ±4%); large sizes are single long runs. Fits below.
+**Both execution paths are now measured at all six query sizes — nothing is extrapolated.** The
+GPU 250k/500k points were added after reviewer 2 objected to the projected curve in the original
+figure; they are the same harness, same machine, same build, run later on the same Air.
 
 ## Findings
 
 **1. Runtime scales linearly; there is no 2× "hot" regime.** A single line fits the whole
 10k→500k range: **wall ≈ 13 s + 14.61 s per 1,000 cells** (CPU/WASM, R² = 0.9997);
-**wall ≈ 13.38 s/1k** (GPU/WebGPU, R² = 0.9999). Per-1k rate varies only **±12%** across the
+**wall ≈ 27 s + 12.13 s/1k** (GPU/WebGPU, R² = 0.9997). Per-1k rate varies only **±12%** across the
 entire range (CPU 13.5–15.1 s/1k) — sustained thermal throttling on the fanless Air costs ~10%,
-not the ~2× seen on the older sspsygene runs. 500k cells label in **2.0 h** on CPU, measured
-directly (no extrapolation needed). The small +13 s intercept is the fixed model+index load.
+not the ~2× seen on the older sspsygene runs. 500k cells label in **2.0 h** on CPU and **1.7 h** on
+GPU, both measured directly. The small intercept is the fixed model+index load.
 
 **2. Memory grows gently and linearly — it is bounded, not flat.** Peak renderer RSS =
-**~2.7 GB fixed base + ~4.0 KB per query cell** (CPU, R² = 0.995); GPU is similar with a slightly
-steeper ~5.9 KB/cell (WebGPU buffers). 500k cells peak at **4.7 GB** — comfortably within a 16 GB
-laptop. So the R2-a answer is: memory does scale with query size, but gently; against a **25M-cell**
-reference the working set stays a small fraction of laptop RAM even at half a million query cells.
+**~2.7 GB fixed base + ~4.0 KB per query cell** (CPU, R² = 0.995); GPU is close behind at
+**~3.7 KB/cell** (R² = 0.985). 500k cells peak at **4.7 GB** (CPU) and **4.5 GB** (GPU) —
+comfortably within a 16 GB laptop. So the R2-a answer is: memory does scale with query size, but
+gently; against a **23M-cell** reference the working set stays a small fraction of laptop RAM even
+at half a million query cells.
 
-**3. GPU ≈ CPU on Apple Silicon (WebGPU ~1.15× faster).** CPU/GPU wall ratio is a stable
-**1.13–1.18×** across 10k/25k/50k/100k (GPU faster). WebGPU genuinely runs the encoder (no
-fallback) but is transfer-bound, so it ties multithreaded WASM to within ~15%. GPU carries ~800 MB
-more peak RSS. GPU was measured to 100k and projected to 500k via its (highly linear) fit.
+**3. GPU ≈ CPU on Apple Silicon (WebGPU ~1.17× faster).** CPU/GPU wall ratio is a stable
+**1.13–1.23×** across all six sizes (GPU faster, mean 1.17×). WebGPU genuinely runs the encoder (no
+fallback) but is transfer-bound, so it ties multithreaded WASM to within ~20%. The GPU path is also
+marginally *lighter* in peak RSS at every size, not heavier — the earlier "~800 MB more" and
+"~5.9 KB/cell" claims were artifacts of fitting only the four small sizes, and are withdrawn.
+All GPU sizes are now measured; nothing is projected.
 
 ## Caveats (for the figure caption)
 
 - Run on a **MacBook Air M4** (fanless). Runtime is only mildly cooling-dependent here (~10%
   sustained-throttle spread) — much less than anticipated; an actively-cooled M4/Pro would sit at
   the low end of that band.
-- **GPU ≈ CPU** on Apple Silicon: WebGPU is at rough parity (~1.15× faster), the encoder being
-  transfer-bound. This is the correct result, consistent with the discrete-NVIDIA finding that
+- **GPU ≈ CPU** on Apple Silicon: WebGPU is at rough parity (~1.17× faster, 1.13–1.23× across
+  sizes), the encoder being transfer-bound. This is the correct result, consistent with the discrete-NVIDIA finding that
   WebGPU does not beat multithreaded WASM for this model.
-- **Memory is bounded** (~2.7 GB base + ~4 KB/cell; 4.7 GB at 500k) against a 25M-cell reference —
+- **Memory is bounded** (~2.7 GB base + ~4 KB/cell; 4.7 GB at 500k) against a 23M-cell reference —
   it scales with query size but stays well under laptop RAM.
 - Large sizes (100k/250k/500k) are **single runs** (n=1); 10k repeats bound variance at ±4% and the
   R²≈0.9997 linear fit confirms consistency.
@@ -87,6 +95,6 @@ baseline. (This is why the button was dropped in favor of the reload note.)
   runtime is one clean line.
 - Plan expected **flat ~2 GB memory** → memory actually **grows** to 4.7 GB at 500k (~4 KB/cell).
   The earlier "flat ~2 GB" was partly the headless 1,000-cell read bug (see below).
-- Plan expected **GPU ≈ CPU parity** → **confirmed** (GPU ~1.15× faster).
+- Plan expected **GPU ≈ CPU parity** → **confirmed** (GPU ~1.17× faster across all six sizes).
 - **Harness bug found & fixed:** headless Chromium truncates the h5ad query read to 1,000 cells, so
   headless runs silently under-process (flat 22 s regardless of size). All runs here are **headed**.

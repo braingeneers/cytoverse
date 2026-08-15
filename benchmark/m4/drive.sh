@@ -6,6 +6,13 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 COOL=$1; shift
 PROG="$DIR/results/progress.log"
 stamp(){ date '+%H:%M:%S'; }
+# Fail before the first cooldown rather than after it: the runs need a `vite preview` server that
+# this harness does not start, and a missing one otherwise costs COOL seconds per run to discover.
+BASE="${BASE:-http://localhost:4173/}"
+if ! curl -sfI --max-time 5 "$BASE" > /dev/null; then
+  echo "$(stamp) DRIVER ABORT: no preview server at $BASE - run 'npm run preview' first" | tee -a "$PROG"
+  exit 1
+fi
 echo "$(stamp) DRIVER START cooldown=${COOL}s runs=$*" >> "$PROG"
 for spec in "$@"; do
   IFS=: read -r C D R <<< "$spec"

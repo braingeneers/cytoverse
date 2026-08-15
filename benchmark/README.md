@@ -17,7 +17,7 @@ To generate the reviewer response you need only this README plus [`m4/RESULTS.md
 
 - **App:** the committed CytoVerse production build (onnxruntime-web **1.27**, WebGPU encoder with a
   runtime WASM fallback; commit `879fb03` on branch `benchmark`), served with `vite preview`.
-- **Reference:** the **full SCimilarity** index — ~**25 M-cell** reference, **815 MB** product-quantized
+- **Reference:** the **full SCimilarity** index — ~**23 M-cell** reference, **815 MB** product-quantized
   index (4,835 partitions), 28,230-gene encoder. Loaded fresh in every run (the fixed intercept).
 - **Query:** deterministic (seed 42) subsamples of the 599,211-cell metaatlas
   (`adata_metaatlas_final_raw.h5ad`), **10k → 500k cells**. This is a runtime/memory study — labels
@@ -38,26 +38,26 @@ larger sizes n=1). Full table: [`m4/results/summary.csv`](m4/results/summary.csv
 | 25k   | 345 s | 2,915 MB | 303 s | 2,818 MB |
 | 50k   | 723 s | 3,010 MB | 641 s | 2,960 MB |
 | 100k  | 1,512 s (25m) | 3,264 MB | 1,314 s | 3,239 MB |
-| 250k  | 3,754 s (63m) | 3,846 MB | — (projected) | — |
-| 500k  | 7,272 s (**2.0 h**) | **4,726 MB** | — (projected) | — |
+| 250k  | 3,754 s (63m) | 3,846 MB | 3,042 s (51m) | 3,775 MB |
+| 500k  | 7,272 s (**2.0 h**) | **4,726 MB** | 6,084 s (**1.7 h**) | 4,516 MB |
 
 **Three findings:**
 
 1. **Runtime is linear in query size.** `wall ≈ 13 s + 14.6 s per 1,000 cells` (CPU/WASM,
-   **R²=0.9997**); `13.4 s/1k` (GPU/WebGPU, **R²=0.9999**). Sustained thermal throttling on the
+   **R²=0.9997**); `27 s + 12.1 s/1k` (GPU/WebGPU, **R²=0.9997**). Sustained thermal throttling on the
    fanless Air costs only **~12%** (per-1k rate 13.5–15.1 s across the whole range) — there is **no
    ~2× "hot" regime**. 500k cells were measured directly (2.0 h), so no extrapolation is needed for
    runtime.
 
 2. **Peak memory is bounded and grows gently.** `~2.7 GB fixed base + ~4.0 KB per query cell`
-   (CPU; GPU ~5.9 KB/cell for WebGPU buffers). 500k cells peak at **4.7 GB** — well under a 16 GB
-   laptop, against a **25 M-cell** reference. This is the R2-a answer: memory *does* scale with query
+   (CPU; GPU ~3.7 KB/cell — marginally lighter, not heavier). 500k cells peak at **4.7 GB** — well under a 16 GB
+   laptop, against a **23 M-cell** reference. This is the R2-a answer: memory *does* scale with query
    size, but gently, and stays a small fraction of laptop RAM even at half a million cells.
 
-3. **GPU ≈ CPU on Apple Silicon (WebGPU ~1.15× faster).** CPU/GPU wall ratio is a stable
-   **1.13–1.18×** (GPU faster) across 10k–100k. WebGPU genuinely runs the encoder (verified, no
-   fallback) but is transfer-bound, so it ties multithreaded WASM. GPU was measured to 100k and
-   projected beyond via its (highly linear) fit. This matches the discrete-NVIDIA result (below).
+3. **GPU ≈ CPU on Apple Silicon (WebGPU ~1.17× faster).** CPU/GPU wall ratio is a stable
+   **1.13–1.23×** (GPU faster) across all six sizes, 10k–500k. WebGPU genuinely runs the encoder (verified, no
+   fallback) but is transfer-bound, so it ties multithreaded WASM. Every GPU size is measured;
+   nothing is projected. This matches the discrete-NVIDIA result (below).
 
 ## Freeing memory (reviewer note)
 

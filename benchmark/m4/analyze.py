@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # M4 benchmark: summary table + the combined figure (runtime + memory scaling) from results/*.json.
 # Corrected story: runtime is ~LINEAR (mild ~10% throttle, no 2x regime); memory grows ~linearly
-# with query size; GPU/WebGPU ~= CPU/WASM (GPU ~1.15x faster). GPU measured to 100k, projected beyond.
+# with query size; GPU/WebGPU ~= CPU/WASM (GPU ~1.15x faster). Every point on both paths is
+# MEASURED across the full 10k-500k range -- nothing in this figure is projected (reviewer 2).
 import json, glob, os, sys
 import numpy as np
 import matplotlib
@@ -13,8 +14,12 @@ RES = os.path.join(DIR, "results")
 
 recs = []
 for f in sorted(glob.glob(os.path.join(RES, "*.json"))):
-    o = json.load(open(f))
     b = os.path.basename(f).replace(".json", "")
+    # results/ also holds non-scaling runs (e.g. reset_100k_cpu.json from the memory-release
+    # experiment); those don't lead with a cell count, so skip them.
+    if not b.split("_")[0].isdigit():
+        continue
+    o = json.load(open(f))
     cells = int(b.split("_")[0])
     if not o.get("finished"):
         continue
@@ -92,13 +97,11 @@ for d in devs:
         axr.fill_between(xr, (b+rmin*xr)/60, (b+rmax*xr)/60, color=COL[d], alpha=.15, zorder=1,
                          label=f"cooling-dependent band (+{rmax/rmin-1:.0%}: cool ↔ throttled)")
     axr.scatter(x, y, color=COL[d], s=48, zorder=5, label=f"{LAB[d]} (measured)")
-    solid = xr[xr <= xmax]; dash = xr[xr >= xmax]
+    # Solid OLS fit over the measured range only. No projection: both execution paths are
+    # measured at every dataset size, so nothing is extrapolated.
+    solid = xr[xr <= xmax]
     axr.plot(solid, (fit["intercept"]+fit["slope"]*solid)/60, "-", color=COL[d], lw=1.8)
-    if len(dash) > 1 and xmax < xr.max():
-        axr.plot(dash, (fit["intercept"]+fit["slope"]*dash)/60, ":", color=COL[d], lw=1.8,
-                 label=f"{LAB[d]} (projected)")
 axr.set_xlabel("query cells"); axr.set_ylabel("wall-clock runtime (min)")
-axr.set_title("Runtime scales linearly (mild ~10% throttle)")
 axr.grid(alpha=.3); axr.legend(fontsize=8, loc="upper left"); axr.ticklabel_format(style="plain", axis="x")
 axr.annotate(f"CPU: {wf['cpu']['intercept']:.0f}s + {wf['cpu']['slope']*1000:.1f} s/1k  (R²={wf['cpu']['r2']:.4f})\n"
              f"500k measured: {table['cpu'][-1]['wall_s']/60:.0f} min",
@@ -109,18 +112,23 @@ for d in devs:
     pts = table[d]
     axm.plot([p["cells"] for p in pts], [p["peak"]/1024 for p in pts], "o-",
              color=COL[d], ms=5, lw=1.4, label=f"{LAB[d]} peak RSS")
-axm.axhline(16, color="#888", ls="--", lw=1); axm.text(12000, 16.2, "16 GB laptop RAM", fontsize=8, color="#555")
-axm.set_ylim(0, 17); axm.set_xlabel("query cells"); axm.set_ylabel("peak renderer RSS (GB)")
-axm.set_title("Memory grows gently with query size")
+# Scale the axis to the data rather than to the 16 GB per-tab browser budget: pinning the top at
+# 16 GB squashed the curves into the bottom tenth of the panel (reviewer 2). The 16 GB headroom is
+# stated verbally in the annotation below and in the manuscript text instead.
+ytop = np.ceil(max(p["peak"] for d in devs for p in table[d]) / 1024 * 1.25)
+axm.set_ylim(0, ytop); axm.set_xlabel("query cells"); axm.set_ylabel("peak renderer RSS (GB)")
 axm.grid(alpha=.3); axm.legend(fontsize=8, loc="upper left"); axm.ticklabel_format(style="plain", axis="x")
 axm.annotate(f"~{mf['cpu']['intercept']/1024:.1f} GB base + {mf['cpu']['slope']*1024:.1f} KB/cell\n"
-             f"500k: {table['cpu'][-1]['peak']/1024:.1f} GB (well under 16 GB)",
+             f"500k: {table['cpu'][-1]['peak']/1024:.1f} GB\n"
+             f"(well under the ~16 GB per-tab budget)",
              xy=(.04,.70), xycoords="axes fraction", fontsize=8,
              bbox=dict(boxstyle="round", fc="white", ec="#ccc", alpha=.9))
 
-fig.suptitle("CytoVerse on MacBook Air M4 — full SCimilarity reference (25M cells, 815 MB index), metaatlas query",
-             fontsize=11)
-fig.tight_layout(rect=[0, 0, 1, 0.96])
-out = os.path.join(RES, "m4_benchmark_figure.png")
-fig.savefig(out, dpi=150)
-print(f"\nwrote {out}")
+# No suptitle and no per-axes titles: the manuscript figure caption carries the machine, reference
+# and query description, and Cell Press figures do not repeat it inside the artwork.
+fig.tight_layout()
+# PDF for the manuscript (every other figure in the paper is vector), PNG for the repo/README.
+for ext in ("png", "pdf"):
+    out = os.path.join(RES, f"m4_benchmark_figure.{ext}")
+    fig.savefig(out, dpi=150)
+    print(f"\nwrote {out}")

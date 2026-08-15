@@ -6,6 +6,11 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 H5AD="/Users/rcurrie/data/cytoverse.main/metaatlas_cells_${CELLS}.h5ad"
 OUT="$DIR/results/${CELLS}_${DEVICE}_r${REP}.json"
 [ -f "$H5AD" ] || { echo "missing $H5AD"; exit 1; }
+# m4bench.mjs drives a separately-launched `vite preview`; it does not start one. Check it is up
+# before the caller pays a multi-minute cooldown only to fail on ERR_CONNECTION_REFUSED.
+BASE="${BASE:-http://localhost:4173/}"
+curl -sfI --max-time 5 "$BASE" > /dev/null || {
+  echo "no preview server at $BASE - run 'npm run preview' in the repo root first"; exit 1; }
 # Always headed: headless Chromium truncates the h5ad read to 1000 cells (verified), so
 # headless CPU runs silently under-process. GPU also needs headed for WebGPU on macOS.
 HEADED_FLAG=1
