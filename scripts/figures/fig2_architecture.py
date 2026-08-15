@@ -184,6 +184,11 @@ def main() -> None:
             f"-dDEVICEHEIGHTPOINTS={paper_h}",
             "-dFIXEDMEDIA",
             "-dAutoRotatePages=/None",
+            # Drop CreationDate so rebuilds stay comparable. Ghostscript still
+            # derives the /ID array from the clock, so unlike the matplotlib
+            # figures this one is not byte-identical across runs -- the page
+            # content is, but 32 bytes of trailer metadata differ.
+            "-dOmitInfoDate=true",
             "-c", f"<</BeginPage{{{scale} {scale} scale}}>> setpagedevice",
             "-f", str(tmp),
         ],

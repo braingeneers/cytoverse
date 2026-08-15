@@ -94,7 +94,9 @@ def save(fig, path, target_width_in: float) -> None:
     sizes differ by a fraction of a millimetre. The PDF page box is what the
     journal measures, so that is what we assert on.
     """
-    fig.savefig(path)
+    # Omit CreationDate so a rebuild is byte-identical and does not dirty the
+    # working tree with a figure whose content did not change.
+    fig.savefig(path, metadata={"CreationDate": None})
 
     out = subprocess.run(
         ["pdfinfo", str(path)], capture_output=True, text=True, check=True
