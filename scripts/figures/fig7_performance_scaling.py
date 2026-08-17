@@ -129,13 +129,18 @@ def main() -> None:
     axr.set_xlabel("Query cells")
     axr.set_ylabel("Wall-clock runtime (min)")
     axr.grid(alpha=0.3, linewidth=0.4)
-    axr.legend(loc="upper left")
+    axr.legend(loc="lower right")
     axr.ticklabel_format(style="plain", axis="x")
     axr.annotate(
         f"CPU: {wf['cpu']['intercept']:.0f}s + {wf['cpu']['slope'] * 1000:.1f} s/1k "
         f"(R\u00b2={wf['cpu']['r2']:.4f})\n"
         f"500k measured: {table['cpu'][-1]['wall_s'] / 60:.0f} min",
-        xy=(0.04, 0.60), xycoords="axes fraction", fontsize=SMALL_PT,
+        # Anchored to the top-left corner with va="top" so the box hangs
+        # downward a predictable amount regardless of how many lines it has.
+        # Both curves rise left-to-right, leaving this corner and the lower
+        # right free -- hence the legend moving to "lower right".
+        xy=(0.04, 0.96), xycoords="axes fraction", fontsize=SMALL_PT,
+        va="top", ha="left",
         bbox=dict(boxstyle="round", fc="white", ec="#cccccc", alpha=0.9, lw=0.5),
     )
 
@@ -150,14 +155,15 @@ def main() -> None:
     axm.set_xlabel("Query cells")
     axm.set_ylabel("Peak renderer RSS (GB)")
     axm.grid(alpha=0.3, linewidth=0.4)
-    axm.legend(loc="upper left")
+    axm.legend(loc="lower right")
     axm.ticklabel_format(style="plain", axis="x")
     axm.annotate(
         f"~{mf['cpu']['intercept'] / 1024:.1f} GB base + "
         f"{mf['cpu']['slope'] * 1024:.1f} KB/cell\n"
         f"500k: {table['cpu'][-1]['peak'] / 1024:.1f} GB\n"
         f"(well under the ~16 GB per-tab budget)",
-        xy=(0.04, 0.62), xycoords="axes fraction", fontsize=SMALL_PT,
+        xy=(0.04, 0.96), xycoords="axes fraction", fontsize=SMALL_PT,
+        va="top", ha="left",
         bbox=dict(boxstyle="round", fc="white", ec="#cccccc", alpha=0.9, lw=0.5),
     )
 
