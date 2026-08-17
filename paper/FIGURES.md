@@ -28,8 +28,8 @@ Per the [Cell Press digital image guidelines](https://www.cell.com/figureguideli
 |-----|------|-------|--------|----------------|---------------|
 | 1 | `cytoverse_tutorial.pdf` | **174 mm** | 159 mm | 129 dpi FAIL | Recapture; move callout legend to caption; flatten CropBox |
 | 2 | `architecture_horizontal_full.pdf` | **174 mm** | 67 mm | vector OK, text ~2.3 pt FAIL | Re-render with fonts sized for 174 mm |
-| 3 | `Cytoverse_sspsygene.png` | **174 mm** | 100 mm | 225 dpi FAIL | Recapture at 4x |
-| 4 | `importance.pdf` | **174 mm** | 72 mm | 265 dpi FAIL | Recapture at 4x + rebuild composite reproducibly |
+| 3 | `Cytoverse_sspsygene.png` | **114 mm** (revised) | 66 mm | 344 dpi OK | None -- placed at 114 mm |
+| 4 | `importance.pdf` | **114 mm** (revised) | 47 mm | 405 dpi OK | None -- placed at 114 mm |
 | 5 | `recall_vs_probes.pdf` | **114 mm** | 68 mm | vector OK, text 8.2 pt OK | Regenerate at 114 mm target |
 | 6 | `distortion_vs_recall_grid.pdf` | **174 mm** | 103 mm | vector OK, text ~4.5 pt FAIL | Restructure: shared axes + 3 ticks/panel |
 | 7 | `performance_scaling.pdf` | **174 mm** | 72 mm | vector OK, text ~4.4 pt FAIL | Regenerate at 174 mm target |
@@ -55,6 +55,15 @@ are unreadable at 6 pt at any dpi. Resolution: keep all 12 panels, use one
 shared x-label per column and y-label per row, reduce to 3 ticks per panel with
 a shared scientific-notation exponent. Recovers ~30% of panel area with no data
 loss.
+
+**Figs 3 and 4 -- 114 mm (revised 2026-08-17).** Originally assigned 174 mm on
+the assumption they would be recaptured at 4x. The query datasets behind them
+could not be recovered, so recapture is off the table. At 114 mm their existing
+pixels give 344 dpi and 405 dpi respectively -- both clear 300 dpi honestly,
+with no resampling and no upscaler. This is the reason to prefer a narrower
+column over an ML upscaler: these are screenshots of numeric data, and Fig 4's
+gene-importance values are quoted verbatim in article.tex:178, so synthesised
+detail could silently alter a digit the manuscript depends on.
 
 **Fig 5 -- 114 mm.** A single-panel, three-series line chart does not warrant
 full width; at 174 mm it would run 104 mm tall. Falls back to 174 mm if the

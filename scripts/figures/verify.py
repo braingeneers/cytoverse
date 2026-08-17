@@ -27,10 +27,15 @@ MIN_PT = 6.0
 MIN_DPI = 300
 
 # Assigned width in mm; see the Phase 0 table in paper/FIGURES.md.
+#
+# Figs 3 and 4 are the un-recapturable screenshots. Their original query data is
+# gone, so instead of resampling them they are placed at 114 mm, where their
+# existing pixels clear 300 dpi honestly.
 FIGURES = [
     ("paper/figures/captured/fig1_ui_guide.png", 174, "raster"),
     ("paper/figures/fig2_architecture.pdf", 174, "vector"),
-    # Figs 3 and 4 are blocked on missing query datasets.
+    ("paper/Cytoverse_sspsygene.png", 114, "raster"),
+    ("paper/importance.pdf", 114, "raster-pdf"),
     ("paper/figures/fig5_recall_vs_probes.pdf", 114, "vector"),
     ("paper/figures/fig6_distortion_grid.pdf", 174, "vector"),
     ("paper/figures/fig7_performance_scaling.pdf", 174, "vector"),
@@ -78,6 +83,21 @@ def pdf_min_type_pt(path: Path) -> float | None:
     return min(sizes) if sizes else None
 
 
+def pdf_embedded_px(path: Path) -> int:
+    """Widest embedded raster in a PDF, in pixels, via `pdfimages -list`."""
+    out = subprocess.run(
+        ["pdfimages", "-list", str(path)], capture_output=True, text=True, check=True
+    ).stdout
+    widths = []
+    for row in out.splitlines()[2:]:
+        cols = row.split()
+        if len(cols) > 3 and cols[2] == "image":
+            widths.append(int(cols[3]))
+    if not widths:
+        raise ValueError(f"{path}: no embedded raster found")
+    return max(widths)
+
+
 def png_px(path: Path) -> tuple[int, int]:
     buf = path.read_bytes()
     if buf[:8] != b"\x89PNG\r\n\x1a\n":
@@ -120,12 +140,18 @@ def main() -> int:
             if min_pt is not None and min_pt < MIN_PT - 0.05:
                 problems.append(f"type {min_pt:.2f} pt below {MIN_PT} pt")
         else:
-            px_w, _ = png_px(path)
+            # For a PDF wrapping a raster, what matters is the pixel width of
+            # the embedded image, not the page box: the page can claim any size
+            # while the image inside it stays the same handful of pixels.
+            px_w = pdf_embedded_px(path) if kind == "raster-pdf" else png_px(path)[0]
             dpi = px_w / (target_mm / MM_PER_IN)
             w_mm = target_mm
             metric = f"{dpi:.0f}dpi"
             if dpi < MIN_DPI:
-                problems.append(f"{dpi:.0f} dpi below {MIN_DPI}")
+                problems.append(
+                    f"{dpi:.0f} dpi below {MIN_DPI} "
+                    f"({px_w} px, needs {round(target_mm / MM_PER_IN * MIN_DPI)} px)"
+                )
 
         status = "OK" if not problems else "FAIL"
         print(f"{path.name:38s} {w_mm:8.1f}m {target_mm:7d} {metric:>9s}  {status}")
@@ -137,9 +163,12 @@ def main() -> int:
     if failures:
         print(f"{len(failures)} problem(s) found.")
         return 1
-    print("All figures meet Cell Press requirements.")
-    print("NOTE: Figs 3 and 4 are not in this set -- blocked on missing query")
-    print("datasets. See paper/FIGURES.md.")
+    print("All figures meet Cell Press requirements at their assigned widths.")
+    print()
+    print("NOTE: fig1_ui_guide.png is the raw capture and still needs its")
+    print("callout overlay before it can replace cytoverse_tutorial.pdf.")
+    print("Figs 3 and 4 are the original screenshots, placed at 114 mm rather")
+    print("than recaptured -- their query datasets are lost. See paper/FIGURES.md.")
     return 0
 
 
