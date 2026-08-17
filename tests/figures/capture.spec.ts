@@ -9,6 +9,7 @@ import {
   readGenes,
   capture,
 } from './helpers';
+import { measureCallouts } from './callouts';
 
 /**
  * Base captures for the Cell Patterns figures. These produce clean, high-DPI
@@ -30,6 +31,9 @@ test('fig1: UI guide base capture', async ({ page }) => {
   await waitForPlot(page);
 
   await capture(page, 'fig1_ui_guide', CAPTURE_SCALE);
+  // Callout positions are measured from the live DOM and overlaid in LaTeX, so
+  // the numbers stay vector text and track the UI if it is ever recaptured.
+  await measureCallouts(page, 'fig1_ui_guide');
 });
 
 // Figure 3 -- NGN2 neurons against the SSPsyGene reference.

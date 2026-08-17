@@ -2,7 +2,7 @@
 # against the benchmark/ directory and reports "up to date" without running.
 .PHONY: notice update-models-list test build deploy deploy-dry benchmark \
 	update-validations test-no-capture figures figures-data figures-vector \
-	figures-capture figures-verify
+	figures-capture figures-verify figures-callouts
 
 # Default
 model_id ?= "scimilarity"
@@ -160,6 +160,12 @@ paper/figures/data/ivfpq_metrics.pkl:
 
 figures-data: paper/figures/data/ivfpq_metrics.pkl
 
+# Fig 1's TikZ callout overlay, from anchors measured during the capture.
+paper/figures/fig1_ui_guide.tex: paper/figures/captured/fig1_ui_guide.callouts.json
+	$(PYTHON) scripts/figures/fig1_callouts_tex.py
+
+figures-callouts: paper/figures/fig1_ui_guide.tex
+
 # Vector figures. Seconds, once the cache exists.
 figures-vector: paper/figures/data/ivfpq_metrics.pkl
 	$(PYTHON) scripts/figures/fig2_architecture.py
@@ -176,4 +182,4 @@ figures-capture:
 figures-verify:
 	$(PYTHON) scripts/figures/verify.py
 
-figures: figures-vector figures-verify
+figures: figures-vector figures-callouts figures-verify

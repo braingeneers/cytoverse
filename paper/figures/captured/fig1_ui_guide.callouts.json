@@ -1,0 +1,68 @@
+{
+  "viewport": {
+    "width": 1600,
+    "height": 900
+  },
+  "anchors": [
+    {
+      "n": 1,
+      "x": 0.2031,
+      "y": 0.1156,
+      "legend": "Select \\texttt{.h5ad} file from local disk"
+    },
+    {
+      "n": 2,
+      "x": 0.2031,
+      "y": 0.5487,
+      "legend": "Click to begin embedding and labeling"
+    },
+    {
+      "n": 3,
+      "x": 0.5875,
+      "y": 0.6222,
+      "legend": "Labels and UMAP points appear in real time"
+    },
+    {
+      "n": 3,
+      "x": 0.2031,
+      "y": 0.8009,
+      "legend": ""
+    },
+    {
+      "n": 4,
+      "x": 0.2031,
+      "y": 0.7365,
+      "legend": "Export CSV with cell id, label and confidence"
+    },
+    {
+      "n": 5,
+      "x": 0.2031,
+      "y": 0.602,
+      "legend": "Export embeddings JSON to share"
+    },
+    {
+      "n": 6,
+      "x": 0.1506,
+      "y": 0.2122,
+      "legend": "Change the base reference embeddings"
+    },
+    {
+      "n": 7,
+      "x": 0.1806,
+      "y": 0.2922,
+      "legend": "Change the label category"
+    },
+    {
+      "n": 8,
+      "x": 0.2031,
+      "y": 0.1956,
+      "legend": "Import user reference JSON"
+    },
+    {
+      "n": 9,
+      "x": 0.2838,
+      "y": 0.0478,
+      "legend": "UMAP legend: base, user and query"
+    }
+  ]
+}
